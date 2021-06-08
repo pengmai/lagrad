@@ -4,12 +4,15 @@
 
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
+
+inline void print(llvm::StringRef str) { llvm::outs() << str; }
 
 namespace {
 class DiffOpLowering : public ConversionPattern {
@@ -20,8 +23,34 @@ public:
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    op->getResult(0).replaceAllUsesWith(op->getOperand(0));
+    print("\n---BEGIN---\n");
+    print("The operation:\n");
+    op->print(llvm::outs());
+    print("\n");
+
+    // Obtain a SymbolRefAttr to the Enzyme external function.
+    ModuleOp parentModule = op->getParentOfType<ModuleOp>();
+    parentModule.lookupSymbol<LLVM::LLVMFuncOp>("__enzyme_autodiff");
+    auto sym = SymbolRefAttr::get("__enzyme_autodiff", op->getContext());
+
+    // Following the autograd-style API, we want to take the result of the diff
+    // operator and replace it with a call to the Enzyme API
+    auto result = op->getResult(0);
     rewriter.eraseOp(op);
+    for (auto it = result.use_begin(); it != result.use_end(); it++) {
+      print("The user:\n");
+      it.getUser()->print(llvm::outs());
+      auto user = it.getUser();
+      // Hardcoded (f32) -> f32 signature right now
+      rewriter.replaceOpWithNewOp<mlir::CallOp>(
+          user, sym, rewriter.getF32Type(),
+          ArrayRef<Value>({op->getOperand(0), user->getOperand(1)}));
+      print("\n");
+    }
+    print("\n---END---\n");
+    // op->getResult(0).
+    // op->getResult(0).replaceAllUsesWith(op->getOperand(0));
+    // rewriter.eraseOp(op);
     return success();
   }
 };
