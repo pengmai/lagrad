@@ -12,8 +12,6 @@
 
 using namespace mlir;
 
-inline void print(llvm::StringRef str) { llvm::outs() << str; }
-
 namespace {
 class DiffOpLowering : public ConversionPattern {
 public:
@@ -23,35 +21,55 @@ public:
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    print("\n---BEGIN---\n");
-    print("The operation:\n");
-    op->print(llvm::outs());
-    print("\n");
-
-    // Obtain a SymbolRefAttr to the Enzyme external function.
-    ModuleOp parentModule = op->getParentOfType<ModuleOp>();
-    parentModule.lookupSymbol<LLVM::LLVMFuncOp>("__enzyme_autodiff");
-    auto sym = SymbolRefAttr::get("__enzyme_autodiff", op->getContext());
+    // Obtain a SymbolRefAttr to the Enzyme autodiff function.
+    // TODO: Only works for one unique differentiated function type at a time.
+    auto sym = getOrInsertAutodiffDecl(rewriter, op);
 
     // Following the autograd-style API, we want to take the result of the diff
     // operator and replace it with a call to the Enzyme API
     auto result = op->getResult(0);
     rewriter.eraseOp(op);
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
-      print("The user:\n");
-      it.getUser()->print(llvm::outs());
       auto user = it.getUser();
-      // Hardcoded (f32) -> f32 signature right now
+      // Copy over the arguments for the op
+      auto arguments = std::vector<mlir::Value>();
+      arguments.push_back(op->getOperand(0));
+      for (Value arg : user->getOperands().drop_front(1)) {
+        arguments.push_back(arg);
+      }
+
       rewriter.replaceOpWithNewOp<mlir::CallOp>(
-          user, sym, rewriter.getF32Type(),
-          ArrayRef<Value>({op->getOperand(0), user->getOperand(1)}));
-      print("\n");
+          user, sym, rewriter.getF32Type(), ArrayRef<Value>(arguments));
     }
-    print("\n---END---\n");
-    // op->getResult(0).
-    // op->getResult(0).replaceAllUsesWith(op->getOperand(0));
-    // rewriter.eraseOp(op);
+
     return success();
+  }
+
+private:
+  static FlatSymbolRefAttr getOrInsertAutodiffDecl(PatternRewriter &rewriter,
+                                                   Operation *op) {
+    ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
+    auto *context = moduleOp.getContext();
+    if (moduleOp.lookupSymbol<LLVM::LLVMFuncOp>("__enzyme_autodiff")) {
+      return SymbolRefAttr::get("__enzyme_autodiff", context);
+    }
+
+    // Create the function declaration for __enzyme_autodiff
+    auto llvmF32Ty = FloatType::getF32(context);
+
+    LLVMTypeConverter typeConverter(context);
+    auto llvmOriginalFuncType =
+        typeConverter.packFunctionResults(op->getOperand(0).getType());
+
+    auto llvmFnType = LLVM::LLVMFunctionType::get(
+        llvmF32Ty, llvmOriginalFuncType, /*isVarArg=*/true);
+
+    // Insert the autodiff function into the body of the parent module.
+    PatternRewriter::InsertionGuard insertGuard(rewriter);
+    rewriter.setInsertionPointToStart(moduleOp.getBody());
+    rewriter.create<LLVM::LLVMFuncOp>(moduleOp.getLoc(), "__enzyme_autodiff",
+                                      llvmFnType);
+    return SymbolRefAttr::get("__enzyme_autodiff", context);
   }
 };
 } // end anonymous namespace
