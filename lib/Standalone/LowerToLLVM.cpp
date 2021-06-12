@@ -2,7 +2,10 @@
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
 
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
+#include "mlir/Dialect/Affine/IR/AffineOpsDialect.h.inc"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
@@ -92,6 +95,8 @@ void StandaloneToLLVMLoweringPass::runOnOperation() {
   LLVMTypeConverter typeConverter(&getContext());
 
   OwningRewritePatternList patterns;
+  populateAffineToStdConversionPatterns(patterns, &getContext());
+  populateLoopToStdConversionPatterns(patterns, &getContext());
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
   patterns.insert<DiffOpLowering>(&getContext());
