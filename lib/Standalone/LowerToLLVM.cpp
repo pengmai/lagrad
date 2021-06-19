@@ -27,18 +27,76 @@ public:
     // Obtain a SymbolRefAttr to the Enzyme autodiff function.
     // TODO: Only works for one unique differentiated function type at a time.
     auto sym = getOrInsertAutodiffDecl(rewriter, op);
+    auto const_global = getOrInsertEnzymeConstDecl(rewriter, op);
+    auto llvmI32PtrTy =
+        LLVM::LLVMPointerType::get(IntegerType::get(op->getContext(), 32));
+    auto enzyme_const_addr = rewriter.create<LLVM::AddressOfOp>(
+        op->getLoc(), llvmI32PtrTy, const_global);
 
     // Following the autograd-style API, we want to take the result of the diff
     // operator and replace it with a call to the Enzyme API
     auto result = op->getResult(0);
     rewriter.eraseOp(op);
+    // TODO: I'm creating type converters all over the place.
+    LLVMTypeConverter myConverter(op->getContext());
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
       auto user = it.getUser();
       // Copy over the arguments for the op
       auto arguments = std::vector<mlir::Value>();
-      arguments.push_back(op->getOperand(0));
+      arguments.push_back(operands[0]);
+      // for (auto op : operands) {
+      //   op.print(llvm::outs());
+      //   llvm::outs() << "\n";
+      // }
+      // TODO: Need to actually check the types here
+      bool is_shadow = false;
+      auto llvmF32Ptr =
+          LLVM::LLVMPointerType::get(FloatType::getF32(user->getContext()));
       for (Value arg : user->getOperands().drop_front(1)) {
-        arguments.push_back(arg);
+        if (is_shadow) {
+          // How do we get a pointer to this type?
+          // TODO: Dear god put this in a helper method
+
+          auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
+              user->getLoc(), llvmF32Ptr, arg, rewriter.getI64ArrayAttr(1));
+          // arg.getType().print(llvm::outs());
+          arguments.insert(arguments.begin() + 3, extractShadowOp.getResult());
+          // std::swap(arguments.back());
+        } else {
+          // TODO: This is memref specific and ugly as hell.
+          arguments.push_back(enzyme_const_addr.getResult());
+          arguments.push_back(
+              rewriter
+                  .create<LLVM::ExtractValueOp>(user->getLoc(), llvmF32Ptr, arg,
+                                                rewriter.getI64ArrayAttr(0))
+                  .getResult());
+          arguments.push_back(
+              rewriter
+                  .create<LLVM::ExtractValueOp>(user->getLoc(), llvmF32Ptr, arg,
+                                                rewriter.getI64ArrayAttr(1))
+                  .getResult());
+          auto llvmI64Ty = IntegerType::get(user->getContext(), 64);
+          arguments.push_back(
+              rewriter
+                  .create<LLVM::ExtractValueOp>(user->getLoc(), llvmI64Ty, arg,
+                                                rewriter.getI64ArrayAttr(2))
+                  .getResult());
+          arguments.push_back(rewriter
+                                  .create<LLVM::ExtractValueOp>(
+                                      user->getLoc(), llvmI64Ty, arg,
+                                      rewriter.getI64ArrayAttr({3, 0}))
+                                  .getResult());
+          arguments.push_back(rewriter
+                                  .create<LLVM::ExtractValueOp>(
+                                      user->getLoc(), llvmI64Ty, arg,
+                                      rewriter.getI64ArrayAttr({4, 0}))
+                                  .getResult());
+
+          // auto extractArgs
+          // arguments.push_back(arg);
+        }
+
+        is_shadow = true;
       }
 
       rewriter.replaceOpWithNewOp<mlir::CallOp>(
@@ -49,6 +107,25 @@ public:
   }
 
 private:
+  static FlatSymbolRefAttr getOrInsertEnzymeConstDecl(PatternRewriter &rewriter,
+                                                      Operation *op) {
+    ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
+    auto *context = moduleOp.getContext();
+    // if (moduleOp.lookupSymbol<LLVM::GlobalOp>("enzyme_const")) {
+    //   return SymbolRefAttr::get("enzyme_const", context);
+    // }
+
+    PatternRewriter::InsertionGuard insertGuard(rewriter);
+    rewriter.setInsertionPointToStart(moduleOp.getBody());
+    auto llvmI32Ty = IntegerType::get(context, 32);
+    rewriter.create<LLVM::GlobalOp>(
+        moduleOp.getLoc(), llvmI32Ty, /*isConstant=*/true,
+        LLVM::Linkage::External, "enzyme_const", nullptr);
+    // rewriter.setInsertionPointAfter(op);
+    // rewriter.create<LLVM::AddressOfOp>(op->getLoc(), globalOp);
+    return SymbolRefAttr::get("enzyme_const", context);
+  }
+
   static FlatSymbolRefAttr getOrInsertAutodiffDecl(PatternRewriter &rewriter,
                                                    Operation *op) {
     ModuleOp moduleOp = op->getParentOfType<ModuleOp>();

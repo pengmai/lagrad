@@ -41,7 +41,7 @@ def Standalone_FooOp : Standalone_Op<"foo", [NoSideEffect,
     }];
 }
 
-def Standalone_DiffOp : Standalone_Op<"diff", [NoSideEffect, SameOperandsAndResultType]> {
+def Standalone_DiffOp : Standalone_Op<"diff", [NoSideEffect]> {
     let summary = "Annotate a function for automatic differentiation";
     let description = [{
         The `standalone.diff` operation annotates a function for automatic differentiation via Enzyme.
@@ -51,7 +51,7 @@ def Standalone_DiffOp : Standalone_Op<"diff", [NoSideEffect, SameOperandsAndResu
     let results = (outs FunctionType:$res);
 
     let assemblyFormat = [{
-        $input attr-dict `:` type($input)
+        $input attr-dict `:` type($input) `,` type($res)
     }];
 }
 

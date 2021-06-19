@@ -40,6 +40,7 @@ int main(int argc, char **argv) {
   // will be *parsed* by the tool, not the one generated
   registry.insert<mlir::linalg::LinalgDialect>();
   registry.insert<mlir::LLVM::LLVMDialect>();
+  registry.insert<mlir::scf::SCFDialect>();
   
   // registerAllDialects(registry);
 
