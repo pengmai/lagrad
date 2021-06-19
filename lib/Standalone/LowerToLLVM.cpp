@@ -37,8 +37,6 @@ public:
     // operator and replace it with a call to the Enzyme API
     auto result = op->getResult(0);
     rewriter.eraseOp(op);
-    // TODO: I'm creating type converters all over the place.
-    LLVMTypeConverter myConverter(op->getContext());
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
       auto user = it.getUser();
       // Copy over the arguments for the op
@@ -60,7 +58,7 @@ public:
           auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
               user->getLoc(), llvmF32Ptr, arg, rewriter.getI64ArrayAttr(1));
           // arg.getType().print(llvm::outs());
-          arguments.insert(arguments.begin() + 3, extractShadowOp.getResult());
+          arguments.insert(arguments.begin() + 4, extractShadowOp.getResult());
           // std::swap(arguments.back());
         } else {
           // TODO: This is memref specific and ugly as hell.
