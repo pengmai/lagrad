@@ -38,30 +38,20 @@ public:
     auto result = op->getResult(0);
     rewriter.eraseOp(op);
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
+      // TODO: We currently assume that user is a call_indirect op.
       auto user = it.getUser();
       // Copy over the arguments for the op
       auto arguments = std::vector<mlir::Value>();
       arguments.push_back(operands[0]);
-      // for (auto op : operands) {
-      //   op.print(llvm::outs());
-      //   llvm::outs() << "\n";
-      // }
       // TODO: Need to actually check the types here
-      bool is_shadow = false;
       auto llvmF32Ptr =
           LLVM::LLVMPointerType::get(FloatType::getF32(user->getContext()));
-      for (Value arg : user->getOperands().drop_front(1)) {
-        if (is_shadow) {
-          // How do we get a pointer to this type?
-          // TODO: Dear god put this in a helper method
-
-          auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
-              user->getLoc(), llvmF32Ptr, arg, rewriter.getI64ArrayAttr(1));
-          // arg.getType().print(llvm::outs());
-          arguments.insert(arguments.begin() + 4, extractShadowOp.getResult());
-          // std::swap(arguments.back());
-        } else {
-          // TODO: This is memref specific and ugly as hell.
+      auto opIt = user->getOperands().drop_front(1);
+      for (auto it = opIt.begin(); it != opIt.end(); it++) {
+        // auto m = *arg;
+        auto arg = *it;
+        if (arg.getType().isa<MemRefType>()) {
+          // Ignore the first pointer
           arguments.push_back(enzyme_const_addr.getResult());
           arguments.push_back(
               rewriter
@@ -73,6 +63,15 @@ public:
                   .create<LLVM::ExtractValueOp>(user->getLoc(), llvmF32Ptr, arg,
                                                 rewriter.getI64ArrayAttr(1))
                   .getResult());
+
+          // Shadow pointer has to follow the aligned pointer
+          auto shadow = *(++it);
+          assert(shadow.getType().isa<MemRefType>() &&
+                 "Shadow argument must be a Memref");
+          auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
+              shadow.getLoc(), llvmF32Ptr, shadow, rewriter.getI64ArrayAttr(1));
+          arguments.push_back(extractShadowOp.getResult());
+
           auto llvmI64Ty = IntegerType::get(user->getContext(), 64);
           arguments.push_back(
               rewriter
@@ -89,12 +88,7 @@ public:
                                       user->getLoc(), llvmI64Ty, arg,
                                       rewriter.getI64ArrayAttr({4, 0}))
                                   .getResult());
-
-          // auto extractArgs
-          // arguments.push_back(arg);
         }
-
-        is_shadow = true;
       }
 
       rewriter.replaceOpWithNewOp<mlir::CallOp>(
