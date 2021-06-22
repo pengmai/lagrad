@@ -3,6 +3,7 @@ import subprocess
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+BUFFERIZE = ["-tensor-constant-bufferize", "-func-bufferize"]
 LOWERING = [
     "-convert-linalg-to-affine-loops",
     "-convert-standalone-to-llvm",
@@ -28,7 +29,9 @@ TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
 
 def lower_to_llvm_dialect(filename: str) -> bytes:
     opt_p = subprocess.run(
-        [f"{BIN}/standalone-opt", filename] + LOWERING, capture_output=True, check=True
+        [f"{BIN}/standalone-opt", filename] + BUFFERIZE + LOWERING,
+        capture_output=True,
+        check=True,
     )
     return opt_p.stdout
 

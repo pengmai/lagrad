@@ -88,6 +88,8 @@ public:
                                       user->getLoc(), llvmI64Ty, arg,
                                       rewriter.getI64ArrayAttr({4, 0}))
                                   .getResult());
+        } else {
+          arguments.push_back(arg);
         }
       }
 

@@ -19,7 +19,7 @@ def extract_1d(output: str):
     float_regex = r"[-+]?[0-9]*\.?[0-9]+"
     pat = re.compile(rf"data=\[({float_regex}(?:,{float_regex})+)\]")
     m = pat.search(output).group(1)
-    return [float(el) for el in m.split(',')]
+    return [float(el) for el in m.split(",")]
 
 
 def test_square():
@@ -33,6 +33,11 @@ def test_twoargs():
     assert extract_scalar(output.decode("utf-8")) == 1.4
 
 
-def test_1d():
+def test_1d_sum():
     output = compile_pipeline(f"{MLIR_FILES}/arrsum.mlir")
-    assert all([x == 1.0 for x in extract_1d(output.decode("utf-8"))])
+    assert extract_1d(output.decode('utf-8')) == [1.0] * 4
+
+
+def test_scf_dot():
+    output = compile_pipeline(f"{MLIR_FILES}/scfdot.mlir")
+    assert extract_1d(output.decode("utf-8")) == [-0.3, 1.4, 2.2, -3.0]
