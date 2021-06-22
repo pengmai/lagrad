@@ -1,0 +1,79 @@
+import os.path as osp
+import subprocess
+
+BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+LOWERING = [
+    "-convert-linalg-to-affine-loops",
+    "-convert-standalone-to-llvm",
+    "-convert-linalg-to-llvm",
+    "-convert-std-to-llvm",
+    "-llvm-legalize-for-export",
+]
+ENZYME_DYLIB = osp.join(
+    osp.dirname(__file__),
+    "..",
+    "..",
+    "..",
+    "playground",
+    "enzyme_test",
+    "LLVMEnzyme-12.dylib",
+)
+LIB = osp.expanduser(osp.join("~", ".local", "lib"))
+LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
+
+# Can't run tests in parallel
+TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
+
+
+def lower_to_llvm_dialect(filename: str) -> bytes:
+    opt_p = subprocess.run(
+        [f"{BIN}/standalone-opt", filename] + LOWERING, capture_output=True, check=True
+    )
+    return opt_p.stdout
+
+
+def lower_to_llvm(llvm_dialect: bytes) -> bytes:
+    translate_p = subprocess.run(
+        ["mlir-translate", "-mlir-to-llvmir"],
+        input=llvm_dialect,
+        capture_output=True,
+        check=True,
+    )
+    return translate_p.stdout
+
+
+def run_enzyme(llvm_ir: bytes, optimize=True):
+    # opt "$LLVM_FILE" -load $ENZYME_DYLIB -enzyme -o "$ENZYME_OUTPUT" -S
+    enzyme_p = subprocess.run(
+        ["opt", "-load", ENZYME_DYLIB, "-enzyme", "-S"],
+        input=llvm_ir,
+        capture_output=True,
+        check=True,
+    )
+    if optimize:
+        opt_p = subprocess.run(
+            ["opt", "-O3", "-S"], input=enzyme_p.stdout, capture_output=True, check=True
+        )
+        return opt_p.stdout
+    return enzyme_p.stdout
+
+
+def compile_pipeline(filename, run=True):
+    dialect_ir = lower_to_llvm_dialect(filename)
+    llvm_ir = lower_to_llvm(dialect_ir)
+    enzyme_output = run_enzyme(llvm_ir, optimize=True)
+
+    object_file = osp.join(TMP_DIR, "app.o")
+    with open(object_file, "wb") as ofile:
+        subprocess.run(
+            ["llc", "-filetype=obj"], input=enzyme_output, stdout=ofile, check=True
+        )
+
+    exe_file = osp.join(TMP_DIR, "a.out")
+    subprocess.run(["clang", object_file, LIBS, "-o", exe_file], check=True)
+
+    exe_p = subprocess.run(
+        [exe_file], env={"DYLD_LIBRARY_PATH": LIB}, capture_output=True
+    )
+    return exe_p.stdout
