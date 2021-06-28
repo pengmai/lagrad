@@ -50,7 +50,9 @@ public:
       for (auto it = opIt.begin(); it != opIt.end(); it++) {
         // auto m = *arg;
         auto arg = *it;
-        if (arg.getType().isa<MemRefType>()) {
+        auto memrefType = arg.getType().dyn_cast_or_null<MemRefType>();
+        if (memrefType) {
+          auto rank = memrefType.getRank();
           // Ignore the first pointer
           arguments.push_back(enzyme_const_addr.getResult());
           arguments.push_back(
@@ -66,7 +68,7 @@ public:
 
           // Shadow pointer has to follow the aligned pointer
           auto shadow = *(++it);
-          assert(shadow.getType().isa<MemRefType>() &&
+          assert(shadow.getType().dyn_cast<MemRefType>() &&
                  "Shadow argument must be a Memref");
           auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
               shadow.getLoc(), llvmF32Ptr, shadow, rewriter.getI64ArrayAttr(1));
@@ -78,16 +80,18 @@ public:
                   .create<LLVM::ExtractValueOp>(user->getLoc(), llvmI64Ty, arg,
                                                 rewriter.getI64ArrayAttr(2))
                   .getResult());
-          arguments.push_back(rewriter
-                                  .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmI64Ty, arg,
-                                      rewriter.getI64ArrayAttr({3, 0}))
-                                  .getResult());
-          arguments.push_back(rewriter
-                                  .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmI64Ty, arg,
-                                      rewriter.getI64ArrayAttr({4, 0}))
-                                  .getResult());
+          for (int64_t i = 0; i < rank; ++i)
+            arguments.push_back(rewriter
+                                    .create<LLVM::ExtractValueOp>(
+                                        user->getLoc(), llvmI64Ty, arg,
+                                        rewriter.getI64ArrayAttr({3, i}))
+                                    .getResult());
+          for (int64_t i = 0; i < rank; ++i)
+            arguments.push_back(rewriter
+                                    .create<LLVM::ExtractValueOp>(
+                                        user->getLoc(), llvmI64Ty, arg,
+                                        rewriter.getI64ArrayAttr({4, i}))
+                                    .getResult());
         } else {
           arguments.push_back(arg);
         }
