@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
   // mlir::PassManager pm(&context);
   // pm.addPass(mlir::Standalone::createLowerToLLVMPass());
   mlir::registerPass("convert-standalone-to-llvm", "TODO write description", mlir::Standalone::createLowerToLLVMPass);
+  mlir::registerPass("take-grads", "Run the autodiff procedure for standalone.grad", mlir::Standalone::createGradPass);
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::standalone::StandaloneDialect>();
