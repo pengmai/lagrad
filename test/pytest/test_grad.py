@@ -10,6 +10,6 @@ def test_add3():
     assert extract_scalar(output.decode("utf-8")) == 3.0
 
 
-def test_add_and_mul():
-    output = compile_pipeline(f"{MLIR_FILES}/addandmul.mlir", mode="grad")
+def test_quadratic():
+    output = compile_pipeline(f"{MLIR_FILES}/quadratic.mlir", mode="grad")
     assert extract_scalar(output.decode("utf-8")) == 1.6

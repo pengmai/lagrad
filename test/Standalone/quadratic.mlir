@@ -1,10 +1,12 @@
-// Implement the function x^2 + x
+// Implement the function x^2 + x + 4
 func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
 func @addandmul(%arg : f32) -> f32 {
-  %partial = mulf %arg, %arg : f32
-  %res = addf %arg, %partial : f32
-  return %res : f32
+  %cst = constant 4.0 : f32
+  %0 = mulf %arg, %arg : f32
+  %1 = addf %arg, %0 : f32
+  %2 = addf %cst, %1 : f32
+  return %2 : f32
 }
 
 func @main() {
@@ -12,7 +14,6 @@ func @main() {
 
   %f = constant @addandmul : (f32) -> f32
   %df = standalone.grad %f : (f32) -> f32, (f32) -> f32
-
   %dval = call_indirect %df(%cst) : (f32) -> f32
 
   %loc = alloca() : memref<f32>
