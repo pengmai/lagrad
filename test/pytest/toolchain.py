@@ -1,5 +1,8 @@
+"""An entrypoint into the standalone-opt compiler."""
+
 import os.path as osp
 import subprocess
+from typing_extensions import Literal
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
@@ -27,9 +30,12 @@ LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
 TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
 
 
-def lower_to_llvm_dialect(filename: str) -> bytes:
+def lower_to_llvm_dialect(filename: str, take_grads=False) -> bytes:
     opt_p = subprocess.run(
-        [f"{BIN}/standalone-opt", filename] + BUFFERIZE + LOWERING,
+        [f"{BIN}/standalone-opt", filename]
+        + (["-take-grads"] if take_grads else [])
+        + BUFFERIZE
+        + LOWERING,
         capture_output=True,
         check=True,
     )
@@ -62,15 +68,19 @@ def run_enzyme(llvm_ir: bytes, optimize=True):
     return enzyme_p.stdout
 
 
-def compile_pipeline(filename, run=True):
-    dialect_ir = lower_to_llvm_dialect(filename)
+def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
+    if mode not in ["enzyme", "grad"]:
+        raise ValueError("'mode' must be one of 'enzyme', 'grad'")
+
+    dialect_ir = lower_to_llvm_dialect(filename, take_grads=(mode == "grad"))
     llvm_ir = lower_to_llvm(dialect_ir)
-    enzyme_output = run_enzyme(llvm_ir, optimize=True)
+    if mode == "enzyme":
+        llvm_ir = run_enzyme(llvm_ir, optimize=True)
 
     object_file = osp.join(TMP_DIR, "app.o")
     with open(object_file, "wb") as ofile:
         subprocess.run(
-            ["llc", "-filetype=obj"], input=enzyme_output, stdout=ofile, check=True
+            ["llc", "-filetype=obj"], input=llvm_ir, stdout=ofile, check=True
         )
 
     exe_file = osp.join(TMP_DIR, "a.out")
