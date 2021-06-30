@@ -2,6 +2,7 @@
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -37,11 +38,11 @@ private:
       gradOp->emitError("Argument to `standalone.grad` was not a function");
       return failure();
     }
-    if (!arg0Type.getResult(0).isa<FloatType>()) {
-      gradOp->emitError(
-          "Argument to `standalone.grad` must return a float type");
-      return failure();
-    }
+    // if (!arg0Type.getResult(0).isa<FloatType>()) {
+    //   gradOp->emitError(
+    //       "Argument to `standalone.grad` must return a float type");
+    //   return failure();
+    // }
 
     // Assume the arg was defined by a constant op.
     auto definingOp = arg0.getDefiningOp();
@@ -67,7 +68,10 @@ private:
     }
 
     std::vector<Operation *> ops;
-    region->walk([&](Operation *op) { ops.push_back(op); });
+    region->walk([&](Operation *op) {
+      ops.push_back(op);
+      // llvm::outs() << *op << "\n";
+    });
 
     // env maps values to their gradient signals. x -> x_bar
     llvm::DenseMap<Value, Value> env;
@@ -76,8 +80,6 @@ private:
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     for (auto it = ops.rbegin(); it != ops.rend(); it++) {
       Operation *op = *it;
-      // llvm::outs() << "op: " << *op << "\n"
-      //              << "results: " << op->getNumResults() << "\n";
       if (op->isKnownTerminator()) {
         // This is the exit point
         rewriter.setInsertionPoint(op);
@@ -95,13 +97,40 @@ private:
                 op->getLoc(), FloatAttr::get(operand.getType(), 0.0));
           }
 
-          // Compute the pullback (VJP)
+          // Compute the pullback (VJP).
+          // TODO: Gotta be a better way to structure/abstract this.
           Value vjp_value = env[op->getResult(0)];
-          if (op->getName().getStringRef() == "std.mulf") {
+          auto opName = op->getName().getStringRef();
+          if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
                 op->getLoc(), vjp_value, op->getOperand(1 - op_index));
-          } else if (op->getName().getStringRef() == "std.addf") {
+          } else if (opName == "std.addf") {
             // This has no effect on the VJP
+          } else if (opName == "std.subf") {
+            if (op_index == 1) {
+              vjp_value =
+                  rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+            }
+          } else if (opName == "std.divf") {
+            if (op_index == 0) {
+              vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
+                                                        op->getOperand(1));
+            } else {
+              assert(op_index == 1 && "std.divf op had more than 2 args");
+              vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                        op->getOperand(0));
+              vjp_value =
+                  rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+              Value denom =
+                  rewriter.create<mlir::MulFOp>(op->getLoc(), operand, operand);
+              vjp_value =
+                  rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value, denom);
+            }
+          } else if (opName == "std.negf") {
+            vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+          } else {
+            llvm::outs() << "Unrecognized op: " << op->getName().getStringRef()
+                         << "\n";
           }
 
           // Add the gradient signals.
@@ -141,6 +170,7 @@ struct GradConversionPass
 void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target.addLegalOp<linalg::DotOp, linalg::YieldOp>();
 
   OwningRewritePatternList patterns;
   patterns.insert<GradOpLowering>(&getContext());
