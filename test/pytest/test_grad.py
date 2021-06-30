@@ -12,4 +12,4 @@ def test_add3():
 
 def test_quadratic():
     output = compile_pipeline(f"{MLIR_FILES}/quadratic.mlir", mode="grad")
-    assert extract_scalar(output.decode("utf-8")) == 1.6
+    assert extract_scalar(output.decode("utf-8")) == 3.4
