@@ -1,8 +1,8 @@
 #include "Standalone/Passes.h"
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -92,13 +92,15 @@ private:
         int op_index = 0;
         for (Value operand : op->getOperands()) {
           if (!env[operand]) {
-            // TODO: This might not be a scalar
-            env[operand] = rewriter.create<mlir::ConstantOp>(
-                op->getLoc(), FloatAttr::get(operand.getType(), 0.0));
+            env[operand] = getZero(op->getLoc(), operand, rewriter);
           }
 
           // Compute the pullback (VJP).
           // TODO: Gotta be a better way to structure/abstract this.
+          if (op->getNumResults() == 0) {
+            op->emitError("op had zero results");
+            return failure();
+          }
           Value vjp_value = env[op->getResult(0)];
           auto opName = op->getName().getStringRef();
           if (opName == "std.mulf") {
@@ -146,6 +148,23 @@ private:
     rewriter.create<mlir::ReturnOp>(region->getLoc(),
                                     env[region->getArgument(0)]);
     return success();
+  }
+
+  static mlir::Value getZero(Location loc, mlir::Value operand,
+                             ConversionPatternRewriter &rewriter) {
+    if (operand.getType().isa<FloatType>()) {
+      return rewriter.create<mlir::ConstantOp>(
+          loc, FloatAttr::get(operand.getType(), 0.0));
+    }
+    if (operand.getType().isa<ShapedType>()) {
+      auto shapedType = operand.getType().dyn_cast<ShapedType>();
+      llvm::outs() << "operand is a shaped type: " << shapedType << "\n";
+      // Will automatically be broadcasted to the right shape.
+      return rewriter.create<mlir::ConstantOp>(
+          loc, DenseFPElementsAttr::get(shapedType, llvm::makeArrayRef({0.0})));
+    }
+    llvm_unreachable("not yet implemented");
+    return nullptr;
   }
 };
 } // end anonymous namespace
