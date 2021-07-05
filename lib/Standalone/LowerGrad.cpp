@@ -68,25 +68,28 @@ private:
     }
 
     std::vector<Operation *> ops;
-    region->walk([&](Operation *op) {
-      ops.push_back(op);
-      // llvm::outs() << *op << "\n";
-    });
+    for (auto &op : region->getOps()) {
+      ops.push_back(&op);
+      // llvm::outs() << "Walking op: " << op << "\n";
+    }
+    // region->walk([&](Operation *op) {
+    //   ops.push_back(op);
+    //   llvm::outs() << "Walking op: " << *op << "\n";
+    // });
 
     // env maps values to their gradient signals. x -> x_bar
     llvm::DenseMap<Value, Value> env;
-    auto f32Ty = FloatType::getF32(region->getContext());
 
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     for (auto it = ops.rbegin(); it != ops.rend(); it++) {
       Operation *op = *it;
-      if (op->isKnownTerminator()) {
+      if (op->getName().getStringRef() == "std.return") {
+        // if (op->isKnownTerminator()) {
         // This is the exit point
         rewriter.setInsertionPoint(op);
         Value operand = op->getOperand(0);
         // Initialize the gradient signal to 1.0
-        env[operand] = rewriter.create<mlir::ConstantOp>(
-            op->getLoc(), FloatAttr::get(f32Ty, 1.0));
+        env[operand] = onesLike(op->getLoc(), operand, rewriter);
         rewriter.eraseOp(op);
       } else {
         int op_index = 0;
@@ -102,6 +105,15 @@ private:
             return failure();
           }
           Value vjp_value = env[op->getResult(0)];
+          // TODO: To what extent do I need this? I put it in as hack to avoid
+          // changing the function type.
+          if (!vjp_value) {
+            Value result = op->getResult(0);
+            vjp_value = onesLike(result.getLoc(), result, rewriter);
+            env[result] = vjp_value;
+            // llvm::outs() << "Initializing value (not yet initialized): "
+            //              << result << "\n";
+          }
           auto opName = op->getName().getStringRef();
           if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
@@ -130,6 +142,27 @@ private:
             }
           } else if (opName == "std.negf") {
             vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+          } else if (opName == "linalg.dot") {
+            if (op_index > 1)
+              continue;
+
+            Value broadcast_value =
+                rewriter.create<tensor::ExtractOp>(operand.getLoc(), vjp_value);
+
+            // This is an ugly workaround to get a broadcasted tensor.
+            assert(operand.getType().isa<ShapedType>() &&
+                   "dot input arg was not a shaped type");
+            auto opType = operand.getType().dyn_cast<ShapedType>();
+            Value memref = rewriter.create<mlir::AllocaOp>(
+                operand.getLoc(),
+                MemRefType::get(opType.getShape(), opType.getElementType()));
+            rewriter.create<linalg::FillOp>(operand.getLoc(), memref,
+                                            broadcast_value);
+            vjp_value =
+                rewriter.create<mlir::TensorLoadOp>(operand.getLoc(), memref);
+            // The gradient is the other argument.
+            vjp_value = rewriter.create<mlir::MulFOp>(
+                operand.getLoc(), vjp_value, op->getOperand(1 - op_index));
           } else {
             llvm::outs() << "Unrecognized op: " << op->getName().getStringRef()
                          << "\n";
@@ -138,13 +171,17 @@ private:
           // Add the gradient signals.
           env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(),
                                                        env[operand], vjp_value);
-          // llvm::outs() << "operand value: " << operand << "\n";
           op_index++;
         }
         // llvm::outs() << "\n";
       }
     }
 
+    // auto fntyp = funcOp.getType();
+    // This is extremely dangerous
+    // TODO: Just copy the function maybe?
+    // funcOp.setType(FunctionType::get(funcOp.getContext(), fntyp.getInputs(),
+    //                                  {region->getArgument(0).getType()}));
     rewriter.create<mlir::ReturnOp>(region->getLoc(),
                                     env[region->getArgument(0)]);
     return success();
@@ -158,12 +195,26 @@ private:
     }
     if (operand.getType().isa<ShapedType>()) {
       auto shapedType = operand.getType().dyn_cast<ShapedType>();
-      llvm::outs() << "operand is a shaped type: " << shapedType << "\n";
       // Will automatically be broadcasted to the right shape.
-      return rewriter.create<mlir::ConstantOp>(
-          loc, DenseFPElementsAttr::get(shapedType, llvm::makeArrayRef({0.0})));
+      auto denseAttr = DenseFPElementsAttr::get(shapedType, {0.0f});
+      return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
     }
     llvm_unreachable("not yet implemented");
+    return nullptr;
+  }
+
+  static mlir::Value onesLike(Location loc, mlir::Value operand,
+                              ConversionPatternRewriter &rewriter) {
+    if (operand.getType().isa<FloatType>()) {
+      return rewriter.create<mlir::ConstantOp>(
+          loc, FloatAttr::get(operand.getType(), 1.0));
+    }
+    if (operand.getType().isa<ShapedType>()) {
+      auto shapedType = operand.getType().dyn_cast<ShapedType>();
+      auto denseAttr = DenseFPElementsAttr::get(shapedType, {1.0f});
+      return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
+    }
+    llvm_unreachable("ones for type not yet implemented");
     return nullptr;
   }
 };
@@ -189,7 +240,8 @@ struct GradConversionPass
 void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
-  target.addLegalOp<linalg::DotOp, linalg::YieldOp>();
+  target.addLegalOp<linalg::DotOp, linalg::YieldOp, linalg::FillOp>();
+  target.addLegalOp<tensor::ExtractOp>();
 
   OwningRewritePatternList patterns;
   patterns.insert<GradOpLowering>(&getContext());
