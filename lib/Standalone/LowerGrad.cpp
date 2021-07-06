@@ -19,24 +19,29 @@ public:
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    auto funcDeclResult = getFunctionDeclaration(op, operands, rewriter);
-    if (funcDeclResult.value == LogicalResult::Failure) {
-      return funcDeclResult;
+    auto funcOp = getFunctionDeclaration(op, operands, rewriter);
+    if (!funcOp) {
+      return failure();
     }
-    op->replaceAllUsesWith(operands);
+
+    auto funcVal = rewriter.create<mlir::ConstantOp>(
+        op->getLoc(), funcOp.getType(),
+        SymbolRefAttr::get(funcOp.getName(), funcOp.getContext()));
+    op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
+    // op->replaceAllUsesWith(funcVal.getResult());
     rewriter.eraseOp(op);
     return success();
   }
 
 private:
-  static LogicalResult
-  getFunctionDeclaration(Operation *gradOp, ArrayRef<Value> operands,
-                         ConversionPatternRewriter &rewriter) {
+  static FuncOp getFunctionDeclaration(Operation *gradOp,
+                                       ArrayRef<Value> operands,
+                                       ConversionPatternRewriter &rewriter) {
     Value arg0 = operands[0];
     auto arg0Type = arg0.getType().dyn_cast<FunctionType>();
     if (!arg0Type) {
       gradOp->emitError("Argument to `standalone.grad` was not a function");
-      return failure();
+      return nullptr;
     }
     // if (!arg0Type.getResult(0).isa<FloatType>()) {
     //   gradOp->emitError(
@@ -48,34 +53,31 @@ private:
     auto definingOp = arg0.getDefiningOp();
     if (!definingOp) {
       gradOp->emitError("Argument had no defining op");
-      return failure();
+      return nullptr;
     }
 
     if (!definingOp->hasAttr("value")) {
       definingOp->emitError("Expected constant op to have 'value' attribute "
                             "(trying to look up function name)");
-      return failure();
+      return nullptr;
     }
 
     auto attr = definingOp->getAttrOfType<FlatSymbolRefAttr>("value");
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
-    auto funcOp = moduleOp.lookupSymbol<FuncOp>(attr);
+    auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
 
-    auto region = funcOp.getCallableRegion();
+    FuncOp funcOp = copyFunctionDeclaration(originalFuncOp, rewriter);
+
+    Region *region = funcOp.getCallableRegion();
     if (!region) {
       definingOp->emitError("Function region cannot be null");
-      return failure();
+      return nullptr;
     }
 
     std::vector<Operation *> ops;
     for (auto &op : region->getOps()) {
       ops.push_back(&op);
-      // llvm::outs() << "Walking op: " << op << "\n";
     }
-    // region->walk([&](Operation *op) {
-    //   ops.push_back(op);
-    //   llvm::outs() << "Walking op: " << *op << "\n";
-    // });
 
     // env maps values to their gradient signals. x -> x_bar
     llvm::DenseMap<Value, Value> env;
@@ -102,7 +104,7 @@ private:
           // TODO: Gotta be a better way to structure/abstract this.
           if (op->getNumResults() == 0) {
             op->emitError("op had zero results");
-            return failure();
+            return nullptr;
           }
           Value vjp_value = env[op->getResult(0)];
           // TODO: To what extent do I need this? I put it in as hack to avoid
@@ -184,7 +186,19 @@ private:
     //                                  {region->getArgument(0).getType()}));
     rewriter.create<mlir::ReturnOp>(region->getLoc(),
                                     env[region->getArgument(0)]);
-    return success();
+    return funcOp;
+  }
+
+  static FuncOp copyFunctionDeclaration(FuncOp funcOp,
+                                        ConversionPatternRewriter &rewriter) {
+    PatternRewriter::InsertionGuard insertGuard(rewriter);
+    rewriter.setInsertionPointAfter(funcOp);
+    auto newOp = static_cast<FuncOp>(rewriter.clone(*funcOp));
+
+    std::string gradFuncName = "__grad_";
+    gradFuncName += funcOp.getName();
+    newOp.setName(gradFuncName);
+    return newOp;
   }
 
   static mlir::Value getZero(Location loc, mlir::Value operand,
