@@ -28,7 +28,6 @@ public:
         op->getLoc(), funcOp.getType(),
         SymbolRefAttr::get(funcOp.getName(), funcOp.getContext()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
-    // op->replaceAllUsesWith(funcVal.getResult());
     rewriter.eraseOp(op);
     return success();
   }
@@ -179,11 +178,9 @@ private:
       }
     }
 
-    // auto fntyp = funcOp.getType();
-    // This is extremely dangerous
-    // TODO: Just copy the function maybe?
-    // funcOp.setType(FunctionType::get(funcOp.getContext(), fntyp.getInputs(),
-    //                                  {region->getArgument(0).getType()}));
+    auto fntyp = funcOp.getType();
+    funcOp.setType(FunctionType::get(funcOp.getContext(), fntyp.getInputs(),
+                                     {region->getArgument(0).getType()}));
     rewriter.create<mlir::ReturnOp>(region->getLoc(),
                                     env[region->getArgument(0)]);
     return funcOp;

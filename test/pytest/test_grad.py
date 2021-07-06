@@ -1,6 +1,6 @@
 import os.path as osp
 from toolchain import compile_pipeline
-from stdout_parser import extract_scalar
+from stdout_parser import extract_scalar, extract_1d
 
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 
@@ -13,3 +13,8 @@ def test_add3():
 def test_quadratic():
     output = compile_pipeline(f"{MLIR_FILES}/quadratic.mlir", mode="grad")
     assert extract_scalar(output.decode("utf-8")) == 3.4
+
+
+def test_dot():
+    output = compile_pipeline(f"{MLIR_FILES}/dot.mlir", mode="grad")
+    assert extract_1d(output.decode("utf-8")) == [-5.0, 3.4, -10.2, 3.33]

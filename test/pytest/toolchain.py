@@ -6,7 +6,16 @@ from typing_extensions import Literal
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
-BUFFERIZE = ["-tensor-constant-bufferize", "-func-bufferize"]
+TENSOR_PREPROCESS = ["-convert-elementwise-to-linalg"]
+BUFFERIZE = [
+    "-tensor-constant-bufferize",
+    "-linalg-bufferize",
+    "-canonicalize",
+    "-func-bufferize",
+    # According to the discussion -func-bufferize should be last, but for some
+    # reason in this case, -tensor-bufferize must be last.
+    "-tensor-bufferize",
+]
 LOWERING = [
     "-convert-linalg-to-affine-loops",
     "-convert-standalone-to-llvm",
@@ -31,14 +40,18 @@ TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
 
 
 def lower_to_llvm_dialect(filename: str, take_grads=False) -> bytes:
-    opt_p = subprocess.run(
-        [f"{BIN}/standalone-opt", filename]
-        + (["-take-grads"] if take_grads else [])
-        + BUFFERIZE
-        + LOWERING,
-        capture_output=True,
-        check=True,
-    )
+    try:
+        opt_p = subprocess.run(
+            [f"{BIN}/standalone-opt", filename]
+            + (["-take-grads"] if take_grads else [])
+            + TENSOR_PREPROCESS
+            + BUFFERIZE
+            + LOWERING,
+            capture_output=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise Exception(e.stderr.decode("utf-8"))
     return opt_p.stdout
 
 

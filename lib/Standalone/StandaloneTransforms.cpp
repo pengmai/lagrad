@@ -52,5 +52,5 @@ struct FooBarSubstitute : public mlir::OpRewritePattern<FooOp> {
 void FooOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
                                         MLIRContext *context) {
   results.insert<FooBarSubstitute>(context);
-  results.insert<DiffTransform>(context);
+  // results.insert<DiffTransform>(context);
 }
