@@ -164,6 +164,15 @@ private:
             // The gradient is the other argument.
             vjp_value = rewriter.create<mlir::MulFOp>(
                 operand.getLoc(), vjp_value, op->getOperand(1 - op_index));
+          } else if (opName == "tensor.extract") {
+            // TODO: This only supports 0d tensors
+            op->emitError("differentiating tensor.extract not yet supported");
+            // Value index = rewriter.create<mlir::ConstantOp>(
+            //     operand.getLoc(),
+            //     IntegerAttr::get(IndexType::get(operand.getContext()), 0));
+            // auto genOp = rewriter.create<tensor::GenerateOp>(
+            //     operand.getLoc(), env[operand].getType(), index);
+            // vjp_value = genOp.getResult();
           } else {
             llvm::outs() << "Unrecognized op: " << op->getName().getStringRef()
                          << "\n";
@@ -235,6 +244,7 @@ namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<tensor::TensorDialect>();
     addLegalOp<FuncOp>();
   }
 };
@@ -252,7 +262,6 @@ void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
   target.addLegalOp<linalg::DotOp, linalg::YieldOp, linalg::FillOp>();
-  target.addLegalOp<tensor::ExtractOp>();
 
   OwningRewritePatternList patterns;
   patterns.insert<GradOpLowering>(&getContext());
