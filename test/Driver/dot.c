@@ -25,7 +25,10 @@ typedef struct {
 extern float mlir_sum(float *, float *, int64_t, int64_t, int64_t);
 extern F32MemRef ddot(float *, float *, int64_t, int64_t, int64_t, float *,
                       float *, int64_t, int64_t, int64_t);
-extern void denzyme_dot(int, float *, float *, float *, float *);
+// extern void denzyme_dot(int, float *, float *, float *, float *);
+
+extern F32MemRef enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
+                            float *, float *, int64_t, int64_t, int64_t);
 
 void random_init(float *arr, int size) {
   for (int i = 0; i < size; ++i) {
@@ -33,7 +36,8 @@ void random_init(float *arr, int size) {
   }
 }
 
-static inline unsigned long timediff(struct timeval start, struct timeval stop) {
+static inline unsigned long timediff(struct timeval start,
+                                     struct timeval stop) {
   return (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec;
 }
 
@@ -49,8 +53,8 @@ void print_arr(unsigned long *arr, int n) {
 }
 
 int main() {
-  const int size = 32768;
-  const int NUM_RUNS = 20;
+  const int size = 131072;
+  const int NUM_RUNS = 11;
   bool check_val = false;
 
   unsigned long grad_results[NUM_RUNS];
@@ -79,16 +83,17 @@ int main() {
     }
 
     gettimeofday(&start, NULL);
-    float da[size] = {0};
-    float db[size] = {0};
-    denzyme_dot(size, a, da, b, db);
+    // float da[size] = {0};
+    // float db[size] = {0};
+    F32MemRef edot_grad = enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
+    // denzyme_dot(size, a, da, b, db);
     gettimeofday(&stop, NULL);
 
     enzyme_results[run] = timediff(start, stop);
     if (check_val) {
       float error = 0;
       for (int i = 0; i < size; i++) {
-        error += fabs(da[i] - b[i]);
+        error += fabs(edot_grad.descriptor->aligned[i] - b[i]);
       }
       printf("Enzyme total absolute error: %f\n", error);
     }

@@ -3,6 +3,7 @@
 #include "Standalone/StandaloneOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -245,6 +246,7 @@ struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     addLegalDialect<mlir::StandardOpsDialect>();
     addLegalDialect<tensor::TensorDialect>();
+    addLegalDialect<mlir::scf::SCFDialect>();
     addLegalOp<FuncOp>();
   }
 };
@@ -267,7 +269,7 @@ void GradConversionPass::runOnOperation() {
   patterns.insert<GradOpLowering>(&getContext());
 
   auto mod = getOperation();
-  if (failed(applyFullConversion(mod, target, std::move(patterns)))) {
+  if (failed(applyPartialConversion(mod, target, std::move(patterns)))) {
     signalPassFailure();
   }
 }

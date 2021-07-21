@@ -2,7 +2,7 @@
 
 import os.path as osp
 import subprocess
-from typing_extensions import Literal
+from typing import Literal
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")

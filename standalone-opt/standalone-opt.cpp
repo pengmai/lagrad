@@ -36,8 +36,9 @@ int main(int argc, char **argv) {
   registry.insert<mlir::linalg::LinalgDialect>();
   registry.insert<mlir::LLVM::LLVMDialect>();
   registry.insert<mlir::scf::SCFDialect>();
+  registry.insert<mlir::tensor::TensorDialect>();
   
-  // registerAllDialects(registry);
+  registerAllDialects(registry);
 
   return failed(
       mlir::MlirOptMain(argc, argv, "Standalone optimizer driver\n", registry));
