@@ -2,6 +2,7 @@
  * A driver to call a kernel written in MLIR.
  */
 
+#include "standaloneabi.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,20 +10,6 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-typedef struct {
-  float *allocated;
-  float *aligned;
-  int64_t offset;
-  int64_t sizes;
-  int64_t strides;
-} Descriptor;
-
-typedef struct {
-  int64_t rank;
-  Descriptor *descriptor;
-} F32MemRef;
-
-extern float mlir_sum(float *, float *, int64_t, int64_t, int64_t);
 extern F32MemRef ddot(float *, float *, int64_t, int64_t, int64_t, float *,
                       float *, int64_t, int64_t, int64_t);
 // extern void denzyme_dot(int, float *, float *, float *, float *);
@@ -30,32 +17,15 @@ extern F32MemRef ddot(float *, float *, int64_t, int64_t, int64_t, float *,
 extern F32MemRef enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
                             float *, float *, int64_t, int64_t, int64_t);
 
-void random_init(float *arr, int size) {
-  for (int i = 0; i < size; ++i) {
-    arr[i] = (float)rand() / (float)RAND_MAX;
-  }
-}
-
 static inline unsigned long timediff(struct timeval start,
                                      struct timeval stop) {
   return (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec;
 }
 
-void print_arr(unsigned long *arr, int n) {
-  printf("[");
-  for (int i = 0; i < n; i++) {
-    printf("%lu", arr[i]);
-    if (i != n - 1) {
-      printf(", ");
-    }
-  }
-  printf("]\n");
-}
-
 int main() {
   const int size = 131072;
-  const int NUM_RUNS = 11;
-  bool check_val = false;
+  const int NUM_RUNS = 51;
+  bool check_val = true;
 
   unsigned long grad_results[NUM_RUNS];
   unsigned long enzyme_results[NUM_RUNS];
@@ -79,13 +49,16 @@ int main() {
       for (int i = 0; i < dot_grad.descriptor->sizes; ++i) {
         error += fabs(dot_grad.descriptor->aligned[i] - b[i]);
       }
-      printf("Grad total absolute error: %f\n", error);
+      if (error > 1e-9) {
+        printf("Grad total absolute error: %f\n", error);
+      }
     }
 
     gettimeofday(&start, NULL);
     // float da[size] = {0};
     // float db[size] = {0};
-    F32MemRef edot_grad = enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
+    F32MemRef edot_grad =
+        enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
     // denzyme_dot(size, a, da, b, db);
     gettimeofday(&stop, NULL);
 
@@ -95,10 +68,25 @@ int main() {
       for (int i = 0; i < size; i++) {
         error += fabs(edot_grad.descriptor->aligned[i] - b[i]);
       }
-      printf("Enzyme total absolute error: %f\n", error);
+      if (error > 1e-9) {
+        printf("Enzyme total absolute error: %f\n", error);
+      }
     }
   }
 
-  print_arr(grad_results, NUM_RUNS);
-  print_arr(enzyme_results, NUM_RUNS);
+  float grad_res = 0;
+  for (int i = 1; i < NUM_RUNS; i++) {
+    grad_res += grad_results[i];
+  }
+  printf("Mean grad result: %f\n", grad_res / (NUM_RUNS - 1));
+
+  float enzy_res = 0;
+  for (int i = 1; i < NUM_RUNS; i++) {
+    enzy_res += enzyme_results[i];
+  }
+  printf("Mean enzyme result: %f\n", enzy_res / (NUM_RUNS - 1));
+  printf("Speedup: %f\n", enzy_res / grad_res);
+
+  // print_arr(grad_results, NUM_RUNS);
+  // print_arr(enzyme_results, NUM_RUNS);
 }

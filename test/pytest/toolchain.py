@@ -2,7 +2,7 @@
 
 import os.path as osp
 import subprocess
-from typing import Literal
+from typing import List, Literal
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
@@ -39,20 +39,27 @@ LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
 TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
 
 
-def lower_to_llvm_dialect(filename: str, take_grads=False) -> bytes:
+def run_opt(contents: bytes, args: List[str]) -> bytes:
     try:
         opt_p = subprocess.run(
-            [f"{BIN}/standalone-opt", filename]
-            + (["-take-grads"] if take_grads else [])
-            + TENSOR_PREPROCESS
-            + BUFFERIZE
-            + LOWERING,
+            [f"{BIN}/standalone-opt"] + args,
+            input=contents,
             capture_output=True,
             check=True,
         )
     except subprocess.CalledProcessError as e:
         raise Exception(e.stderr.decode("utf-8"))
     return opt_p.stdout
+
+
+def lower_to_llvm_dialect(contents: bytes, take_grads=False) -> bytes:
+    return run_opt(
+        contents,
+        (["-take-grads"] if take_grads else [])
+        + TENSOR_PREPROCESS
+        + BUFFERIZE
+        + LOWERING,
+    )
 
 
 def lower_to_llvm(llvm_dialect: bytes) -> bytes:
@@ -81,11 +88,25 @@ def run_enzyme(llvm_ir: bytes, optimize=True):
     return enzyme_p.stdout
 
 
+def compile_benchmark(name: str, high_level_ir: bytes):
+    llvm_dialect = lower_to_llvm_dialect(high_level_ir, take_grads=False)
+    llvm_ir = lower_to_llvm(llvm_dialect)
+    object_file = osp.join(TMP_DIR, f"{name}.o")
+    with open(object_file, "wb") as ofile:
+        subprocess.run(
+            ["llc", "-filetype=obj"], input=llvm_ir, stdout=ofile, check=True
+        )
+    # TODO: Do this
+
+
 def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     if mode not in ["enzyme", "grad"]:
         raise ValueError("'mode' must be one of 'enzyme', 'grad'")
 
-    dialect_ir = lower_to_llvm_dialect(filename, take_grads=(mode == "grad"))
+    with open(filename, "rb") as f:
+        contents = f.read()
+
+    dialect_ir = lower_to_llvm_dialect(contents, take_grads=(mode == "grad"))
     llvm_ir = lower_to_llvm(dialect_ir)
     if mode == "enzyme":
         llvm_ir = run_enzyme(llvm_ir, optimize=True)

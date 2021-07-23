@@ -1,4 +1,5 @@
 .vscode/
 build/
 test/pytest/tmp
+.DS_Store
 
