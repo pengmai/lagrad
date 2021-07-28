@@ -2,8 +2,8 @@
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -151,20 +151,14 @@ private:
             Value broadcast_value =
                 rewriter.create<tensor::ExtractOp>(operand.getLoc(), vjp_value);
 
-            // This is an ugly workaround to get a broadcasted tensor.
             assert(operand.getType().isa<ShapedType>() &&
                    "dot input arg was not a shaped type");
             auto opType = operand.getType().dyn_cast<ShapedType>();
-            Value memref = rewriter.create<mlir::AllocaOp>(
-                operand.getLoc(),
-                MemRefType::get(opType.getShape(), opType.getElementType()));
-            rewriter.create<linalg::FillOp>(operand.getLoc(), memref,
-                                            broadcast_value);
-            vjp_value =
-                rewriter.create<mlir::TensorLoadOp>(operand.getLoc(), memref);
             // The gradient is the other argument.
+            vjp_value =
+                broadcast(operand.getLoc(), opType, broadcast_value, rewriter);
             vjp_value = rewriter.create<mlir::MulFOp>(
-                operand.getLoc(), vjp_value, op->getOperand(1 - op_index));
+                operand.getLoc(), op->getOperand(1 - op_index), vjp_value);
           } else if (opName == "tensor.extract") {
             // TODO: This only supports 0d tensors
             op->emitError("differentiating tensor.extract not yet supported");
@@ -184,7 +178,6 @@ private:
                                                        env[operand], vjp_value);
           op_index++;
         }
-        // llvm::outs() << "\n";
       }
     }
 
@@ -237,6 +230,21 @@ private:
     }
     llvm_unreachable("ones for type not yet implemented");
     return nullptr;
+  }
+
+  static mlir::Value broadcast(Location loc, Type type,
+                               mlir::Value broadcast_value,
+                               ConversionPatternRewriter &rewriter) {
+    llvm::SmallVector<Value> empty;
+    auto generateOp =
+        rewriter.create<mlir::tensor::GenerateOp>(loc, type, empty);
+
+    OpBuilder::InsertionGuard guard(rewriter);
+
+    rewriter.createBlock(&generateOp.getBodyRegion(), {},
+                         TypeRange({IndexType::get(loc.getContext())}));
+    rewriter.create<mlir::tensor::YieldOp>(loc, broadcast_value);
+    return generateOp;
   }
 };
 } // end anonymous namespace

@@ -18,6 +18,7 @@ BUFFERIZE = [
 ]
 LOWERING = [
     "-convert-linalg-to-affine-loops",
+    "-convert-scf-to-std",
     "-convert-standalone-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
