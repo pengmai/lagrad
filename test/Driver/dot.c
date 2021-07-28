@@ -29,15 +29,15 @@ int main() {
 
   unsigned long grad_results[NUM_RUNS];
   unsigned long enzyme_results[NUM_RUNS];
+  float *a = (float *)malloc(size * sizeof(float));
+  float *b = (float *)malloc(size * sizeof(float));
+  random_init(a, size);
+  random_init(b, size);
 
+  float *deadbeef = (float *)0xdeadbeef;
   for (int run = 0; run < NUM_RUNS; run++) {
-    float a[size];
-    float b[size];
-    random_init(a, size);
-    random_init(b, size);
 
-    float *deadbeef = (float *)0xdeadbeef;
-    struct timeval stop, start;
+    struct timeval start, stop;
 
     gettimeofday(&start, NULL);
     F32MemRef dot_grad = ddot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
@@ -53,13 +53,16 @@ int main() {
         printf("Grad total absolute error: %f\n", error);
       }
     }
+    free(dot_grad.descriptor->aligned);
+    free(dot_grad.descriptor);
+  }
+
+  for (int run = 0; run < NUM_RUNS; run++) {
+    struct timeval start, stop;
 
     gettimeofday(&start, NULL);
-    // float da[size] = {0};
-    // float db[size] = {0};
     F32MemRef edot_grad =
         enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
-    // denzyme_dot(size, a, da, b, db);
     gettimeofday(&stop, NULL);
 
     enzyme_results[run] = timediff(start, stop);
@@ -72,6 +75,8 @@ int main() {
         printf("Enzyme total absolute error: %f\n", error);
       }
     }
+    free(edot_grad.descriptor->aligned);
+    free(edot_grad.descriptor);
   }
 
   float grad_res = 0;
@@ -86,6 +91,9 @@ int main() {
   }
   printf("Mean enzyme result: %f\n", enzy_res / (NUM_RUNS - 1));
   printf("Speedup: %f\n", enzy_res / grad_res);
+
+  free(a);
+  free(b);
 
   // print_arr(grad_results, NUM_RUNS);
   // print_arr(enzyme_results, NUM_RUNS);
