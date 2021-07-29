@@ -79,6 +79,7 @@ int main() {
     free(edot_grad.descriptor);
   }
 
+  printf("Number of runs: %d (%d warmup run(s))\n", NUM_RUNS, 1);
   float grad_res = 0;
   for (int i = 1; i < NUM_RUNS; i++) {
     grad_res += grad_results[i];
@@ -94,7 +95,4 @@ int main() {
 
   free(a);
   free(b);
-
-  // print_arr(grad_results, NUM_RUNS);
-  // print_arr(enzyme_results, NUM_RUNS);
 }
