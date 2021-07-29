@@ -57,26 +57,8 @@ public:
           OperationState state(loc, op->getName());
           state.addAttributes(op->getAttrs());
 
-          Value lhs;
-          // TODO: Move this to a helper function, check that defining op exists.
-          // if (op->getOperand(0).getDefiningOp()->getName().getStringRef() ==
-          //     "std.tensor_load") {
-          //   lhs = builder.create<mlir::AffineLoadOp>(
-          //       loc, op->getOperand(0).getDefiningOp()->getOperand(0), value);
-          // } else {
-            lhs = builder.create<tensor::ExtractOp>(loc, op->getOperand(0),
-                                                    value);
-          // }
-
-          Value rhs;
-          if (op->getOperand(1).getDefiningOp()->getName().getStringRef() ==
-              "std.tensor_load") {
-            rhs = rewriter.create<mlir::AffineLoadOp>(
-                loc, op->getOperand(1).getDefiningOp()->getOperand(0), value);
-          } else {
-            rhs = rewriter.create<tensor::ExtractOp>(loc, op->getOperand(1),
-                                                     value);
-          }
+          Value lhs = this->elementFromArgument(op, builder, loc, 0, value);
+          Value rhs = this->elementFromArgument(op, builder, loc, 1, value);
           state.addOperands({lhs, rhs});
           auto resultTypes = llvm::to_vector<6>(
               llvm::map_range(op->getResultTypes(), [](Type type) {
@@ -94,6 +76,23 @@ public:
     op->replaceAllUsesWith(llvm::makeArrayRef(result));
     rewriter.eraseOp(op);
     return success();
+  }
+
+private:
+  static Value elementFromArgument(Operation *op, OpBuilder &builder,
+                                   Location loc, unsigned int arg_index,
+                                   Value index) {
+    // TODO: Might be a better way to check if there's an existing memref to
+    // read from.
+    auto definingOp = op->getOperand(arg_index).getDefiningOp();
+    if (definingOp &&
+        definingOp->getName().getStringRef() == "std.tensor_load") {
+      return builder.create<mlir::AffineLoadOp>(
+          loc, op->getOperand(arg_index).getDefiningOp()->getOperand(0), index);
+    } else {
+      return builder.create<tensor::ExtractOp>(loc, op->getOperand(arg_index),
+                                               index);
+    }
   }
 };
 

@@ -25,7 +25,7 @@ opt "$TMP_DIR/postenzyme.ll" -O3 -o "$TMP_DIR/postenzyme.ll" -S
 llc -filetype=obj < "$TMP_DIR/postenzyme.ll" > "$TMP_DIR/postenzyme.o"
 
 # For debugging
-# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads -canonicalize -convert-elementwise-to-affine -canonicalize -affine-loop-fusion $TENSOR_PREPROCESSING $BUFFERIZE $LOWERING
+# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads $HIGH_LEVEL_OPTS
 
 # For execution
 $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads $HIGH_LEVEL_OPTS $OPT_ARGS -convert-linalg-to-llvm --llvm-legalize-for-export | mlir-translate -mlir-to-llvmir > "$LLVM_FILE"
