@@ -43,10 +43,14 @@ private:
       gradOp->emitError("Argument to `standalone.grad` was not a function");
       return nullptr;
     }
-    // if (!arg0Type.getResult(0).isa<FloatType>()) {
-    //   gradOp->emitError(
-    //       "Argument to `standalone.grad` must return a float type");
-    //   return failure();
+    // auto returnShapedType =
+    //     arg0Type.getResult(0).dyn_cast_or_null<ShapedType>();
+    // if (!(arg0Type.getResult(0).isa<FloatType>() ||
+    //       (returnShapedType && returnShapedType.hasRank() &&
+    //        returnShapedType.getRank() == 0))) {
+    //   gradOp->emitError("Argument to `standalone.grad` must return a float "
+    //                     "type or a rank-0 shaped type");
+    //   return nullptr;
     // }
 
     // Assume the arg was defined by a constant op.
@@ -86,7 +90,6 @@ private:
     for (auto it = ops.rbegin(); it != ops.rend(); it++) {
       Operation *op = *it;
       if (op->getName().getStringRef() == "std.return") {
-        // if (op->isKnownTerminator()) {
         // This is the exit point
         rewriter.setInsertionPoint(op);
         Value operand = op->getOperand(0);
@@ -116,6 +119,7 @@ private:
             // llvm::outs() << "Initializing value (not yet initialized): "
             //              << result << "\n";
           }
+          bool skip = false;
           auto opName = op->getName().getStringRef();
           if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
@@ -159,6 +163,24 @@ private:
                 broadcast(operand.getLoc(), opType, broadcast_value, rewriter);
             vjp_value = rewriter.create<mlir::MulFOp>(
                 operand.getLoc(), op->getOperand(1 - op_index), vjp_value);
+          } else if (opName == "linalg.matvec") {
+            if (op_index > 1)
+              continue;
+            if (op_index == 0) {
+              // Broadcast the gradient signal
+              assert(operand.getType().isa<RankedTensorType>() &&
+                     "matvec input was not a ranked tensor type");
+              auto opType = operand.getType().dyn_cast<RankedTensorType>();
+              vjp_value =
+                  broadcast(operand.getLoc(), opType, vjp_value, rewriter);
+
+              auto broadcasted_arg = broadcast(operand.getLoc(), opType,
+                                               op->getOperand(1), rewriter);
+              vjp_value = rewriter.create<mlir::MulFOp>(
+                  operand.getLoc(), broadcasted_arg, vjp_value);
+            } else {
+              skip = true;
+            }
           } else if (opName == "tensor.extract") {
             // TODO: This only supports 0d tensors
             op->emitError("differentiating tensor.extract not yet supported");
@@ -174,14 +196,22 @@ private:
           }
 
           // Add the gradient signals.
-          env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(),
-                                                       env[operand], vjp_value);
+          if (!skip) {
+            env[operand] = rewriter.create<mlir::AddFOp>(
+                op->getLoc(), env[operand], vjp_value);
+          }
+          skip = false;
           op_index++;
         }
       }
     }
 
     auto fntyp = funcOp.getType();
+    // if (!env[region->getArgument(0)]) {
+    //   env[region->getArgument(0)] = getZero(region->getArgument(0).getLoc(),
+    //                                         region->getArgument(0),
+    //                                         rewriter);
+    // }
     funcOp.setType(FunctionType::get(funcOp.getContext(), fntyp.getInputs(),
                                      {region->getArgument(0).getType()}));
     rewriter.create<mlir::ReturnOp>(region->getLoc(),
@@ -235,15 +265,48 @@ private:
   static mlir::Value broadcast(Location loc, Type type,
                                mlir::Value broadcast_value,
                                ConversionPatternRewriter &rewriter) {
+    auto shapedType = type.dyn_cast<ShapedType>();
+    assert(shapedType && shapedType.hasRank() &&
+           "broadcast given type that was not a ranked type");
+
     llvm::SmallVector<Value> empty;
     auto generateOp =
         rewriter.create<mlir::tensor::GenerateOp>(loc, type, empty);
 
     OpBuilder::InsertionGuard guard(rewriter);
 
-    rewriter.createBlock(&generateOp.getBodyRegion(), {},
-                         TypeRange({IndexType::get(loc.getContext())}));
-    rewriter.create<mlir::tensor::YieldOp>(loc, broadcast_value);
+    int64_t rank = shapedType.getRank();
+    llvm::SmallVector<Type> blockArgs(rank);
+    for (int i = 0; i < rank; i++) {
+      blockArgs[i] = IndexType::get(loc.getContext());
+    }
+
+    auto generateBlock = rewriter.createBlock(&generateOp.getBodyRegion(), {},
+                                              TypeRange(blockArgs));
+
+    if (rank == 1) {
+      rewriter.create<mlir::tensor::YieldOp>(loc, broadcast_value);
+    } else if (rank == 2) {
+      auto broadcast_type =
+          broadcast_value.getType().dyn_cast<RankedTensorType>();
+      assert(broadcast_type && "broadcast value was not a ranked tensor");
+      assert(broadcast_type.getRank() == 1 &&
+             "broadcast to rank 2 requires a broadcast_value with rank 1");
+
+      Value element;
+      if (shapedType.getShape()[0] == broadcast_type.getShape()[0]) {
+        element = rewriter.create<tensor::ExtractOp>(
+            loc, broadcast_value, generateBlock->getArgument(0));
+      } else if (shapedType.getShape()[1] == broadcast_type.getShape()[0]) {
+        element = rewriter.create<tensor::ExtractOp>(
+            loc, broadcast_value, generateBlock->getArgument(1));
+      } else {
+        assert(0 && "Can't broadcast 2D types without matching dims");
+      }
+      rewriter.create<tensor::YieldOp>(loc, element);
+    } else {
+      assert(0 && "broadcast for rank >= 3 not yet implemented");
+    }
     return generateOp;
   }
 };
@@ -255,6 +318,7 @@ struct GradTarget : public ConversionTarget {
     addLegalDialect<mlir::StandardOpsDialect>();
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
+    addLegalDialect<linalg::LinalgDialect>();
     addLegalOp<FuncOp>();
   }
 };
@@ -271,13 +335,12 @@ struct GradConversionPass
 void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
-  target.addLegalOp<linalg::DotOp, linalg::YieldOp, linalg::FillOp>();
 
   OwningRewritePatternList patterns;
   patterns.insert<GradOpLowering>(&getContext());
 
   auto mod = getOperation();
-  if (failed(applyPartialConversion(mod, target, std::move(patterns)))) {
+  if (failed(applyFullConversion(mod, target, std::move(patterns)))) {
     signalPassFailure();
   }
 }
