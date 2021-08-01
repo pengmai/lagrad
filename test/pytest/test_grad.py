@@ -18,3 +18,8 @@ def test_quadratic():
 def test_dot():
     output = compile_pipeline(f"{MLIR_FILES}/dot.mlir", mode="grad")
     assert extract_1d(output.decode("utf-8")) == [-5.0, 3.4, -10.2, 3.33]
+
+
+def test_dot_second_arg():
+    output = compile_pipeline(f"{MLIR_FILES}/dot_second_arg.mlir", mode="grad")
+    assert extract_1d(output.decode("utf-8")) == [0.1, 1.0, 2.0, -3.0]

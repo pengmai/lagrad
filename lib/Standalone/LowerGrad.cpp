@@ -34,6 +34,29 @@ public:
   }
 
 private:
+  static bool verifyAttributes(Operation *op, unsigned int num_inputs) {
+    ArrayAttr ofAttr = op->getAttr("of").dyn_cast_or_null<ArrayAttr>();
+    if (ofAttr) {
+      for (const auto attr : ofAttr) {
+        auto intAttr = attr.dyn_cast_or_null<IntegerAttr>();
+        if (!intAttr) {
+          return false;
+        }
+
+        auto attrValue = intAttr.getValue().getSExtValue();
+        if (attrValue < 0) {
+          op->emitError("'of' index cannot be negative");
+          return false;
+        } else if (static_cast<size_t>(attrValue) >= num_inputs) {
+          op->emitError(
+              "'of' index cannot be greater than number of function inputs");
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   static FuncOp getFunctionDeclaration(Operation *gradOp,
                                        ArrayRef<Value> operands,
                                        ConversionPatternRewriter &rewriter) {
@@ -41,6 +64,10 @@ private:
     auto arg0Type = arg0.getType().dyn_cast<FunctionType>();
     if (!arg0Type) {
       gradOp->emitError("Argument to `standalone.grad` was not a function");
+      return nullptr;
+    }
+
+    if (!verifyAttributes(gradOp, arg0Type.getNumInputs())) {
       return nullptr;
     }
     // auto returnShapedType =
@@ -238,10 +265,27 @@ private:
     //                                         region->getArgument(0),
     //                                         rewriter);
     // }
-    funcOp.setType(FunctionType::get(funcOp.getContext(), fntyp.getInputs(),
-                                     {region->getArgument(0).getType()}));
-    rewriter.create<mlir::ReturnOp>(region->getLoc(),
-                                    env[region->getArgument(0)]);
+    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
+    SmallVector<Type> returnType(arg0Type.getNumInputs());
+    SmallVector<Value> returnValue(arg0Type.getNumInputs());
+    if (gradientsOf) {
+      returnType.resize(gradientsOf.size());
+      returnValue.resize(gradientsOf.size());
+      for (size_t i = 0; i < gradientsOf.size(); i++) {
+        auto argIndex =
+            gradientsOf[i].dyn_cast<IntegerAttr>().getValue().getSExtValue();
+        returnType[i] = region->getArgument(argIndex).getType();
+        returnValue[i] = env[region->getArgument(argIndex)];
+      }
+    } else {
+      returnType.resize(1);
+      returnType[0] = region->getArgument(0).getType();
+      returnValue.resize(1);
+      returnValue[0] = env[region->getArgument(0)];
+    }
+    funcOp.setType(
+        FunctionType::get(funcOp.getContext(), fntyp.getInputs(), returnType));
+    rewriter.create<mlir::ReturnOp>(region->getLoc(), returnValue);
     return funcOp;
   }
 
