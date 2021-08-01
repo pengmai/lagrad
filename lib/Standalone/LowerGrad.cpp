@@ -191,9 +191,9 @@ private:
                   {getReductionIteratorTypeName(),
                    getParallelIteratorTypeName()});
 
-              // TODO: This currently uses the allocated gradient space and adds it inside the matmul.
-              // This may produce incorrect results due to being added twice? Especially down the line
-              // with bufferization.
+              // TODO: This currently uses the allocated gradient space and adds
+              // it inside the matmul. This may produce incorrect results due to
+              // being added twice? Especially down the line with bufferization.
               auto matmulOp = rewriter.create<linalg::GenericOp>(
                   operand.getLoc(),
                   /*resultTensorTypes=*/operand.getType(),
@@ -225,6 +225,8 @@ private:
           }
 
           // Add the gradient signals.
+          env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(),
+                                                       env[operand], vjp_value);
           op_index++;
         }
       }
