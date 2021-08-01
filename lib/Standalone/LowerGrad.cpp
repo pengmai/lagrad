@@ -119,7 +119,6 @@ private:
             // llvm::outs() << "Initializing value (not yet initialized): "
             //              << result << "\n";
           }
-          bool skip = false;
           auto opName = op->getName().getStringRef();
           if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
@@ -179,7 +178,37 @@ private:
               vjp_value = rewriter.create<mlir::MulFOp>(
                   operand.getLoc(), broadcasted_arg, vjp_value);
             } else {
-              skip = true;
+              // TODO: Probably a more elegant way to do this. The goal is to
+              // express indexingMaps =
+              //   {<(d0, d1)> -> <(d0)>,
+              //    <(d0, d1)> -> <(d0, d1)>
+              //    <(d0, d1)> -> <(d1)>}
+              SmallVector<AffineMap, 3> indexingMaps(
+                  op->getNumOperands(), rewriter.getMultiDimIdentityMap(2));
+              indexingMaps[0] = indexingMaps[0].getSubMap({0});
+              indexingMaps[2] = indexingMaps[2].getSubMap({1});
+              SmallVector<StringRef, 6> iteratorTypes(
+                  {getReductionIteratorTypeName(),
+                   getParallelIteratorTypeName()});
+
+              // TODO: This currently uses the allocated gradient space and adds it inside the matmul.
+              // This may produce incorrect results due to being added twice? Especially down the line
+              // with bufferization.
+              auto matmulOp = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(),
+                  /*resultTensorTypes=*/operand.getType(),
+                  /*inputs=*/ValueRange({vjp_value, op->getOperand(0)}),
+                  /*outputs=*/ValueRange({env[operand]}),
+                  /*indexingMaps=*/indexingMaps,
+                  /*iteratorTypes=*/iteratorTypes,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    auto mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
+                                                                regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, reduced.getResult());
+                  });
+              vjp_value = matmulOp.getResult(0);
             }
           } else if (opName == "tensor.extract") {
             // TODO: This only supports 0d tensors
@@ -196,11 +225,6 @@ private:
           }
 
           // Add the gradient signals.
-          if (!skip) {
-            env[operand] = rewriter.create<mlir::AddFOp>(
-                op->getLoc(), env[operand], vjp_value);
-          }
-          skip = false;
           op_index++;
         }
       }
