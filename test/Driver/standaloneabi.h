@@ -7,13 +7,23 @@ typedef struct {
   float *allocated;
   float *aligned;
   int64_t offset;
-  int64_t sizes;
-  int64_t strides;
-} Descriptor;
+  int64_t size;
+  int64_t stride;
+} Descriptor1D;
+
+typedef struct {
+  float *allocated;
+  float *aligned;
+  int64_t offset;
+  int64_t size_0;
+  int64_t size_1;
+  int64_t stride_0;
+  int64_t stride_1;
+} Descriptor2D;
 
 typedef struct {
   int64_t rank;
-  Descriptor *descriptor;
+  Descriptor1D *descriptor;
 } F32MemRef;
 
 void random_init(float *arr, int size) {
@@ -31,4 +41,19 @@ void print_arr(unsigned long *arr, int n) {
     }
   }
   printf("]\n");
+}
+
+void print_farr(float *arr, int n) {
+  printf("[");
+  for (int i = 0; i < n; i++) {
+    printf("%f", arr[i]);
+    if (i != n - 1) {
+      printf(", ");
+    }
+  }
+  printf("]\n");
+}
+
+unsigned long timediff(struct timeval start, struct timeval stop) {
+  return (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec;
 }
