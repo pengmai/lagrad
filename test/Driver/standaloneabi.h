@@ -32,6 +32,14 @@ void random_init(float *arr, int size) {
   }
 }
 
+void random_init_2d(float *arr, int m, int n) {
+  for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j < n; j++) {
+      arr[i * n + j] = (float)rand() / (float)RAND_MAX;
+    }
+  }
+}
+
 void print_arr(unsigned long *arr, int n) {
   printf("[");
   for (int i = 0; i < n; i++) {
@@ -39,6 +47,23 @@ void print_arr(unsigned long *arr, int n) {
     if (i != n - 1) {
       printf(", ");
     }
+  }
+  printf("]\n");
+}
+
+void print_2d(float *arr, size_t m, size_t n) {
+  printf("[");
+  for (size_t i = 0; i < m; i++)
+  {
+    printf("[");
+    for (size_t j = 0; j < n; j++)
+    {
+      printf("%f", arr[i * n + j]);
+      if (i != n - 1) {
+        printf(", ");
+      }
+    }
+    printf("]\n");
   }
   printf("]\n");
 }
