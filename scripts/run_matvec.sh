@@ -22,7 +22,7 @@ COMPILE="llc -filetype=obj"
 # For debugging
 # $BIN/standalone-opt "$KERNELS/matvec.mlir" -canonicalize -convert-elementwise-to-linalg $BUFFERIZE $AFFINE_OPTS -finalizing-bufferize
 
-$BIN/standalone-opt "$KERNELS/matvec.mlir" -canonicalize -convert-elementwise-to-linalg $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatvec.o
+$BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize -convert-elementwise-to-linalg $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatvec.o
 
 gcc -c $DRIVERS/matvec.c -o $TMP/matvec.o
 # gcc $TMP/matvec.o $TMP/mmatvec.o $TMP/ematvec.o -o $TMP/matvec.out

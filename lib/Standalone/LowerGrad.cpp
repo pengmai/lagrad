@@ -126,10 +126,6 @@ private:
       } else {
         int op_index = 0;
         for (Value operand : op->getOperands()) {
-          if (!env[operand]) {
-            env[operand] = getZero(op->getLoc(), operand, rewriter);
-          }
-
           // Compute the pullback (VJP).
           // TODO: Gotta be a better way to structure/abstract this.
           if (op->getNumResults() == 0) {
@@ -196,14 +192,25 @@ private:
               // Broadcast the gradient signal
               assert(operand.getType().isa<RankedTensorType>() &&
                      "matvec input was not a ranked tensor type");
+              SmallVector<AffineMap, 3> indexingMaps(
+                  op->getNumOperands(), rewriter.getMultiDimIdentityMap(2));
+              indexingMaps[0] = indexingMaps[0].getSubMap({0});
+              indexingMaps[1] = indexingMaps[1].getSubMap({1});
               auto opType = operand.getType().dyn_cast<RankedTensorType>();
-              vjp_value =
-                  broadcast(operand.getLoc(), opType, vjp_value, rewriter);
-
-              auto broadcasted_arg = broadcast(operand.getLoc(), opType,
-                                               op->getOperand(1), rewriter);
-              vjp_value = rewriter.create<mlir::MulFOp>(
-                  operand.getLoc(), broadcasted_arg, vjp_value);
+              SmallVector<StringRef, 6> iteratorTypes(
+                  opType.getRank(), getParallelIteratorTypeName());
+              auto outerProductOp = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(),
+                  /*resultTensorTypes=*/opType,
+                  /*inputs=*/ValueRange({vjp_value, op->getOperand(1)}),
+                  /*outputs=*/ValueRange({operand}), indexingMaps,
+                  iteratorTypes,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    Value mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    builder.create<linalg::YieldOp>(loc, mul_res);
+                  });
+              vjp_value = outerProductOp.getResult(0);
             } else {
               // TODO: Probably a more elegant way to do this. The goal is to
               // express indexingMaps =
@@ -225,15 +232,15 @@ private:
                   operand.getLoc(),
                   /*resultTensorTypes=*/operand.getType(),
                   /*inputs=*/ValueRange({vjp_value, op->getOperand(0)}),
-                  /*outputs=*/ValueRange({env[operand]}),
+                  /*outputs=*/ValueRange({operand}),
                   /*indexingMaps=*/indexingMaps,
                   /*iteratorTypes=*/iteratorTypes,
                   [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                     auto mul_res = builder.create<mlir::MulFOp>(
                         loc, regionArgs[0], regionArgs[1]);
-                    auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
-                                                                regionArgs[2]);
-                    builder.create<linalg::YieldOp>(loc, reduced.getResult());
+                    // auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
+                    //                                             regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, mul_res.getResult());
                   });
               vjp_value = matmulOp.getResult(0);
             }
@@ -252,8 +259,12 @@ private:
           }
 
           // Add the gradient signals.
-          env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(),
-                                                       env[operand], vjp_value);
+          if (!env[operand]) {
+            env[operand] = vjp_value;
+          } else {
+            env[operand] = rewriter.create<mlir::AddFOp>(
+                op->getLoc(), env[operand], vjp_value);
+          }
           op_index++;
         }
       }
