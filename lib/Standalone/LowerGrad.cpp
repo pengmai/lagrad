@@ -170,6 +170,11 @@ private:
             }
           } else if (opName == "std.negf") {
             vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+          } else if (opName == "std.exp") {
+            assert(op->getNumResults() == 1 &&
+                   "math.exp op did not have exactly 1 result");
+            vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                      op->getResult(0));
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
               continue;
@@ -212,6 +217,9 @@ private:
                   });
               vjp_value = outerProductOp.getResult(0);
             } else {
+              Value zero = env[operand]
+                               ? env[operand]
+                               : getZero(operand.getLoc(), operand, rewriter);
               // TODO: Probably a more elegant way to do this. The goal is to
               // express indexingMaps =
               //   {<(d0, d1)> -> <(d0)>,
@@ -232,17 +240,70 @@ private:
                   operand.getLoc(),
                   /*resultTensorTypes=*/operand.getType(),
                   /*inputs=*/ValueRange({vjp_value, op->getOperand(0)}),
-                  /*outputs=*/ValueRange({operand}),
+                  /*outputs=*/ValueRange({zero}),
                   /*indexingMaps=*/indexingMaps,
                   /*iteratorTypes=*/iteratorTypes,
                   [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                     auto mul_res = builder.create<mlir::MulFOp>(
                         loc, regionArgs[0], regionArgs[1]);
-                    // auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
-                    //                                             regionArgs[2]);
-                    builder.create<linalg::YieldOp>(loc, mul_res.getResult());
+                    auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
+                                                                regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, reduced.getResult());
                   });
               vjp_value = matmulOp.getResult(0);
+            }
+          } else if (opName == "linalg.vecmat") {
+            if (op_index > 1) {
+              continue;
+            } else if (op_index == 0) {
+              Value zero = env[operand]
+                               ? env[operand]
+                               : getZero(operand.getLoc(), operand, rewriter);
+              SmallVector<AffineMap, 3> indexingMaps(
+                  op->getNumOperands(), rewriter.getMultiDimIdentityMap(2));
+              indexingMaps[0] = indexingMaps[0].getSubMap({1});
+              indexingMaps[2] = indexingMaps[2].getSubMap({0});
+              SmallVector<StringRef, 6> iteratorTypes(
+                  {getParallelIteratorTypeName(),
+                   getReductionIteratorTypeName()});
+              auto matmulOp = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(),
+                  /*resultTensorTypes=*/operand.getType(),
+                  /*inputs=*/ValueRange({vjp_value, op->getOperand(1)}),
+                  /*outputs=*/ValueRange({zero}),
+                  /*indexingMaps=*/indexingMaps,
+                  /*iteratorTypes=*/iteratorTypes,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    auto mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    auto reduced = builder.create<mlir::AddFOp>(loc, mul_res,
+                                                                regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, reduced.getResult());
+                  });
+              vjp_value = matmulOp.getResult(0);
+            } else {
+              // TODO: This is almost identical to the arg 0 case of matvec
+              assert(operand.getType().isa<RankedTensorType>() &&
+                     "matvec input was not a ranked tensor type");
+              SmallVector<AffineMap, 3> indexingMaps(
+                  op->getNumOperands(), rewriter.getMultiDimIdentityMap(2));
+              indexingMaps[0] = indexingMaps[0].getSubMap({1});
+              indexingMaps[1] = indexingMaps[1].getSubMap({0});
+              auto opType = operand.getType().dyn_cast<RankedTensorType>();
+              SmallVector<StringRef, 6> iteratorTypes(
+                  opType.getRank(), getParallelIteratorTypeName());
+              auto outerProductOp = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(),
+                  /*resultTensorTypes=*/opType,
+                  /*inputs=*/ValueRange({vjp_value, op->getOperand(0)}),
+                  /*outputs=*/ValueRange({operand}), indexingMaps,
+                  iteratorTypes,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    Value mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    builder.create<linalg::YieldOp>(loc, mul_res);
+                  });
+              vjp_value = outerProductOp.getResult(0);
             }
           } else if (opName == "tensor.extract") {
             // TODO: This only supports 0d tensors
