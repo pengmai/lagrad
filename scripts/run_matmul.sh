@@ -1,5 +1,3 @@
-# Will probably want to consolidate these scripts.
-
 SCRIPT_DIR=`echo $(dirname "$0")`
 DRIVERS="$SCRIPT_DIR/../test/Driver"
 KERNELS="$SCRIPT_DIR/../test/Standalone/kernels"
@@ -20,15 +18,13 @@ COMPILE="llc -filetype=obj"
 # llc -filetype=obj "$TMP/postematvec.ll" > "$TMP/ematvec.o"
 
 # For debugging
-$BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize $BUFFERIZE -linalg-tile=linalg-tile-sizes=64,1 -convert-linalg-to-loops
+# $BIN/standalone-opt "$KERNELS/matmul.mlir" #-take-grads -canonicalize $BUFFERIZE -convert-linalg-to-loops
 
-# $BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize -convert-elementwise-to-linalg $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT > $TMP/mmatvec.ll
-$BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatvec.o
+$BIN/standalone-opt "$KERNELS/matmul.mlir" -take-grads -canonicalize $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatmul.o
 # opt -O3 $tmp/mmatvec.ll -o $tmp/mmatvec.ll
 # clang -c -O3 $TMP/mmatvec.ll -o $TMP/mmatvec.o
 # $COMPILE $TMP/mmatvec.ll -o $TMP/mmatvec.o
 
-gcc -c $DRIVERS/matvec.c -o $TMP/matvec.o
-# gcc $TMP/matvec.o $TMP/mmatvec.o $TMP/postematvec.o -o $TMP/matvec.out
-gcc $TMP/matvec.o $TMP/mmatvec.o -o $TMP/matvec.out
-$TMP/matvec.out
+gcc -c $DRIVERS/matmul.c -o $TMP/matmul.o
+gcc $TMP/matmul.o $TMP/mmatmul.o -o $TMP/matmul.out
+$TMP/matmul.out

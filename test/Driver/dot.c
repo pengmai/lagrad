@@ -10,17 +10,17 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-extern F32MemRef ddot(float *, float *, int64_t, int64_t, int64_t, float *,
-                      float *, int64_t, int64_t, int64_t);
+typedef struct {
+  Descriptor1D da;
+  Descriptor1D db;
+} DotGradient;
+
+extern DotGradient ddot(float *, float *, int64_t, int64_t, int64_t, float *,
+                        float *, int64_t, int64_t, int64_t);
 // extern void denzyme_dot(int, float *, float *, float *, float *);
 
-extern F32MemRef enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
-                            float *, float *, int64_t, int64_t, int64_t);
-
-static inline unsigned long timediff(struct timeval start,
-                                     struct timeval stop) {
-  return (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec;
-}
+extern DotGradient enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
+                              float *, float *, int64_t, int64_t, int64_t);
 
 int main() {
   const int size = 131072;
@@ -40,28 +40,37 @@ int main() {
     struct timeval start, stop;
 
     gettimeofday(&start, NULL);
-    F32MemRef dot_grad = ddot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
+    DotGradient dot_grad =
+        ddot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
     gettimeofday(&stop, NULL);
 
     grad_results[run] = timediff(start, stop);
     if (check_val) {
       float error = 0;
-      for (int i = 0; i < dot_grad.descriptor->sizes; ++i) {
-        error += fabs(dot_grad.descriptor->aligned[i] - b[i]);
+      for (int i = 0; i < dot_grad.da.size; ++i) {
+        error += fabs(dot_grad.da.aligned[i] - b[i]);
       }
       if (error > 1e-9) {
         printf("Grad total absolute error: %f\n", error);
       }
+      error = 0;
+      for (size_t i = 0; i < dot_grad.db.size; i++)
+      {
+        error += fabs(dot_grad.db.aligned[i] - a[i]);
+      }
+      if (error > 1e-9) {
+        printf("Grad total absolute error (second arg): %f\n", error);
+      }
     }
-    free(dot_grad.descriptor->aligned);
-    free(dot_grad.descriptor);
+    free(dot_grad.da.aligned);
+    free(dot_grad.db.aligned);
   }
 
   for (int run = 0; run < NUM_RUNS; run++) {
     struct timeval start, stop;
 
     gettimeofday(&start, NULL);
-    F32MemRef edot_grad =
+    DotGradient edot_grad =
         enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
     gettimeofday(&stop, NULL);
 
@@ -69,14 +78,21 @@ int main() {
     if (check_val) {
       float error = 0;
       for (int i = 0; i < size; i++) {
-        error += fabs(edot_grad.descriptor->aligned[i] - b[i]);
+        error += fabs(edot_grad.da.aligned[i] - b[i]);
       }
       if (error > 1e-9) {
         printf("Enzyme total absolute error: %f\n", error);
       }
+      error = 0;
+      for (size_t i = 0; i < size; i++) {
+        error += fabs(edot_grad.db.aligned[i] - a[i]);
+      }
+      if (error > 1e-9) {
+        printf("Enzyme total absolute error (second arg): %f\n", error);
+      }
     }
-    free(edot_grad.descriptor->aligned);
-    free(edot_grad.descriptor);
+    free(edot_grad.da.aligned);
+    free(edot_grad.db.aligned);
   }
 
   printf("Number of runs: %d (%d warmup run(s))\n", NUM_RUNS, 1);

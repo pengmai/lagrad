@@ -6,7 +6,7 @@ from typing import List, Literal
 
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
-TENSOR_PREPROCESS = ["-convert-elementwise-to-linalg"]
+TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
     "-tensor-constant-bufferize",
     "-linalg-bufferize",

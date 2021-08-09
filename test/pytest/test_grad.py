@@ -16,6 +16,11 @@ def test_quadratic():
     assert extract_scalar(output.decode("utf-8")) == 3.4
 
 
+def test_logistic():
+    output = compile_pipeline(f"{MLIR_FILES}/logistic.mlir", mode="grad")
+    print(output.decode("utf-8"))
+
+
 def test_dot():
     output = compile_pipeline(f"{MLIR_FILES}/dot.mlir", mode="grad")
     assert extract_1d(output.decode("utf-8")) == [-5.0, 3.4, -10.2, 3.33]

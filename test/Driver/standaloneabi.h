@@ -55,15 +55,21 @@ void print_2d(float *arr, size_t m, size_t n) {
   printf("[");
   for (size_t i = 0; i < m; i++)
   {
+    if (i != 0) {
+      printf(" ");
+    }
     printf("[");
     for (size_t j = 0; j < n; j++)
     {
       printf("%f", arr[i * n + j]);
-      if (i != n - 1) {
+      if (j != n - 1) {
         printf(", ");
       }
     }
-    printf("]\n");
+    printf("]");
+    if (i != m - 1) {
+      printf("\n");
+    }
   }
   printf("]\n");
 }
