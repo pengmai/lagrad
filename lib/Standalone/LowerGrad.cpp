@@ -305,6 +305,46 @@ private:
                   });
               vjp_value = outerProductOp.getResult(0);
             }
+          } else if (opName == "linalg.matmul") {
+            if (op_index > 1) {
+              continue;
+            }
+            Value zero = env[operand]
+                             ? env[operand]
+                             : getZero(operand.getLoc(), operand, rewriter);
+            SmallVector<AffineMap, 3> indexingMaps(
+                op->getNumOperands(), rewriter.getMultiDimIdentityMap(3));
+            if (op_index == 0) {
+              indexingMaps[0] = indexingMaps[0].getSubMap({0, 1});
+              indexingMaps[1] = indexingMaps[1].getSubMap({2, 1});
+              indexingMaps[2] = indexingMaps[2].getSubMap({0, 2});
+            } else {
+              indexingMaps[0] = indexingMaps[0].getSubMap({1, 0});
+              indexingMaps[1] = indexingMaps[1].getSubMap({1, 2});
+              indexingMaps[2] = indexingMaps[2].getSubMap({0, 2});
+            }
+            SmallVector<StringRef, 6> iteratorTypes(
+                {getParallelIteratorTypeName(), getReductionIteratorTypeName(),
+                 getParallelIteratorTypeName()});
+            SmallVector<Value> inputs(2);
+            if (op_index == 0) {
+              inputs[0] = vjp_value;
+              inputs[1] = op->getOperand(1);
+            } else {
+              inputs[0] = op->getOperand(0);
+              inputs[1] = vjp_value;
+            }
+            auto matmulOp = rewriter.create<linalg::GenericOp>(
+                operand.getLoc(), operand.getType(), inputs, ValueRange({zero}),
+                indexingMaps, iteratorTypes,
+                [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                  Value mul_res = builder.create<mlir::MulFOp>(
+                      loc, regionArgs[0], regionArgs[1]);
+                  Value add_res =
+                      builder.create<mlir::AddFOp>(loc, regionArgs[2], mul_res);
+                  builder.create<linalg::YieldOp>(loc, add_res);
+                });
+            vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
             // TODO: This only supports 0d tensors
             op->emitError("differentiating tensor.extract not yet supported");
