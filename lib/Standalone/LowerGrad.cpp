@@ -210,6 +210,8 @@ private:
                   /*inputs=*/ValueRange({vjp_value, op->getOperand(1)}),
                   /*outputs=*/ValueRange({operand}), indexingMaps,
                   iteratorTypes,
+                  /*doc=*/"Vector-vector outer product",
+                  /*library call=*/"souter",
                   [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                     Value mul_res = builder.create<mlir::MulFOp>(
                         loc, regionArgs[0], regionArgs[1]);
@@ -243,6 +245,8 @@ private:
                   /*outputs=*/ValueRange({zero}),
                   /*indexingMaps=*/indexingMaps,
                   /*iteratorTypes=*/iteratorTypes,
+                  /*doc=*/"Vector-Matrix multiplication",
+                  /*library call=*/"svecmat",
                   [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                     auto mul_res = builder.create<mlir::MulFOp>(
                         loc, regionArgs[0], regionArgs[1]);
