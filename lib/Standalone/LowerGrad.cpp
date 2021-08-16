@@ -215,8 +215,24 @@ private:
                   });
               vjp_value = adjoint.getResult(0);
             } else {
-              // auto inputs = Valuerange({vjp_value,})
-              // Not yet implemented
+              auto inputs = ValueRange({op->getOperand(0), vjp_value});
+              auto outputs = ValueRange({output});
+              indexing_maps[0] = genericOp.getIndexingMap(0);
+              indexing_maps[1] = genericOp.getIndexingMap(2);
+              indexing_maps[2] = genericOp.getIndexingMap(1);
+              auto adjoint = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(), /*resultTensorType=*/operand.getType(),
+                  /*inputs=*/inputs, /*outputs=*/outputs,
+                  /*indexing_maps=*/indexing_maps,
+                  /*iterator_types=*/iterator_types,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    Value mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    Value add_res = builder.create<mlir::AddFOp>(loc, mul_res,
+                                                                 regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, add_res);
+                  });
+              vjp_value = adjoint.getResult(0);
             }
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
