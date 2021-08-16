@@ -20,7 +20,7 @@ COMPILE="llc -filetype=obj"
 # llc -filetype=obj "$TMP/postematvec.ll" > "$TMP/ematvec.o"
 
 # For debugging
-$BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize $BUFFERIZE -linalg-tile=linalg-tile-sizes=64,1 -convert-linalg-to-loops
+# $BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize $BUFFERIZE -convert-linalg-to-loops
 
 # $BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize -convert-elementwise-to-linalg $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT > $TMP/mmatvec.ll
 $BIN/standalone-opt "$KERNELS/matvec.mlir" -take-grads -canonicalize $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatvec.o

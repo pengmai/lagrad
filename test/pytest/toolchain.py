@@ -125,3 +125,39 @@ def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
         [exe_file], env={"DYLD_LIBRARY_PATH": LIB}, capture_output=True
     )
     return exe_p.stdout
+
+
+def jit(filename: str) -> str:
+    """
+    Execute the given MLIR file through MLIR's JIT, first generalizing any named
+    linalg ops to linalg.generic.
+    """
+    with open(filename, "rb") as f:
+        contents = f.read()
+    # print(
+    #     "\n",
+    #     run_opt(
+    #         contents, ["-linalg-generalize-named-ops", "-take-grads", "-canonicalize"]
+    #     ).decode("utf-8"),
+    # )
+    dialect_ir = run_opt(
+        contents,
+        [
+            "-linalg-generalize-named-ops",
+            "-take-grads",
+            "-canonicalize",
+            "-convert-elementwise-to-linalg",
+        ]
+        + BUFFERIZE
+        + LOWERING,
+    )
+    try:
+        runner = subprocess.run(
+            ["mlir-cpu-runner", "-entry-point-result=void", f"-shared-libs={LIBS}"],
+            input=dialect_ir,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise Exception(e.stderr.decode("utf-8"))
+    return runner.stdout.decode("utf-8")

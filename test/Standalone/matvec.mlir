@@ -9,22 +9,22 @@ func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
   return %final : tensor<3xf32>
 }
 
-#map0 = affine_map<(d0, d1) -> (d0)>
-#map1 = affine_map<(d0, d1) -> (d1)>
-#map2 = affine_map<(d0, d1) -> (d0, d1)>
-func @mygrad(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3x4xf32> {
-  %grad_signal = constant dense<[1.1, -1.2, 1.0]> : tensor<3xf32>
-  %output = constant dense<0.0> : tensor<3x4xf32>
-  %res = linalg.generic
-    {indexing_maps = [#map0, #map1, #map2], iterator_types = ["parallel", "parallel"]}
-    ins(%grad_signal, %arg1 : tensor<3xf32>, tensor<4xf32>)
-    outs(%output : tensor<3x4xf32>) {
-  ^bb0(%arg2 : f32, %arg3 : f32, %arg4 : f32):
-    %0 = mulf %arg2, %arg3 : f32
-    linalg.yield %0 : f32
-  } -> tensor<3x4xf32>
-  return %res : tensor<3x4xf32>
-}
+// #map0 = affine_map<(d0, d1) -> (d0)>
+// #map1 = affine_map<(d0, d1) -> (d1)>
+// #map2 = affine_map<(d0, d1) -> (d0, d1)>
+// func @mygrad(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3x4xf32> {
+//   %grad_signal = constant dense<[1.1, -1.2, 1.0]> : tensor<3xf32>
+//   %output = constant dense<0.0> : tensor<3x4xf32>
+//   %res = linalg.generic
+//     {indexing_maps = [#map0, #map1, #map2], iterator_types = ["parallel", "parallel"]}
+//     ins(%grad_signal, %arg1 : tensor<3xf32>, tensor<4xf32>)
+//     outs(%output : tensor<3x4xf32>) {
+//   ^bb0(%arg2 : f32, %arg3 : f32, %arg4 : f32):
+//     %0 = mulf %arg2, %arg3 : f32
+//     linalg.yield %0 : f32
+//   } -> tensor<3x4xf32>
+//   return %res : tensor<3x4xf32>
+// }
 
 func @main() {
   %M = constant dense<[

@@ -1,7 +1,7 @@
 #include "standaloneabi.h"
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <math.h>
 #include <sys/time.h>
 
 typedef struct {
@@ -12,12 +12,12 @@ typedef struct {
 extern Descriptor1D grad_matvec(/*M=*/float *, float *, int64_t, int64_t,
                                 int64_t, int64_t, int64_t, /*x=*/float *,
                                 float *, int64_t, int64_t, int64_t);
-extern TupleResult enzyme_matvec(/*M=*/float *, float *, int64_t, int64_t,
-                                 int64_t, int64_t, int64_t, /*dM=*/float *,
-                                 float *, int64_t, int64_t, int64_t, int64_t,
-                                 int64_t, /*x=*/float *, float *, int64_t,
-                                 int64_t, int64_t, /*dx=*/float *, float *,
-                                 int64_t, int64_t, int64_t);
+// extern TupleResult enzyme_matvec(/*M=*/float *, float *, int64_t, int64_t,
+//                                  int64_t, int64_t, int64_t, /*dM=*/float *,
+//                                  float *, int64_t, int64_t, int64_t, int64_t,
+//                                  int64_t, /*x=*/float *, float *, int64_t,
+//                                  int64_t, int64_t, /*dx=*/float *, float *,
+//                                  int64_t, int64_t, int64_t);
 
 void checkFirstArg(float *da, float *x, size_t m, size_t n) {
   float total_err = 0;
@@ -51,8 +51,10 @@ int main() {
   const size_t TOTAL = NUM_RUNS + NUM_WARMUPS;
   const size_t m = 512;
   const size_t n = 1024;
-  float M[m * n];
-  float x[n];
+  float *M = (float *)malloc(m * n * sizeof(float));
+  // float M[m * n];
+  // float x[n];
+  float *x = (float *)malloc(n * sizeof(float));
   // random_init_2d(M, m, n);
   for (size_t i = 0; i < m; i++) {
     for (size_t j = 0; j < n; j++) {
@@ -74,7 +76,7 @@ int main() {
     gettimeofday(&stop, NULL);
     grad_results[i] = timediff(start, stop);
 
-    // checkFirstArg(res.first.aligned, x, m, n);
+    // checkFirstArg(res.aligned, x, m, n);
     checkSecondArg(res.aligned, M, m, n);
     // print_farr(res.aligned, 10);
     free(res.aligned);
@@ -118,6 +120,8 @@ int main() {
 
   printf("Number of runs: %lu (%lu warmup runs)\n", NUM_RUNS, NUM_WARMUPS);
   printf("Mean grad result: %f\n", grad_mean / NUM_RUNS);
+  free(M);
+  free(x);
   // printf("Mean enzyme result: %f\n", enzyme_mean / NUM_RUNS);
   // printf("Relative speedup: %f\n", enzyme_mean / grad_mean);
 }

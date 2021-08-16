@@ -30,6 +30,7 @@ public:
         SymbolRefAttr::get(funcOp.getName(), funcOp.getContext()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
     rewriter.eraseOp(op);
+    // llvm::outs() << funcOp << "\n";
     return success();
   }
 
@@ -175,6 +176,48 @@ private:
                    "math.exp op did not have exactly 1 result");
             vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
                                                       op->getResult(0));
+          } else if (opName == "linalg.generic") {
+            auto genericOp = dyn_cast<linalg::GenericOp>(op);
+            if (op_index > (int)genericOp.getNumInputs() - 1)
+              continue;
+
+            auto numIterators = genericOp.iterator_types().size();
+            SmallVector<AffineMap, 6> indexing_maps(
+                op->getNumOperands(),
+                rewriter.getMultiDimIdentityMap(numIterators));
+            SmallVector<StringRef, 6> iterator_types(
+                numIterators, getParallelIteratorTypeName());
+
+            Value output = env[operand]
+                               ? env[operand]
+                               : getZero(operand.getLoc(), operand, rewriter);
+            assert(genericOp.getNumInputs() <= 2 &&
+                   "support for more ops than 2 not yet implemented");
+            auto outputShape = output.getType().dyn_cast<ShapedType>();
+            assert(outputShape.hasRank() && "output must be a ranked type");
+            if (op_index == 0) {
+              auto inputs = ValueRange({vjp_value, op->getOperand(1)});
+              auto outputs = ValueRange({output});
+              indexing_maps[0] = genericOp.getIndexingMap(2);
+              indexing_maps[1] = genericOp.getIndexingMap(1);
+              indexing_maps[2] = genericOp.getIndexingMap(0);
+              auto adjoint = rewriter.create<linalg::GenericOp>(
+                  operand.getLoc(), /*resultTensorType=*/operand.getType(),
+                  /*inputs=*/inputs, /*outputs=*/outputs,
+                  /*indexing_maps=*/indexing_maps,
+                  /*iterator_types=*/iterator_types,
+                  [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                    Value mul_res = builder.create<mlir::MulFOp>(
+                        loc, regionArgs[0], regionArgs[1]);
+                    Value add_res = builder.create<mlir::AddFOp>(loc, mul_res,
+                                                                 regionArgs[2]);
+                    builder.create<linalg::YieldOp>(loc, add_res);
+                  });
+              vjp_value = adjoint.getResult(0);
+            } else {
+              // auto inputs = Valuerange({vjp_value,})
+              // Not yet implemented
+            }
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
               continue;

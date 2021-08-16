@@ -18,13 +18,13 @@ COMPILE="llc -filetype=obj"
 # llc -filetype=obj "$TMP/postematvec.ll" > "$TMP/ematvec.o"
 
 # For debugging
-# $BIN/standalone-opt "$KERNELS/matmul.mlir" #-take-grads -canonicalize $BUFFERIZE -convert-linalg-to-loops
+$BIN/standalone-opt "$KERNELS/matmul.mlir" -take-grads -linalg-generalize-named-ops -canonicalize
 
-$BIN/standalone-opt "$KERNELS/matmul.mlir" -take-grads -canonicalize $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatmul.o
-# opt -O3 $tmp/mmatvec.ll -o $tmp/mmatvec.ll
-# clang -c -O3 $TMP/mmatvec.ll -o $TMP/mmatvec.o
-# $COMPILE $TMP/mmatvec.ll -o $TMP/mmatvec.o
+# $BIN/standalone-opt "$KERNELS/matmul.mlir" -take-grads -canonicalize $BUFFERIZE $AFFINE_OPTS $LOWERING | $EXPORT | $COMPILE > $TMP/mmatmul.o
+# # opt -O3 $tmp/mmatvec.ll -o $tmp/mmatvec.ll
+# # clang -c -O3 $TMP/mmatvec.ll -o $TMP/mmatvec.o
+# # $COMPILE $TMP/mmatvec.ll -o $TMP/mmatvec.o
 
-gcc -c $DRIVERS/matmul.c -o $TMP/matmul.o
-gcc $TMP/matmul.o $TMP/mmatmul.o -o $TMP/matmul.out
-$TMP/matmul.out
+# gcc -c $DRIVERS/matmul.c -o $TMP/matmul.o
+# gcc $TMP/matmul.o $TMP/mmatmul.o -o $TMP/matmul.out
+# $TMP/matmul.out

@@ -1,5 +1,5 @@
 // Minimal working example of a dot product.
-func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
+func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
 func @dot(%arg0 : tensor<4xf32>, %arg1 : tensor<4xf32>) -> tensor<f32> {
   %res = constant dense<0.0> : tensor<f32> // %res is used only for the shape information.
@@ -15,8 +15,7 @@ func @main() {
   %df = standalone.grad %f : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>, (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
   %val = call_indirect %df(%A, %B) : (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
 
-  %res = tensor_to_memref %val : memref<4xf32>
-  %U = memref_cast %res : memref<4xf32> to memref<*xf32>
-  call @print_memref_f32(%U) : (memref<*xf32>) -> ()
+  %U = tensor.cast %val : tensor<4xf32> to tensor<*xf32>
+  call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
   return
 }
