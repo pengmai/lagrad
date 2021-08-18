@@ -5,6 +5,7 @@
 // #include "mlir/Dialect"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
@@ -17,7 +18,7 @@ using namespace mlir;
 // Taken from
 // https://github.com/llvm/llvm-project/commit/53a0d45db6d0f33dfbb724c99ce2560ae25473c2
 static bool isElementwiseMappableOpOnRankedTensors(Operation *op) {
-  if (!op->hasTrait<OpTrait::ElementwiseMappable>())
+  if (!OpTrait::hasElementwiseMappableTraits(op))
     return false;
 
   // TODO: The conversion pattern can be made to work for `any_of` here, but
@@ -30,7 +31,7 @@ namespace {
 class ElementwiseToAffineLowering : public RewritePattern {
 public:
   explicit ElementwiseToAffineLowering(MLIRContext *context)
-      : RewritePattern(/*benefit=*/1, MatchAnyOpTypeTag()) {}
+      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context) {}
 
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
@@ -45,7 +46,7 @@ public:
       return failure();
     }
 
-    Value destination = rewriter.create<mlir::AllocOp>(
+    Value destination = rewriter.create<mlir::memref::AllocOp>(
         op->getLoc(),
         MemRefType::get(rankedType.getShape(), rankedType.getElementType()));
     rewriter.create<mlir::AffineForOp>(
@@ -71,7 +72,7 @@ public:
           builder.create<mlir::AffineYieldOp>(loc);
         });
     Value result =
-        rewriter.create<mlir::TensorLoadOp>(op->getLoc(), destination);
+        rewriter.create<mlir::memref::TensorLoadOp>(op->getLoc(), destination);
 
     op->replaceAllUsesWith(llvm::makeArrayRef(result));
     rewriter.eraseOp(op);
@@ -112,7 +113,7 @@ struct ElementwiseToAffineConversionPass
   void runOnOperation() final {
     ConversionTarget target(getContext());
     // target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
-    OwningRewritePatternList patterns;
+    OwningRewritePatternList patterns(&getContext());
     patterns.insert<ElementwiseToAffineLowering>(&getContext());
 
     target.markUnknownOpDynamicallyLegal([](Operation *op) {

@@ -19,8 +19,8 @@ extern DotGradient ddot(float *, float *, int64_t, int64_t, int64_t, float *,
                         float *, int64_t, int64_t, int64_t);
 // extern void denzyme_dot(int, float *, float *, float *, float *);
 
-extern DotGradient enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
-                              float *, float *, int64_t, int64_t, int64_t);
+// extern DotGradient enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
+//                               float *, float *, int64_t, int64_t, int64_t);
 
 int main() {
   const int size = 131072;
@@ -66,34 +66,34 @@ int main() {
     free(dot_grad.db.aligned);
   }
 
-  for (int run = 0; run < NUM_RUNS; run++) {
-    struct timeval start, stop;
+  // for (int run = 0; run < NUM_RUNS; run++) {
+  //   struct timeval start, stop;
 
-    gettimeofday(&start, NULL);
-    DotGradient edot_grad =
-        enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
-    gettimeofday(&stop, NULL);
+  //   gettimeofday(&start, NULL);
+  //   DotGradient edot_grad =
+  //       enzyme_dot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
+  //   gettimeofday(&stop, NULL);
 
-    enzyme_results[run] = timediff(start, stop);
-    if (check_val) {
-      float error = 0;
-      for (int i = 0; i < size; i++) {
-        error += fabs(edot_grad.da.aligned[i] - b[i]);
-      }
-      if (error > 1e-9) {
-        printf("Enzyme total absolute error: %f\n", error);
-      }
-      error = 0;
-      for (size_t i = 0; i < size; i++) {
-        error += fabs(edot_grad.db.aligned[i] - a[i]);
-      }
-      if (error > 1e-9) {
-        printf("Enzyme total absolute error (second arg): %f\n", error);
-      }
-    }
-    free(edot_grad.da.aligned);
-    free(edot_grad.db.aligned);
-  }
+  //   enzyme_results[run] = timediff(start, stop);
+  //   if (check_val) {
+  //     float error = 0;
+  //     for (int i = 0; i < size; i++) {
+  //       error += fabs(edot_grad.da.aligned[i] - b[i]);
+  //     }
+  //     if (error > 1e-9) {
+  //       printf("Enzyme total absolute error: %f\n", error);
+  //     }
+  //     error = 0;
+  //     for (size_t i = 0; i < size; i++) {
+  //       error += fabs(edot_grad.db.aligned[i] - a[i]);
+  //     }
+  //     if (error > 1e-9) {
+  //       printf("Enzyme total absolute error (second arg): %f\n", error);
+  //     }
+  //   }
+  //   free(edot_grad.da.aligned);
+  //   free(edot_grad.db.aligned);
+  // }
 
   printf("Number of runs: %d (%d warmup run(s))\n", NUM_RUNS, 1);
   float grad_res = 0;
@@ -102,12 +102,12 @@ int main() {
   }
   printf("Mean grad result: %f\n", grad_res / (NUM_RUNS - 1));
 
-  float enzy_res = 0;
-  for (int i = 1; i < NUM_RUNS; i++) {
-    enzy_res += enzyme_results[i];
-  }
-  printf("Mean enzyme result: %f\n", enzy_res / (NUM_RUNS - 1));
-  printf("Speedup: %f\n", enzy_res / grad_res);
+  // float enzy_res = 0;
+  // for (int i = 1; i < NUM_RUNS; i++) {
+  //   enzy_res += enzyme_results[i];
+  // }
+  // printf("Mean enzyme result: %f\n", enzy_res / (NUM_RUNS - 1));
+  // printf("Speedup: %f\n", enzy_res / grad_res);
 
   free(a);
   free(b);

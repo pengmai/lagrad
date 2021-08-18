@@ -11,9 +11,10 @@ OBJ_FILE="$TMP_DIR/$FILE.o"
 HIGH_LEVEL_OPTS="-canonicalize -convert-elementwise-to-affine -canonicalize"
 TENSOR_PREPROCESSING=""
 BUFFERIZE="-tensor-constant-bufferize -linalg-bufferize -canonicalize -func-bufferize -tensor-constant-bufferize -tensor-bufferize"
-LOWERING="-convert-linalg-to-loops -finalizing-bufferize -buffer-deallocation -convert-scf-to-std"
+LOWERING="-convert-linalg-to-affine-loops -finalizing-bufferize -buffer-deallocation -lower-affine -convert-scf-to-std"
+TO_LLVM="-convert-memref-to-llvm -convert-std-to-llvm -llvm-legalize-for-export"
 # LOWERING="-convert-linalg-to-loops -finalizing-bufferize -promote-buffers-to-stack=max-alloc-size-in-bytes=10000000 -buffer-deallocation"
-OPT_ARGS="$TENSOR_PREPROCESSING $BUFFERIZE $LOWERING"
+OPT_ARGS="$TENSOR_PREPROCESSING $BUFFERIZE $LOWERING $TO_LLVM"
 
 # Compile the Enzyme object file
 ENZYME_DYLIB=/Users/Appleliu/llvm-project/mlir/examples/playground/enzyme_test/LLVMEnzyme-12.dylib
@@ -25,15 +26,17 @@ ENZYME_OPT_ARGS="-convert-linalg-to-loops -convert-standalone-to-llvm"
 # llc -filetype=obj < "$TMP_DIR/postenzyme.ll" > "$TMP_DIR/postenzyme.o"
 
 # For debugging
-# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads $HIGH_LEVEL_OPTS
+# LINALG_OPTS="-linalg-fuse-elementwise-ops -linalg-inline-scalar-operands"
+# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -linalg-generalize-named-ops -take-grads -canonicalize $HIGH_LEVEL_OPTS $LINALG_OPTS #$TENSOR_PREPROCESSING $BUFFERIZE #$LOWERING $TO_LLVM
 
 # For execution
-$BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads $HIGH_LEVEL_OPTS $OPT_ARGS -convert-linalg-to-llvm --llvm-legalize-for-export | mlir-translate -mlir-to-llvmir > "$LLVM_FILE"
+$BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -linalg-generalize-named-ops -take-grads $HIGH_LEVEL_OPTS $OPT_ARGS | mlir-translate -mlir-to-llvmir > "$LLVM_FILE"
 # opt "$LLVM_FILE" -O3 -o "$LLVM_FILE" -S
 llc -filetype=obj < "$LLVM_FILE" > "$OBJ_FILE"
 
 CC=gcc
 "$CC" -c "$DRIVERS/$FILE.c" -o "$TMP_DIR/driver.o"
-"$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" "$TMP_DIR/postenzyme.o" -o "$TMP_DIR/$FILE.out"
+# "$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" "$TMP_DIR/postenzyme.o" -o "$TMP_DIR/$FILE.out"
+"$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" -o "$TMP_DIR/$FILE.out"
 
 "$TMP_DIR/$FILE.out"
