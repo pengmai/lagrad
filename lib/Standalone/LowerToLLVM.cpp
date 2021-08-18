@@ -3,6 +3,8 @@
 #include "Standalone/StandaloneOps.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
 #include "mlir/Dialect/Affine/IR/AffineOpsDialect.h.inc"
@@ -121,7 +123,7 @@ private:
         LLVM::Linkage::External, "enzyme_const", nullptr);
     // rewriter.setInsertionPointAfter(op);
     // rewriter.create<LLVM::AddressOfOp>(op->getLoc(), globalOp);
-    return SymbolRefAttr::get("enzyme_const", context);
+    return SymbolRefAttr::get(context, "enzyme_const");
   }
 
   static FlatSymbolRefAttr getOrInsertAutodiffDecl(PatternRewriter &rewriter,
@@ -129,7 +131,7 @@ private:
     ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
     auto *context = moduleOp.getContext();
     if (moduleOp.lookupSymbol<LLVM::LLVMFuncOp>("__enzyme_autodiff")) {
-      return SymbolRefAttr::get("__enzyme_autodiff", context);
+      return SymbolRefAttr::get(context, "__enzyme_autodiff");
     }
 
     // Create the function declaration for __enzyme_autodiff
@@ -147,7 +149,7 @@ private:
     rewriter.setInsertionPointToStart(moduleOp.getBody());
     rewriter.create<LLVM::LLVMFuncOp>(moduleOp.getLoc(), "__enzyme_autodiff",
                                       llvmFnType);
-    return SymbolRefAttr::get("__enzyme_autodiff", context);
+    return SymbolRefAttr::get(context, "__enzyme_autodiff");
   }
 };
 } // end anonymous namespace
@@ -165,13 +167,13 @@ struct StandaloneToLLVMLoweringPass
 
 void StandaloneToLLVMLoweringPass::runOnOperation() {
   LLVMConversionTarget target(getContext());
-  target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target.addLegalOp<ModuleOp>();
 
   LLVMTypeConverter typeConverter(&getContext());
 
-  OwningRewritePatternList patterns;
-  populateAffineToStdConversionPatterns(patterns, &getContext());
-  populateLoopToStdConversionPatterns(patterns, &getContext());
+  OwningRewritePatternList patterns(&getContext());
+  populateAffineToStdConversionPatterns(patterns);
+  populateLoopToStdConversionPatterns(patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
 
   patterns.insert<DiffOpLowering>(&getContext());

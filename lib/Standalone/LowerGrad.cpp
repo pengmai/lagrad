@@ -26,7 +26,7 @@ public:
 
     auto funcVal = rewriter.create<mlir::ConstantOp>(
         op->getLoc(), funcOp.getType(),
-        SymbolRefAttr::get(funcOp.getName(), funcOp.getContext()));
+        SymbolRefAttr::get(funcOp.getContext(), funcOp.getName()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
     rewriter.eraseOp(op);
     return success();
@@ -154,13 +154,13 @@ private:
             assert(operand.getType().isa<ShapedType>() &&
                    "dot input arg was not a shaped type");
             auto opType = operand.getType().dyn_cast<ShapedType>();
-            Value memref = rewriter.create<mlir::AllocaOp>(
+            Value memref = rewriter.create<mlir::memref::AllocaOp>(
                 operand.getLoc(),
                 MemRefType::get(opType.getShape(), opType.getElementType()));
             rewriter.create<linalg::FillOp>(operand.getLoc(), memref,
                                             broadcast_value);
             vjp_value =
-                rewriter.create<mlir::TensorLoadOp>(operand.getLoc(), memref);
+                rewriter.create<mlir::memref::TensorLoadOp>(operand.getLoc(), memref);
             // The gradient is the other argument.
             vjp_value = rewriter.create<mlir::MulFOp>(
                 operand.getLoc(), vjp_value, op->getOperand(1 - op_index));
@@ -235,6 +235,7 @@ namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<mlir::memref::MemRefDialect>();
     addLegalOp<FuncOp>();
   }
 };
@@ -250,11 +251,11 @@ struct GradConversionPass
 
 void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
-  target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target.addLegalOp<ModuleOp>();
   target.addLegalOp<linalg::DotOp, linalg::YieldOp, linalg::FillOp>();
   target.addLegalOp<tensor::ExtractOp>();
 
-  OwningRewritePatternList patterns;
+  OwningRewritePatternList patterns(&getContext());
   patterns.insert<GradOpLowering>(&getContext());
 
   auto mod = getOperation();
