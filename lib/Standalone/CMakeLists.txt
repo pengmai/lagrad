@@ -4,6 +4,8 @@ add_mlir_dialect_library(MLIRStandalone
         StandaloneTransforms.cpp
         LowerToLLVM.cpp
         LowerGrad.cpp
+        TensorConstantFolding.cpp
+        ElementwiseToAffine.cpp
 
         ADDITIONAL_HEADER_DIRS
         ${PROJECT_SOURCE_DIR}/include/Standalone

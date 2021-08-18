@@ -70,7 +70,7 @@ public:
 
           // Shadow pointer has to follow the aligned pointer
           auto shadow = *(++it);
-          assert(shadow.getType().dyn_cast<MemRefType>() &&
+          assert(shadow && shadow.getType().isa<MemRefType>() &&
                  "Shadow argument must be a Memref");
           auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
               shadow.getLoc(), llvmF32Ptr, shadow, rewriter.getI64ArrayAttr(1));
