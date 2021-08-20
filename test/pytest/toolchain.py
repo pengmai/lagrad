@@ -15,11 +15,12 @@ BUFFERIZE = [
     # According to the discussion -func-bufferize should be last, but for some
     # reason in this case, -tensor-bufferize must be last.
     "-tensor-bufferize",
+    "-finalizing-bufferize"
 ]
 LOWERING = [
-    "-convert-linalg-to-affine-loops",
+    "-convert-linalg-to-loops",
     "-convert-scf-to-std",
-    "-convert-standalone-to-llvm",
+    "-convert-memref-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
     "-llvm-legalize-for-export",
@@ -127,13 +128,17 @@ def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     return exe_p.stdout
 
 
-def jit(filename: str) -> str:
+def jit_file(filename: str) -> str:
+    with open(filename, "rb") as f:
+        contents = f.read()
+    return jit(contents)
+
+
+def jit(contents: bytes, args=None) -> str:
     """
     Execute the given MLIR file through MLIR's JIT, first generalizing any named
     linalg ops to linalg.generic.
     """
-    with open(filename, "rb") as f:
-        contents = f.read()
     # print(
     #     "\n",
     #     run_opt(
@@ -142,7 +147,8 @@ def jit(filename: str) -> str:
     # )
     dialect_ir = run_opt(
         contents,
-        [
+        args
+        or [
             "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",

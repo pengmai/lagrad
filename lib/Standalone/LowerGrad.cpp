@@ -171,7 +171,7 @@ private:
             }
           } else if (opName == "std.negf") {
             vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
-          } else if (opName == "std.exp") {
+          } else if (opName == "math.exp") {
             assert(op->getNumResults() == 1 &&
                    "math.exp op did not have exactly 1 result");
             vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
@@ -219,26 +219,32 @@ private:
                   Value mul_res = builder.create<mlir::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
                   Value add_res =
-                      builder.create<mlir::AddFOp>(loc, mul_res,
-                      regionArgs[2]);
-                  builder.create<linalg::YieldOp>(loc, mul_res);
+                      builder.create<mlir::AddFOp>(loc, mul_res, regionArgs[2]);
+                  builder.create<linalg::YieldOp>(loc, add_res);
                 });
             vjp_value = adjoint.getResult(0);
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
               continue;
 
-            Value broadcast_value =
-                rewriter.create<tensor::ExtractOp>(operand.getLoc(), vjp_value);
-
-            assert(operand.getType().isa<ShapedType>() &&
-                   "dot input arg was not a shaped type");
-            auto opType = operand.getType().dyn_cast<ShapedType>();
-            // The gradient is the other argument.
-            vjp_value =
-                broadcast(operand.getLoc(), opType, broadcast_value, rewriter);
-            vjp_value = rewriter.create<mlir::MulFOp>(
-                operand.getLoc(), op->getOperand(1 - op_index), vjp_value);
+            SmallVector<AffineMap, 6> indexing_maps(
+                op->getNumOperands(), rewriter.getMultiDimIdentityMap(1));
+            indexing_maps[0] = indexing_maps[0].getSubMap({});
+            indexing_maps[1] = indexing_maps[1].getSubMap({0});
+            indexing_maps[2] = indexing_maps[2].getSubMap({0});
+            auto adjoint = rewriter.create<linalg::GenericOp>(
+                operand.getLoc(), /*resultTensorTypes=*/operand.getType(),
+                /*inputs=*/
+                ValueRange({vjp_value, op->getOperand(1 - op_index)}),
+                /*outputs=*/ValueRange({operand}), indexing_maps,
+                /*iteratorTypes=*/
+                SmallVector<StringRef>({getParallelIteratorTypeName()}),
+                [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                  Value mul_res = builder.create<mlir::MulFOp>(
+                      loc, regionArgs[0], regionArgs[1]);
+                  builder.create<linalg::YieldOp>(loc, mul_res);
+                });
+            vjp_value = adjoint.getResult(0);
           } else if (opName == "linalg.matvec") {
             if (op_index > 1)
               continue;
