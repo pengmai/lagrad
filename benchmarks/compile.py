@@ -1,7 +1,7 @@
 import subprocess
 import os.path as osp
 
-DRIVER_INCLUDES = osp.join(osp.dirname(__file__), "drivers", "templates")
+DRIVER_INCLUDES = osp.join(osp.dirname(__file__), "C", "templates")
 BIN = osp.join(osp.dirname(__file__), "..", "build", "bin")
 TMP = osp.join(osp.dirname(__file__), "tmp")
 BUFFERIZE = [

@@ -8,6 +8,7 @@
 #define NUM_RUNS {{ num_runs }}
 #define N {{ n }}
 
+// {% if application == 'dot' %}
 // {% if args == [0] or args == [1] %}
 // extern float *c_dot(float*, float*, int64_t);
 extern F32Descriptor1D grad_dot(float *, float *, int64_t, int64_t, int64_t,
@@ -39,27 +40,34 @@ void check_second_arg(F32Descriptor1D db, float *a) {
   }
 }
 
+// {% endif %}
+
 int main() {
+  // {% if application == 'dot' %}
   unsigned long grad_naive_results[NUM_WARMUPS + NUM_RUNS];
   float *a = (float *)malloc(N * sizeof(float));
   float *b = (float *)malloc(N * sizeof(float));
   random_init(a, N);
   random_init(b, N);
+  // {% endif %}
 
   float *deadbeef = (float *)0xdeadbeef;
   for (size_t run = 0; run < NUM_WARMUPS + NUM_RUNS; run++) {
     struct timeval start, stop;
 
     gettimeofday(&start, NULL);
+    // {% if application == 'dot' %}
     // {% if args == [0] or args == [1] %}
     F32Descriptor1D dot_grad =
         grad_dot(deadbeef, a, 0, N, 1, deadbeef, b, 0, N, 1);
     // {% elif args == [0, 1] %}
     DotGradient dot_grad = grad_dot(deadbeef, a, 0, N, 1, deadbeef, b, 0, N, 1);
     // {% endif %}
+    // {% endif %}
     gettimeofday(&stop, NULL);
 
     grad_naive_results[run] = timediff(start, stop);
+    // {% if application == 'dot' %}
     // {% if args == [0] %}
     check_first_arg(dot_grad, b);
     free(dot_grad.aligned);
@@ -72,7 +80,7 @@ int main() {
     free(dot_grad.da.aligned);
     free(dot_grad.db.aligned);
     // {% endif %}
-    /* code */
+    // {% endif %}
   }
 
   printf("grad_naive: ");

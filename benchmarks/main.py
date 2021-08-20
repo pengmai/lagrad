@@ -6,7 +6,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(
-    loader=PackageLoader("drivers"), autoescape=select_autoescape()
+    loader=PackageLoader("C"), autoescape=select_autoescape()
 )
 
 
@@ -27,23 +27,35 @@ def parse_results(results: str):
 
 def main(args):
     N = 131072
-    ARGS = [0, 1]
+    APPLICATION = "dot"
+    ARGS = [0]
     NUM_WARMUPS = 10
     NUM_RUNS = 100
 
-    kernel_template = mlir_env.get_template("dot.mlir")
-    driver_template = driver_env.get_template("dot_driver.c")
-    compile_mlir(kernel_template.render(n=N, args=ARGS).encode("utf-8"), "dot_kernel.o")
+    kernel_template = mlir_env.get_template(f"{APPLICATION}.mlir")
+    driver_template = driver_env.get_template("driver.c")
+    compile_mlir(
+        kernel_template.render(n=N, args=ARGS).encode("utf-8"),
+        f"{APPLICATION}_kernel.o",
+    )
     compile_c(
         driver_template.render(
-            num_warmups=NUM_WARMUPS, num_runs=NUM_RUNS, n=N, args=ARGS
+            application=APPLICATION,
+            num_warmups=NUM_WARMUPS,
+            num_runs=NUM_RUNS,
+            n=N,
+            args=ARGS,
         ).encode("utf-8"),
-        "dot_driver.o",
+        f"{APPLICATION}_driver.o",
     )
-    stdout = link_and_run(["dot_kernel.o", "dot_driver.o"], "dot_driver.out")
+    stdout = link_and_run(
+        [f"{APPLICATION}_kernel.o", f"{APPLICATION}_driver.o"],
+        f"{APPLICATION}_driver.out",
+    )
     results = parse_results(stdout.decode("utf-8"))
-    # print(results)
-    print("mean:", np.mean(results["grad_naive"]), 'µs')
+
+    for key in results:
+        print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
 
 
 if __name__ == "__main__":
