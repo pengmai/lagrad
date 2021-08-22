@@ -232,6 +232,8 @@ private:
             indexing_maps[0] = indexing_maps[0].getSubMap({});
             indexing_maps[1] = indexing_maps[1].getSubMap({0});
             indexing_maps[2] = indexing_maps[2].getSubMap({0});
+            auto library_call =
+                op_index == 0 ? "sdot_grad_first" : "sdot_grad_second";
             auto adjoint = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*resultTensorTypes=*/operand.getType(),
                 /*inputs=*/
@@ -239,6 +241,8 @@ private:
                 /*outputs=*/ValueRange({operand}), indexing_maps,
                 /*iteratorTypes=*/
                 SmallVector<StringRef>({getParallelIteratorTypeName()}),
+                /*doc=*/"Copy and scalar multiplication",
+                /*library call=*/library_call,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                   Value mul_res = builder.create<mlir::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
