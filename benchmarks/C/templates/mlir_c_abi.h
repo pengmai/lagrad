@@ -34,11 +34,6 @@ typedef struct {
 } DotGradient;
 
 typedef struct {
-  float *da;
-  float *db;
-} RawDotGradient;
-
-typedef struct {
   F32Descriptor2D da;
   F32Descriptor2D db;
 } MatVecGradient;

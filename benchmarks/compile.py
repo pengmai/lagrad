@@ -69,9 +69,11 @@ def compile_mlir(contents, output, lower_type="loops"):
 
 
 def compile_enzyme(contents, output):
+    includes = f"-I{DRIVER_INCLUDES}"
     preenzyme = run_safe(
         [
             CLANG_12,
+            includes,
             "-S",
             "-emit-llvm",
             "-xc",
