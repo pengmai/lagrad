@@ -21,6 +21,14 @@ void random_init_2d(float *arr, size_t m, size_t n) {
   }
 }
 
+void uniform_init_2d(float val, float *arr, size_t m, size_t n) {
+  for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j < n; j++) {
+      arr[i * n + j] = val;
+    }
+  }
+}
+
 void print_ul_arr(unsigned long *arr, size_t n) {
   printf("[");
   for (size_t i = 0; i < n; i++) {

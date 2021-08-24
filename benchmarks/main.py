@@ -8,10 +8,6 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 import matplotlib.pyplot as plt
 
-# import seaborn as sns
-
-# sns.set()
-
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 
@@ -69,12 +65,43 @@ def run_application(config):
         ],
         f"{APPLICATION}_driver.out",
     )
+    # print(stdout.decode("utf-8"))
     results = parse_results(stdout.decode("utf-8"))
 
     return results
 
+
 def run_matmul():
-    pass
+    sizes = list(range(32, 257, 32))
+    raw_results = []
+    for size in tqdm(sizes):
+        config = {
+            "m": size,
+            "n": size,
+            "k": size,
+            "application": "matmul",
+            "args": [0],
+            "num_warmups": 10,
+            "num_runs": 10,
+        }
+        raw_results.append(run_application(config))
+
+    with open("matmul_results.json", "w") as f:
+        json.dump(raw_results, f)
+    # with open("matmul_results.json", "r") as f:
+    #     raw_results = json.load(f)
+    plot_results(
+        raw_results,
+        sizes=sizes,
+        title="(NxN) by (NxN) Matmul Gradient Performance (lower is better)",
+        xlabel="N",
+    )
+
+
+def run_matvec():
+    size = 64
+    config = {}
+
 
 def run_dot():
     sizes = np.array(list(range(1024, 2 ** 20, 4096 * 10)))
@@ -91,6 +118,14 @@ def run_dot():
 
     with open("dot_results.json", "w") as f:
         json.dump(raw_results, f)
+    plot_results(
+        raw_results, sizes=sizes, title="Dot Gradient Performance (lower is better)"
+    )
+
+
+def plot_results(
+    raw_results, sizes=[], title="", xlabel="Size of arrays", ylabel="Runtime (µs)"
+):
     results = {"means": defaultdict(list), "stds": defaultdict(list)}
     # with open("dot_results.json", "r") as f:
     #     raw_results = json.load(f)
@@ -101,25 +136,17 @@ def run_dot():
 
     for method in results["means"]:
         plt.plot(sizes, results["means"][method], label=method)
-    plt.title("Dot Gradient Performance (lower is better)")
-    plt.ylabel("Runtime (µs)")
-    plt.xscale("linear")
-    plt.xlabel("Size of arrays")
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xlabel(xlabel)
     plt.legend()
     plt.show()
 
 
 def main(args):
-    config = {
-        "n": 2 ** 17,
-        "application": "dot",
-        "args": [0],
-        "num_warmups": 10,
-        "num_runs": 50,
-    }
-    results = run_application(config)
-    for key in results:
-        print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
+    run_matmul()
+    # for key in results:
+    #     print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
 
     return
     run_dot()

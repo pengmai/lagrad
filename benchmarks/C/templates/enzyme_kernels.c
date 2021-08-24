@@ -3,6 +3,7 @@
 // #include <stdlib.h>
 
 extern void *malloc(unsigned long);
+extern void free(void *);
 extern float __enzyme_autodiff(void *, ...);
 int enzyme_const;
 
@@ -45,6 +46,48 @@ RawDotGradient enzyme_dot_both(float *a, float *b, int64_t size) {
   __enzyme_autodiff(dot_primal, a, da, b, db, size);
   RawDotGradient result = {da, db};
   return result;
+}
+// {% endif %}
+// {% endif %}
+
+// {% if application == "matmul" %}
+float matmul_primal(float *A, float *B, int64_t M, int64_t N, int64_t K) {
+  float *C = (float *)malloc(M * K * sizeof(float));
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < K; j++) {
+      C[i * K + j] = 0.0;
+    }
+  }
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < K; j++) {
+      for (int k = 0; k < N; k++) {
+        C[i * K + j] += A[i * N + k] * B[k * K + j];
+      }
+    }
+  }
+
+  float sum = 0.0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < K; j++) {
+      sum += C[i * K + j];
+    }
+  }
+
+  free(C);
+  return sum;
+}
+// {% if args == [0] %}
+float *enzyme_matmul_first(float *A, float *B, int64_t M, int64_t N,
+                           int64_t K) {
+  float *dA = (float *)malloc(M * N * sizeof(float));
+  int size_a = M * N;
+  for (int i = 0; i < size_a; i++) {
+    dA[i] = 0.0;
+  }
+
+  __enzyme_autodiff(matmul_primal, A, dA, enzyme_const, B, M, N, K);
+  return dA;
 }
 // {% endif %}
 // {% endif %}
