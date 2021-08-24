@@ -21,6 +21,12 @@ void random_init_2d(float *arr, size_t m, size_t n) {
   }
 }
 
+void uniform_init(float val, float *arr, size_t size) {
+  for (size_t i = 0; i < size; ++i) {
+    arr[i] = val;
+  }
+}
+
 void uniform_init_2d(float val, float *arr, size_t m, size_t n) {
   for (size_t i = 0; i < m; i++) {
     for (size_t j = 0; j < n; j++) {

@@ -60,6 +60,26 @@ RawDotGradient openblas_dot_both(float *a, float *b, int64_t size) {
 }
 // {% endif %}
 
+float *c_matvec_first(float *A, float *x, float *g, int64_t M, int64_t N) {
+  float *dA = (float *)malloc(M * N * sizeof(float));
+  for (size_t i = 0; i < M; i++) {
+    for (size_t j = 0; j < N; j++) {
+      dA[i * N + j] = g[i] * x[j];
+    }
+  }
+  return dA;
+}
+
+float *openblas_matvec_first(float *A, float *x, float *g, int64_t M, int64_t N) {
+  float *dA = (float *)malloc(M * N * sizeof(float));
+  size_t size_a = M * N;
+  for (size_t i = 0; i < size_a; i++) {
+    dA[i] = 0.0;
+  }
+
+  cblas_sger(CblasRowMajor, M, N, 1.0, g, 1, x, 1, dA, M);
+  return dA;
+}
 /**
  * Computes the operation GB^T
  * A: MxN
@@ -96,6 +116,10 @@ void _mlir_ciface_linalg_dot_view{{n}}xf32_view{{n}}xf32_viewf32(F32Descriptor1D
   out->aligned[0] = cblas_sdot(a->size, a->aligned, 1, b->aligned, 1);
 }
 
+void _mlir_ciface_linalg_matvec_view{{m}}x{{n}}xf32_view{{n}}xf32_view{{m}}xf32(F32Descriptor2D *A, F32Descriptor1D *x, F32Descriptor1D *out) {
+  // Don't need this implementation
+}
+
 void _mlir_ciface_linalg_matmul_view{{m}}x{{n}}xf32_view{{n}}x{{k}}xf32_view{{m}}x{{k}}xf32(F32Descriptor2D *A, F32Descriptor2D *B, F32Descriptor2D *out) {
   // Don't need this implementation
 }
@@ -103,6 +127,10 @@ void _mlir_ciface_linalg_matmul_view{{m}}x{{n}}xf32_view{{n}}x{{k}}xf32_view{{m}
 void _mlir_ciface_linalg_copy_viewf32_viewf32(F32Descriptor0D *in,
                                               F32Descriptor0D *out) {
   out->aligned[0] = in->aligned[0];
+}
+
+void _mlir_ciface_linalg_copy_view{{m}}xf32_view{{m}}xf32(F32Descriptor1D *in, F32Descriptor1D *out) {
+  cblas_scopy(out->size, in->aligned, 1, out->aligned, 1);
 }
 
 // For simplicity, this library only works with square matrices. Generating the
@@ -122,6 +150,14 @@ void _mlir_ciface_sdot_grad_second(F32Descriptor0D *g, F32Descriptor1D *a,
                                    F32Descriptor1D *out) {
   cblas_scopy(out->size, a->aligned, 1, out->aligned, 1);
   cblas_sscal(out->size, g->aligned[0], out->aligned, 1);
+}
+
+void _mlir_ciface_souter(F32Descriptor1D *x, F32Descriptor1D *y, F32Descriptor2D *out) {
+  for (size_t i = 0; i < x->size; i++) {
+    for (size_t j = 0; j < y->size; j++) {
+      out->aligned[i * y->size + j] = x->aligned[i] * y->aligned[j];
+    }
+  }
 }
 
 void _mlir_ciface_smatmul_grad_first(F32Descriptor2D *g, F32Descriptor2D *B,

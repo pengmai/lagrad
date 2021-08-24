@@ -99,8 +99,29 @@ def run_matmul():
 
 
 def run_matvec():
-    size = 64
-    config = {}
+    sizes = list(range(256, 1025, 128))
+    raw_results = []
+    for size in tqdm(sizes):
+        config = {
+            "n": size,
+            "m": size,
+            "application": "matvec",
+            "args": [0],
+            "num_warmups": 10,
+            "num_runs": 50,
+        }
+        raw_results.append(run_application(config))
+
+    with open("matvec_results.json", "w") as f:
+        json.dump(raw_results, f)
+    # with open("matvec_results.json", "r") as f:
+    #     raw_results = json.load(f)
+    plot_results(
+        raw_results,
+        sizes=sizes,
+        title="(NxN) by N Matrix-Vector Multiplication Gradient Performance (lower is better)",
+        xlabel="N",
+    )
 
 
 def run_dot():
@@ -144,7 +165,7 @@ def plot_results(
 
 
 def main(args):
-    run_matmul()
+    run_matvec()
     # for key in results:
     #     print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
 
