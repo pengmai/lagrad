@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import os.path as osp
 from compile import compile_c, compile_mlir, compile_enzyme, link_and_run, OPENBLAS_OBJ
 import argparse
 from collections import defaultdict
@@ -7,7 +8,11 @@ from tqdm import tqdm
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 
+sns.set()
+
+RESULTS_DIR = osp.join(osp.dirname(__file__), "results")
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 
@@ -86,15 +91,42 @@ def run_matmul():
         }
         raw_results.append(run_application(config))
 
-    with open("matmul_results.json", "w") as f:
+    with open(f"{RESULTS_DIR}/matmul_first_arg.json", "w") as f:
         json.dump(raw_results, f)
-    # with open("matmul_results.json", "r") as f:
+    # with open(f"{RESULTS_DIR}/matmul_first_arg.json", "r") as f:
     #     raw_results = json.load(f)
     plot_results(
         raw_results,
         sizes=sizes,
         title="(NxN) by (NxN) Matmul Gradient Performance (lower is better)",
         xlabel="N",
+        omit="handwritten_blas",
+    )
+
+
+def run_vecmat():
+    sizes = list(range(256, 1025, 128))
+    raw_results = []
+    for size in tqdm(sizes):
+        config = {
+            "n": size,
+            "m": size,
+            "application": "vecmat",
+            "args": [0],
+            "num_warmups": 10,
+            "num_runs": 50,
+        }
+        raw_results.append(run_application(config))
+    with open(f"{RESULTS_DIR}/vecmat_first_arg.json", "w") as f:
+        json.dump(raw_results, f)
+    # with open(f"{RESULTS_DIR}/vecmat_first_arg.json", "r") as f:
+    #     raw_results = json.load(f)
+    plot_results(
+        raw_results,
+        sizes=sizes,
+        title="N by (NxN) Vector-Matrix Multiplication Gradient Performance (lower is better)",
+        xlabel="N",
+        omit=["handwritten_blas"],
     )
 
 
@@ -112,9 +144,9 @@ def run_matvec():
         }
         raw_results.append(run_application(config))
 
-    with open("matvec_results.json", "w") as f:
+    with open(f"{RESULTS_DIR}/matvec_first_arg.json", "w") as f:
         json.dump(raw_results, f)
-    # with open("matvec_results.json", "r") as f:
+    # with open(f"{RESULTS_DIR}/matvec_first_arg.json", "r") as f:
     #     raw_results = json.load(f)
     plot_results(
         raw_results,
@@ -137,26 +169,34 @@ def run_dot():
         }
         raw_results.append(run_application(config))
 
-    with open("dot_results.json", "w") as f:
+    with open(f"{RESULTS_DIR}/dot_first_arg.json", "w") as f:
         json.dump(raw_results, f)
+    # with open(f"{RESULTS_DIR}/dot_first_arg.json", "r") as f:
+    #     raw_results = json.load(f)
     plot_results(
-        raw_results, sizes=sizes, title="Dot Gradient Performance (lower is better)"
+        raw_results,
+        sizes=sizes,
+        title="N by N Dot Product Gradient Performance (lower is better)",
     )
 
 
 def plot_results(
-    raw_results, sizes=[], title="", xlabel="Size of arrays", ylabel="Runtime (µs)"
+    raw_results,
+    sizes=[],
+    omit=[],
+    title="",
+    xlabel="N",
+    ylabel="Runtime (µs)",
 ):
     results = {"means": defaultdict(list), "stds": defaultdict(list)}
-    # with open("dot_results.json", "r") as f:
-    #     raw_results = json.load(f)
     for i, run in enumerate(raw_results):
         for method in run:
             results["means"][method].append(np.mean(run[method]))
             results["stds"][method].append(np.std(run[method]))
 
-    for method in results["means"]:
-        plt.plot(sizes, results["means"][method], label=method)
+    for method in sorted(results["means"]):
+        if method not in omit:
+            plt.plot(sizes, results["means"][method], label=method)
     plt.title(title)
     plt.ylabel(ylabel)
     plt.xlabel(xlabel)
@@ -165,12 +205,12 @@ def plot_results(
 
 
 def main(args):
+    run_dot()
     run_matvec()
+    run_vecmat()
+    run_matmul()
     # for key in results:
     #     print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
-
-    return
-    run_dot()
 
 
 if __name__ == "__main__":

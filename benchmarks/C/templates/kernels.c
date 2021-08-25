@@ -80,6 +80,26 @@ float *openblas_matvec_first(float *A, float *x, float *g, int64_t M, int64_t N)
   cblas_sger(CblasRowMajor, M, N, 1.0, g, 1, x, 1, dA, M);
   return dA;
 }
+
+float *c_vecmat_first(float *x, float *A, float *g, int64_t M, int64_t N) {
+  float *dx = (float *)malloc(M * sizeof(float));
+  for (size_t i = 0; i < M; i++) {
+    dx[i] = 0.0;
+  }
+  for (size_t i = 0; i < M; i++) {
+    for (size_t j = 0; j < N; j++) {
+      dx[i] += A[i * N + j] * g[i];
+    }
+  }
+  return dx;
+}
+
+float *openblas_vecmat_first(float *x, float *A, float *g, int64_t M, int64_t N) {
+  float *dx = (float *)malloc(M * sizeof(float));
+  cblas_sgemv(CblasRowMajor, CblasNoTrans, M, N, 1.0, A, N, g, 1, 0.0, dx, 1);
+  return dx;
+}
+
 /**
  * Computes the operation GB^T
  * A: MxN
@@ -117,6 +137,10 @@ void _mlir_ciface_linalg_dot_view{{n}}xf32_view{{n}}xf32_viewf32(F32Descriptor1D
 }
 
 void _mlir_ciface_linalg_matvec_view{{m}}x{{n}}xf32_view{{n}}xf32_view{{m}}xf32(F32Descriptor2D *A, F32Descriptor1D *x, F32Descriptor1D *out) {
+  // Don't need this implementation
+}
+
+void _mlir_ciface_linalg_vecmat_view{{m}}xf32_view{{m}}x{{n}}xf32_view{{n}}xf32(F32Descriptor1D *x, F32Descriptor2D *A, F32Descriptor1D *out) {
   // Don't need this implementation
 }
 
@@ -158,6 +182,10 @@ void _mlir_ciface_souter(F32Descriptor1D *x, F32Descriptor1D *y, F32Descriptor2D
       out->aligned[i * y->size + j] = x->aligned[i] * y->aligned[j];
     }
   }
+}
+
+void _mlir_ciface_smatvec(F32Descriptor2D *A, F32Descriptor1D *x, F32Descriptor1D *out) {
+  cblas_sgemv(CblasRowMajor, CblasNoTrans, A->size_0, A->size_1, 1.0, A->aligned, A->size_1, x->aligned, 1, 0.0, out->aligned, 1);
 }
 
 void _mlir_ciface_smatmul_grad_first(F32Descriptor2D *g, F32Descriptor2D *B,

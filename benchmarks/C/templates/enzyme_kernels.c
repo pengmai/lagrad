@@ -119,3 +119,34 @@ float *enzyme_matvec_first(float *A, float *x, int64_t M, int64_t N) {
   __enzyme_autodiff(matvec_primal, A, dA, enzyme_const, x, M, N);
   return dA;
 }
+
+float vecmat_primal(float *x, float *A, int64_t M, int64_t N) {
+  float *out = (float *)malloc(N * sizeof(float));
+  for (int i = 0; i < N; i++) {
+    out[i] = 0;
+  }
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      out[j] += A[i * N + j] * x[i];
+    }
+  }
+
+  float sum = 0;
+  for (int i = 0; i < N; i++) {
+    sum += out[i];
+  }
+
+  free(out);
+  return sum;
+}
+
+float *enzyme_vecmat_first(float *x, float *A, int64_t M, int64_t N) {
+  float *dx = (float *)malloc(M * sizeof(float));
+  for (int i = 0; i < M; i++) {
+    dx[i] = 0;
+  }
+
+  __enzyme_autodiff(vecmat_primal, x, dx, enzyme_const, A, M, N);
+  return dx;
+}
