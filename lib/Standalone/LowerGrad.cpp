@@ -128,7 +128,8 @@ private:
         size_t op_index = 0;
         for (Value operand : op->getOperands()) {
           // Compute the pullback (VJP).
-          // TODO: Gotta be a better way to structure/abstract this.
+          // TODO: Gotta be a better way to structure/abstract this. It's
+          // essentially a huge switch statement on the operator name.
           if (op->getNumResults() == 0) {
             op->emitError("op had zero results");
             return nullptr;
@@ -144,7 +145,10 @@ private:
             //              << result << "\n";
           }
           auto opName = op->getName().getStringRef();
-          if (opName == "std.mulf") {
+          if (opName == "std.cmpf") {
+            // This produces an integer, which we assume does not affect the
+            // VJP.
+          } else if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
                 op->getLoc(), vjp_value, op->getOperand(1 - op_index));
           } else if (opName == "std.addf") {
@@ -176,6 +180,9 @@ private:
                    "math.exp op did not have exactly 1 result");
             vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
                                                       op->getResult(0));
+          } else if (opName == "scf.if") {
+            auto ifOp = dyn_cast<scf::IfOp>(op);
+            vjp_value = reverseIfOp(ifOp, rewriter);
           } else if (opName == "linalg.generic") {
             auto genericOp = dyn_cast<linalg::GenericOp>(op);
             if (op_index > (size_t)genericOp.getNumInputs() - 1)
@@ -324,7 +331,7 @@ private:
                                : getZero(operand.getLoc(), operand, rewriter);
               SmallVector<AffineMap, 3> indexingMaps(
                   op->getNumOperands(), rewriter.getMultiDimIdentityMap(2));
-              indexingMaps[0] = indexingMaps[0].getSubMap({1});
+              indexingMaps[1] = indexingMaps[1].getSubMap({1});
               indexingMaps[2] = indexingMaps[2].getSubMap({0});
               SmallVector<StringRef, 6> iteratorTypes(
                   {getParallelIteratorTypeName(),
@@ -332,10 +339,12 @@ private:
               auto matmulOp = rewriter.create<linalg::GenericOp>(
                   operand.getLoc(),
                   /*resultTensorTypes=*/operand.getType(),
-                  /*inputs=*/ValueRange({vjp_value, op->getOperand(1)}),
+                  /*inputs=*/ValueRange({op->getOperand(1), vjp_value}),
                   /*outputs=*/ValueRange({zero}),
                   /*indexingMaps=*/indexingMaps,
                   /*iteratorTypes=*/iteratorTypes,
+                  /*doc=*/"Matrix-vector multiplication",
+                  /*library_call=*/"smatvec",
                   [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                     auto mul_res = builder.create<mlir::MulFOp>(
                         loc, regionArgs[0], regionArgs[1]);
@@ -397,9 +406,13 @@ private:
               inputs[0] = op->getOperand(0);
               inputs[1] = vjp_value;
             }
+            auto library_call =
+                op_index == 0 ? "smatmul_grad_first" : "smatmul_grad_second";
             auto matmulOp = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), operand.getType(), inputs, ValueRange({zero}),
                 indexingMaps, iteratorTypes,
+                /*doc=*/"Transposed matrix multiplication",
+                /*library call=*/library_call,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                   Value mul_res = builder.create<mlir::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
@@ -505,6 +518,71 @@ private:
     }
     llvm_unreachable("ones for type not yet implemented");
     return nullptr;
+  }
+
+  static mlir::Value reverseIfOp(scf::IfOp ifOp,
+                                 ConversionPatternRewriter &rewriter) {
+    // TODO: This is incomplete. I need a procedure to collect free variables in the thenBlock
+    // of the primal operation.
+    auto adjointIf = rewriter.create<scf::IfOp>(
+        ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
+        /*cond=*/ifOp.condition(),
+        /*thenBuilder=*/
+        [&](OpBuilder &builder, Location loc) {
+          // TODO: Need to make a "reverse block" or "reverse region" function.
+          llvm::SmallVector<Operation *> thenRegionOps;
+          for (auto &thenRegionOp : ifOp.thenRegion().getOps()) {
+            thenRegionOps.push_back(&thenRegionOp);
+          }
+          llvm::DenseMap<Value, Value> env;
+          for (auto it = thenRegionOps.rbegin(); it != thenRegionOps.rend();
+               it++) {
+            auto op = *it;
+            auto opName = op->getName().getStringRef();
+            if (opName == "scf.yield") {
+              Value operand = op->getOperand(0);
+              // Initialize the gradient signal to 1.0
+              env[operand] = builder.create<mlir::ConstantOp>(
+                  loc, FloatAttr::get(operand.getType(), 1.0));
+            } else {
+              size_t op_index = 0;
+              for (Value operand : op->getOperands()) {
+                if (ifOp->getNumResults() == 0) {
+                  ifOp->emitError("op had zero results");
+                  return;
+                }
+
+                Value vjp_value = env[op->getResult(0)];
+                if (opName == "std.mulf") {
+                  vjp_value = rewriter.create<mlir::MulFOp>(
+                      loc, vjp_value, op->getOperand(1 - op_index));
+                } else {
+                  llvm::outs()
+                      << "(SCF if thenBuilder) unrecognized op: " << opName
+                      << "\n";
+                }
+
+                // Add the gradient signals.
+                if (!env[operand]) {
+                  env[operand] = vjp_value;
+                } else {
+                  env[operand] = builder.create<mlir::AddFOp>(loc, env[operand],
+                                                              vjp_value);
+                }
+                op_index++;
+              }
+            }
+          }
+          builder.create<scf::YieldOp>(
+              loc, env[thenRegionOps.pop_back_val()->getOperand(0)]);
+        },
+        /*elseBuilder=*/
+        [&](OpBuilder &builder, Location loc) {
+          Value cst = rewriter.create<mlir::ConstantOp>(
+              loc, FloatAttr::get(ifOp->getResult(0).getType(), 0.0));
+          builder.create<scf::YieldOp>(loc, cst);
+        });
+    return adjointIf.getResult(0);
   }
 
   static mlir::Value broadcast(Location loc, Type type,
