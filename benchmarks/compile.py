@@ -68,6 +68,35 @@ def compile_mlir(contents, output, lower_type="loops"):
         f.write(obj)
 
 
+def jit_mlir(contents, lower_type="loops", print_loops=False):
+    assert lower_type in ["loops", "blas"], "Invalid lower_type"
+    RUNNER_UTILS = osp.join(
+        osp.expanduser("~"), ".local", "lib", "libmlir_runner_utils.dylib"
+    )
+
+    if print_loops:
+        loops = run_safe(
+            [f"{BIN}/standalone-opt", "-canonicalize"]
+            + BUFFERIZE
+            + ["-convert-linalg-to-affine-loops"],
+            stdin=contents,
+        )
+        print(loops.decode("utf-8"))
+
+    llvm_dialect = run_safe(
+        [f"{BIN}/standalone-opt", "-canonicalize"]
+        + BUFFERIZE
+        + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
+        + LOWER_TO_LLVM,
+        stdin=contents,
+    )
+    output = run_safe(
+        ["mlir-cpu-runner", "-entry-point-result=void", f"-shared-libs={RUNNER_UTILS}"],
+        stdin=llvm_dialect,
+    )
+    print(output.decode("utf-8"))
+
+
 def compile_enzyme(contents, output):
     includes = f"-I{DRIVER_INCLUDES}"
     preenzyme = run_safe(

@@ -2,6 +2,7 @@ import numpy as np
 import json
 import os.path as osp
 from compile import compile_c, compile_mlir, compile_enzyme, link_and_run, OPENBLAS_OBJ
+from pytorch_benchmarks import run_pytorch
 import argparse
 from collections import defaultdict
 from tqdm import tqdm
@@ -72,6 +73,7 @@ def run_application(config):
     )
     # print(stdout.decode("utf-8"))
     results = parse_results(stdout.decode("utf-8"))
+    results["pytorch"] = list(run_pytorch(config))
 
     return results
 
@@ -139,7 +141,7 @@ def run_matvec():
             "m": size,
             "application": "matvec",
             "args": [0],
-            "num_warmups": 10,
+            "num_warmups": 50,
             "num_runs": 50,
         }
         raw_results.append(run_application(config))
@@ -205,10 +207,64 @@ def plot_results(
 
 
 def main(args):
-    run_dot()
-    run_matvec()
-    run_vecmat()
-    run_matmul()
+    # sizes = list(range(768, 1025, 128))
+    # for size in sizes:
+    #     # size = 1024
+    #     config = {
+    #         "n": size,
+    #         "m": size,
+    #         "application": "matvec",
+    #         "args": [0],
+    #         "num_warmups": 10,
+    #         "num_runs": 50,
+    #     }
+    #     print(size, run_pytorch(config))
+    # print(run_application(config))
+    # run_matvec()
+    # run_vecmat()
+    # run_matmul()
+    fix, axs = plt.subplots(2, 2)
+
+    def process_results(raw_results):
+        results = {"means": defaultdict(list), "stds": defaultdict(list)}
+        for i, run in enumerate(raw_results):
+            for method in run:
+                results["means"][method].append(np.mean(run[method]))
+                results["stds"][method].append(np.std(run[method]))
+        return results
+
+    with open(f"{RESULTS_DIR}/dot_first_arg.json") as f:
+        sizes = np.array(list(range(1024, 2 ** 20, 4096 * 10)))
+        results = process_results(json.load(f))
+        for method in sorted(results["means"]):
+            axs[0, 0].plot(sizes, results["means"][method], label=method)
+        axs[0, 0].set_title("Dot product")
+        axs[0, 0].legend()
+
+    with open(f"{RESULTS_DIR}/matvec_first_arg.json") as f:
+        sizes = list(range(256, 1025, 128))
+        results = process_results(json.load(f))
+        for method in sorted(results["means"]):
+            axs[0, 1].plot(sizes, results["means"][method], label=method)
+        axs[0, 1].set_title("Matrix-Vector")
+        axs[0, 1].legend()
+
+    with open(f"{RESULTS_DIR}/vecmat_first_arg.json") as f:
+        sizes = list(range(256, 1025, 128))
+        results = process_results(json.load(f))
+        for method in sorted(results["means"]):
+            axs[1, 0].plot(sizes, results["means"][method], label=method)
+        axs[1, 0].set_title("Vector-Matrix")
+        axs[1, 0].legend()
+
+    with open(f"{RESULTS_DIR}/vecmat_first_arg.json") as f:
+        sizes = list(range(256, 1025, 128))
+        results = process_results(json.load(f))
+        for method in sorted(results["means"]):
+            axs[1, 1].plot(sizes, results["means"][method], label=method)
+        axs[1, 1].set_title("Matrix-Matrix")
+        axs[1, 1].legend()
+    plt.show()
     # for key in results:
     #     print(f"{key}: {np.mean(results[key])} µs ± {np.std(results[key]):.3} µs")
 
