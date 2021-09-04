@@ -117,14 +117,52 @@ private:
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     for (auto it = ops.rbegin(); it != ops.rend(); it++) {
       Operation *op = *it;
-      if (op->getName().getStringRef() == "std.return") {
+      auto opName = op->getName().getStringRef();
+      if (opName == "std.return") {
         // This is the exit point
         rewriter.setInsertionPoint(op);
         Value operand = op->getOperand(0);
         // Initialize the gradient signal to 1.0
         env[operand] = onesLike(op->getLoc(), operand, rewriter);
         rewriter.eraseOp(op);
+      } else if (opName == "std.cmpf") {
+        continue;
       } else {
+        if (opName == "std.select") {
+          auto selectOp = dyn_cast<mlir::SelectOp>(op);
+          auto trueDefiningOp = selectOp.getTrueValue().getDefiningOp();
+          llvm::DenseMap<Value, Value> selectEnv;
+          Value dTrue;
+          if (trueDefiningOp) {
+            populateVJP(trueDefiningOp, selectEnv, rewriter);
+            for (const auto key : selectEnv) {
+              llvm::outs() << "first: " << key.first
+                           << "; second: " << key.second << "\n";
+            }
+            dTrue = selectEnv[selectOp.getTrueValue()];
+          } else {
+            dTrue =
+                onesLike(selectOp.getLoc(), selectOp.getTrueValue(), rewriter);
+          }
+
+          auto falseDefiningOp = selectOp.getFalseValue().getDefiningOp();
+          // TODO: Will there be issues with overlapping the selectEnv for
+          // both true and false VJP generation?
+          Value dFalse;
+          if (falseDefiningOp) {
+            populateVJP(falseDefiningOp, selectEnv, rewriter);
+            dFalse = selectEnv[selectOp.getFalseValue()];
+          } else {
+            dFalse =
+                onesLike(selectOp.getLoc(), selectOp.getFalseValue(), rewriter);
+          }
+          env[selectOp.getTrueValue()] = rewriter.create<mlir::SelectOp>(
+              selectOp.getLoc(), selectOp.getCondition(), dTrue, dFalse);
+          env[selectOp.getFalseValue()] = rewriter.create<mlir::SelectOp>(
+              selectOp.getLoc(), selectOp.getCondition(), dFalse, dTrue);
+          continue;
+        }
+
         size_t op_index = 0;
         for (Value operand : op->getOperands()) {
           // Compute the pullback (VJP).
@@ -143,11 +181,6 @@ private:
             env[result] = vjp_value;
             // llvm::outs() << "Initializing value (not yet initialized): "
             //              << result << "\n";
-          }
-          auto opName = op->getName().getStringRef();
-          if (opName == "std.cmpf") {
-            // This produces an integer, which we assume does not affect the
-            // VJP.
           } else if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
                 op->getLoc(), vjp_value, op->getOperand(1 - op_index));
@@ -422,7 +455,6 @@ private:
                 });
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
-            // TODO: This only supports 0d tensors
             op->emitError("differentiating tensor.extract not yet supported");
             // Value index = rewriter.create<mlir::ConstantOp>(
             //     operand.getLoc(),
@@ -431,8 +463,7 @@ private:
             //     operand.getLoc(), env[operand].getType(), index);
             // vjp_value = genOp.getResult();
           } else {
-            llvm::outs() << "Unrecognized op: " << op->getName().getStringRef()
-                         << "\n";
+            llvm::outs() << "Unrecognized op: " << opName << "\n";
           }
 
           // Add the gradient signals.
@@ -516,14 +547,16 @@ private:
       auto denseAttr = DenseFPElementsAttr::get(shapedType, {1.0f});
       return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
     }
-    llvm_unreachable("ones for type not yet implemented");
+    llvm::outs() << "ones for type " << operand.getType()
+                 << " not implemented\n";
+    llvm_unreachable("");
     return nullptr;
   }
 
   static mlir::Value reverseIfOp(scf::IfOp ifOp,
                                  ConversionPatternRewriter &rewriter) {
-    // TODO: This is incomplete. I need a procedure to collect free variables in the thenBlock
-    // of the primal operation.
+    // TODO: This is incomplete. I need a procedure to collect free variables in
+    // the thenBlock of the primal operation.
     auto adjointIf = rewriter.create<scf::IfOp>(
         ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
         /*cond=*/ifOp.condition(),
@@ -583,6 +616,53 @@ private:
           builder.create<scf::YieldOp>(loc, cst);
         });
     return adjointIf.getResult(0);
+  }
+
+  static void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
+                          ConversionPatternRewriter &rewriter) {
+    auto opName = op->getName().getStringRef();
+    size_t op_index = 0;
+    for (Value operand : op->getOperands()) {
+      // Compute the pullback (VJP).
+      // TODO: Gotta be a better way to structure/abstract this. It's
+      // essentially a huge switch statement on the operator name.
+      if (op->getNumResults() == 0) {
+        // op->emitError("op had zero results");
+        llvm_unreachable("op had zero results");
+        return;
+      }
+      Value vjp_value = env[op->getResult(0)];
+      // TODO: To what extent do I need this? I put it in as hack to avoid
+      // changing the function type.
+      if (!vjp_value) {
+        Value result = op->getResult(0);
+        vjp_value = onesLike(result.getLoc(), result, rewriter);
+        env[result] = vjp_value;
+        // llvm::outs() << "Initializing value (not yet initialized): "
+        //              << result << "\n";
+      }
+
+      if (opName == "std.mulf") {
+        vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                  op->getOperand(1 - op_index));
+      } else if (opName == "std.addf") {
+        // This has no effect on the VJP
+      } else if (opName == "std.select") {
+        // auto selectOp = dyn_cast<mlir::SelectOp>(op);
+        llvm_unreachable("not yet implemented");
+      } else {
+        llvm::outs() << "Unrecognized op: " << opName << "\n";
+      }
+
+      // Add the gradient signals.
+      if (!env[operand]) {
+        env[operand] = vjp_value;
+      } else {
+        env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand],
+                                                     vjp_value);
+      }
+      op_index++;
+    }
   }
 
   static mlir::Value broadcast(Location loc, Type type,

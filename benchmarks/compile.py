@@ -3,7 +3,7 @@ import os.path as osp
 
 # These must be configured based on the location of OpenBLAS, LLVM version 12, and Enzyme.
 OPENBLAS_DIR = osp.join(osp.expanduser("~"), ".local", "OpenBLAS")
-LLVM_12_BIN = osp.join(osp.expanduser("~"), "Research", "llvm-project", "build", "bin")
+LLVM_12_BIN = osp.join(osp.expanduser("~"), ".local", "LLVM12", "bin")
 ENZYME_DYLIB = osp.join(
     osp.expanduser("~"),
     "Research",
@@ -76,7 +76,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
 
     if print_loops:
         loops = run_safe(
-            [f"{BIN}/standalone-opt", "-canonicalize"]
+            [f"{BIN}/standalone-opt", "-convert-elementwise-to-linalg", "-canonicalize"]
             + BUFFERIZE
             + ["-convert-linalg-to-affine-loops"],
             stdin=contents,
@@ -84,7 +84,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
         print(loops.decode("utf-8"))
 
     llvm_dialect = run_safe(
-        [f"{BIN}/standalone-opt", "-canonicalize"]
+        [f"{BIN}/standalone-opt", "-convert-elementwise-to-linalg", "-canonicalize"]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
@@ -94,7 +94,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
         ["mlir-cpu-runner", "-entry-point-result=void", f"-shared-libs={RUNNER_UTILS}"],
         stdin=llvm_dialect,
     )
-    print(output.decode("utf-8"))
+    return output.decode("utf-8")
 
 
 def compile_enzyme(contents, output):
