@@ -4,8 +4,8 @@
 #include "Standalone/Passes.h"
 // #include "mlir/Dialect"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
@@ -110,6 +110,12 @@ struct ElementwiseToAffineConversionPass
     : public PassWrapper<ElementwiseToAffineConversionPass,
                          OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {}
+  StringRef getArgument() const override {
+    return "convert-elementwise-to-affine";
+  }
+  StringRef getDescription() const override {
+    return "Convert elementwise tensor operations to affine loops";
+  }
   void runOnOperation() final {
     ConversionTarget target(getContext());
     // target.addLegalOp<ModuleOp, ModuleTerminatorOp>();

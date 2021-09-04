@@ -732,6 +732,10 @@ namespace {
 struct GradConversionPass
     : public PassWrapper<GradConversionPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {}
+  StringRef getArgument() const override { return "take-grads"; }
+  StringRef getDescription() const override {
+    return "Run the autodiff procedure for standalone.grad";
+  }
   void runOnOperation() final;
 };
 } // end anonymous namespace

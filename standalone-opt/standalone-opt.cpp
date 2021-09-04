@@ -19,14 +19,14 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
-#include "Standalone/StandaloneDialect.h"
 #include "Standalone/Passes.h"
+#include "Standalone/StandaloneDialect.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllPasses();
-  mlir::registerPass("convert-standalone-to-llvm", "TODO write description", mlir::Standalone::createLowerToLLVMPass);
-  mlir::registerPass("take-grads", "Run the autodiff procedure for standalone.grad", mlir::Standalone::createGradPass);
-  mlir::registerPass("convert-elementwise-to-affine", "Convert elementwise tensor operations to affine loops", mlir::Standalone::createElementwiseToAffinePass);
+  mlir::registerPass(mlir::Standalone::createLowerToLLVMPass);
+  mlir::registerPass(mlir::Standalone::createGradPass);
+  mlir::registerPass(mlir::Standalone::createElementwiseToAffinePass);
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::standalone::StandaloneDialect>();
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
   registry.insert<mlir::LLVM::LLVMDialect>();
   registry.insert<mlir::scf::SCFDialect>();
   registry.insert<mlir::tensor::TensorDialect>();
-  
+
   registerAllDialects(registry);
 
   return failed(

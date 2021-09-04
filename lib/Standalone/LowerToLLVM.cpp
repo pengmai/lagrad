@@ -161,6 +161,12 @@ struct StandaloneToLLVMLoweringPass
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<LLVM::LLVMDialect>();
   }
+  StringRef getArgument() const override {
+    return "convert-standalone-to-llvm";
+  }
+  StringRef getDescription() const override {
+    return "Lower standalone.diff calls to Enzyme compatible calls";
+  }
   void runOnOperation() final;
 };
 } // end anonymous namespace
