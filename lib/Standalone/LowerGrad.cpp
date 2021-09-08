@@ -12,6 +12,72 @@
 using namespace mlir;
 
 namespace {
+mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
+  if (operand.getType().isa<FloatType>()) {
+    return builder.create<mlir::ConstantOp>(
+        loc, FloatAttr::get(operand.getType(), 1.0));
+  }
+  if (operand.getType().isa<ShapedType>()) {
+    auto shapedType = operand.getType().dyn_cast<ShapedType>();
+    auto denseAttr = DenseFPElementsAttr::get(shapedType, {1.0f});
+    return builder.create<mlir::ConstantOp>(loc, denseAttr);
+  }
+  llvm::outs() << "ones for type " << operand.getType() << " not implemented\n";
+  llvm_unreachable("");
+  return nullptr;
+}
+
+void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
+                 OpBuilder &rewriter, size_t outer_op_index = 0) {
+  auto opName = op->getName().getStringRef();
+  size_t op_index = 0;
+  for (Value operand : op->getOperands()) {
+    // Compute the pullback (VJP).
+    // TODO: Gotta be a better way to structure/abstract this. It's
+    // essentially a huge switch statement on the operator name.
+    if (op->getNumResults() == 0) {
+      // op->emitError("op had zero results");
+      llvm_unreachable("op had zero results");
+      return;
+    }
+    Value vjp_value = env[op->getResult(0)];
+    // TODO: To what extent do I need this? I put it in as hack to avoid
+    // changing the function type.
+    if (!vjp_value) {
+      Value result = op->getResult(0);
+      vjp_value = onesLike(result.getLoc(), result, rewriter);
+      env[result] = vjp_value;
+      // llvm::outs() << "Initializing value (not yet initialized): "
+      //              << result << "\n";
+    }
+
+    if (opName == "std.mulf") {
+      vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                op->getOperand(1 - op_index));
+    } else if (opName == "std.addf") {
+      // This has no effect on the VJP
+    } else if (opName == "std.subf") {
+      if (op_index == 1) {
+        vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+      }
+    } else if (opName == "std.select") {
+      // auto selectOp = dyn_cast<mlir::SelectOp>(op);
+      llvm_unreachable("not yet implemented");
+    } else {
+      llvm::outs() << "Unrecognized op: " << opName << "\n";
+    }
+
+    // Add the gradient signals.
+    if (!env[operand]) {
+      env[operand] = vjp_value;
+    } else {
+      env[operand] =
+          rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand], vjp_value);
+    }
+    op_index++;
+  }
+}
+
 class GradOpLowering : public ConversionPattern {
 public:
   explicit GradOpLowering(MLIRContext *context)
@@ -30,7 +96,7 @@ public:
         SymbolRefAttr::get(funcOp.getContext(), funcOp.getName()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
     rewriter.eraseOp(op);
-    // llvm::outs() << funcOp << "\n";
+    // llvm::outs() << "\n\nFuncOp:\n" << funcOp << "\n";
     return success();
   }
 
@@ -250,17 +316,31 @@ private:
               }
             }
 
+            SmallVector<mlir::Operation *> genericRegionOps;
+            for (auto &op : genericOp.getOps()) {
+              genericRegionOps.push_back(&op);
+            }
+
+            llvm::DenseMap<Value, Value> bbEnv;
+
             auto adjoint = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*resultTensorType=*/operand.getType(),
                 /*inputs=*/inputs, /*outputs=*/ValueRange({output}),
                 /*indexing_maps=*/indexing_maps,
                 /*iterator_types=*/iterator_types,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                  Value mul_res = builder.create<mlir::MulFOp>(
-                      loc, regionArgs[0], regionArgs[1]);
-                  Value add_res =
-                      builder.create<mlir::AddFOp>(loc, mul_res, regionArgs[2]);
-                  builder.create<linalg::YieldOp>(loc, add_res);
+                  for (auto it = genericRegionOps.rbegin();
+                       it != genericRegionOps.rend(); it++) {
+                    auto rop = *it;
+                    if (rop->getName().getStringRef() == "linalg.yield") {
+                      bbEnv[rop->getOperand(0)] = regionArgs[op_index];
+                    } else {
+                      populateVJP(rop, bbEnv, builder, op_index);
+                    }
+                  }
+
+                  builder.create<linalg::YieldOp>(
+                      loc, bbEnv[genericOp.getRegion().getArgument(op_index)]);
                 });
             vjp_value = adjoint.getResult(0);
           } else if (opName == "linalg.dot") {
@@ -536,23 +616,6 @@ private:
     return nullptr;
   }
 
-  static mlir::Value onesLike(Location loc, mlir::Value operand,
-                              ConversionPatternRewriter &rewriter) {
-    if (operand.getType().isa<FloatType>()) {
-      return rewriter.create<mlir::ConstantOp>(
-          loc, FloatAttr::get(operand.getType(), 1.0));
-    }
-    if (operand.getType().isa<ShapedType>()) {
-      auto shapedType = operand.getType().dyn_cast<ShapedType>();
-      auto denseAttr = DenseFPElementsAttr::get(shapedType, {1.0f});
-      return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
-    }
-    llvm::outs() << "ones for type " << operand.getType()
-                 << " not implemented\n";
-    llvm_unreachable("");
-    return nullptr;
-  }
-
   static mlir::Value reverseIfOp(scf::IfOp ifOp,
                                  ConversionPatternRewriter &rewriter) {
     // TODO: This is incomplete. I need a procedure to collect free variables in
@@ -616,53 +679,6 @@ private:
           builder.create<scf::YieldOp>(loc, cst);
         });
     return adjointIf.getResult(0);
-  }
-
-  static void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
-                          ConversionPatternRewriter &rewriter) {
-    auto opName = op->getName().getStringRef();
-    size_t op_index = 0;
-    for (Value operand : op->getOperands()) {
-      // Compute the pullback (VJP).
-      // TODO: Gotta be a better way to structure/abstract this. It's
-      // essentially a huge switch statement on the operator name.
-      if (op->getNumResults() == 0) {
-        // op->emitError("op had zero results");
-        llvm_unreachable("op had zero results");
-        return;
-      }
-      Value vjp_value = env[op->getResult(0)];
-      // TODO: To what extent do I need this? I put it in as hack to avoid
-      // changing the function type.
-      if (!vjp_value) {
-        Value result = op->getResult(0);
-        vjp_value = onesLike(result.getLoc(), result, rewriter);
-        env[result] = vjp_value;
-        // llvm::outs() << "Initializing value (not yet initialized): "
-        //              << result << "\n";
-      }
-
-      if (opName == "std.mulf") {
-        vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                  op->getOperand(1 - op_index));
-      } else if (opName == "std.addf") {
-        // This has no effect on the VJP
-      } else if (opName == "std.select") {
-        // auto selectOp = dyn_cast<mlir::SelectOp>(op);
-        llvm_unreachable("not yet implemented");
-      } else {
-        llvm::outs() << "Unrecognized op: " << opName << "\n";
-      }
-
-      // Add the gradient signals.
-      if (!env[operand]) {
-        env[operand] = vjp_value;
-      } else {
-        env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand],
-                                                     vjp_value);
-      }
-      op_index++;
-    }
   }
 
   static mlir::Value broadcast(Location loc, Type type,

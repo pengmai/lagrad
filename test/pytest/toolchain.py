@@ -15,7 +15,7 @@ BUFFERIZE = [
     # According to the discussion -func-bufferize should be last, but for some
     # reason in this case, -tensor-bufferize must be last.
     "-tensor-bufferize",
-    "-finalizing-bufferize"
+    "-finalizing-bufferize",
 ]
 LOWERING = [
     "-convert-linalg-to-loops",
