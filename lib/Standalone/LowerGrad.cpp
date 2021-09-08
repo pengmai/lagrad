@@ -27,8 +27,8 @@ mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
   return nullptr;
 }
 
-void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
-                 OpBuilder &rewriter, size_t outer_op_index = 0) {
+void populateVJP(Operation *op, ValueRange regionArgs,
+                 llvm::DenseMap<Value, Value> &env, OpBuilder &rewriter) {
   auto opName = op->getName().getStringRef();
   size_t op_index = 0;
   for (Value operand : op->getOperands()) {
@@ -53,7 +53,7 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
 
     if (opName == "std.mulf") {
       vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                op->getOperand(1 - op_index));
+                                                regionArgs[1 - op_index]);
     } else if (opName == "std.addf") {
       // This has no effect on the VJP
     } else if (opName == "std.subf") {
@@ -200,7 +200,6 @@ private:
           llvm::DenseMap<Value, Value> selectEnv;
           Value dTrue;
           if (trueDefiningOp) {
-            populateVJP(trueDefiningOp, selectEnv, rewriter);
             for (const auto key : selectEnv) {
               llvm::outs() << "first: " << key.first
                            << "; second: " << key.second << "\n";
@@ -216,7 +215,6 @@ private:
           // both true and false VJP generation?
           Value dFalse;
           if (falseDefiningOp) {
-            populateVJP(falseDefiningOp, selectEnv, rewriter);
             dFalse = selectEnv[selectOp.getFalseValue()];
           } else {
             dFalse =
@@ -335,12 +333,19 @@ private:
                     if (rop->getName().getStringRef() == "linalg.yield") {
                       bbEnv[rop->getOperand(0)] = regionArgs[op_index];
                     } else {
-                      populateVJP(rop, bbEnv, builder, op_index);
+                      populateVJP(rop, regionArgs, bbEnv, builder, op_index);
                     }
                   }
 
-                  builder.create<linalg::YieldOp>(
-                      loc, bbEnv[genericOp.getRegion().getArgument(op_index)]);
+                  // This add operation is required in the case of undoing
+                  // reductions. It might be possible to omit this, if the
+                  // output argument is never used in the primal, or perhaps if
+                  // the primal iterator types do not include reductions.
+                  Value add_res = builder.create<mlir::AddFOp>(
+                      loc, bbEnv[genericOp.getRegion().getArgument(op_index)],
+                      regionArgs[regionArgs.size() - 1]);
+
+                  builder.create<linalg::YieldOp>(loc, add_res);
                 });
             vjp_value = adjoint.getResult(0);
           } else if (opName == "linalg.dot") {
