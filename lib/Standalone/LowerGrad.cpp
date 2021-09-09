@@ -62,7 +62,7 @@ void populateVJP(Operation *op, ValueRange regionArgs,
       }
     } else if (opName == "std.select") {
       // auto selectOp = dyn_cast<mlir::SelectOp>(op);
-      llvm_unreachable("not yet implemented");
+      llvm_unreachable("std.select not yet implemented");
     } else {
       llvm::outs() << "Unrecognized op: " << opName << "\n";
     }
@@ -333,7 +333,7 @@ private:
                     if (rop->getName().getStringRef() == "linalg.yield") {
                       bbEnv[rop->getOperand(0)] = regionArgs[op_index];
                     } else {
-                      populateVJP(rop, regionArgs, bbEnv, builder, op_index);
+                      populateVJP(rop, regionArgs, bbEnv, builder);
                     }
                   }
 
@@ -740,6 +740,7 @@ namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<mlir::math::MathDialect>();
     addLegalDialect<mlir::memref::MemRefDialect>();
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
