@@ -163,12 +163,18 @@ private:
     auto attr = definingOp->getAttrOfType<FlatSymbolRefAttr>("value");
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
     auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
+    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
 
     FuncOp funcOp = copyFunctionDeclaration(originalFuncOp, rewriter);
+    return differentiateFunction(funcOp, gradientsOf, rewriter);
+  }
 
+  static FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
+                                      ConversionPatternRewriter &rewriter) {
     Region *region = funcOp.getCallableRegion();
+    auto moduleOp = funcOp->getParentOfType<ModuleOp>();
     if (!region) {
-      definingOp->emitError("Function region cannot be null");
+      funcOp->emitError("Function region cannot be null");
       return nullptr;
     }
 
@@ -541,12 +547,26 @@ private:
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
             op->emitError("differentiating tensor.extract not yet supported");
-            // Value index = rewriter.create<mlir::ConstantOp>(
-            //     operand.getLoc(),
-            //     IntegerAttr::get(IndexType::get(operand.getContext()), 0));
-            // auto genOp = rewriter.create<tensor::GenerateOp>(
-            //     operand.getLoc(), env[operand].getType(), index);
-            // vjp_value = genOp.getResult();
+          } else if (opName == "std.call") {
+            auto callOp = dyn_cast<mlir::CallOp>(op);
+            std::string gradFuncName("__grad_");
+            gradFuncName += callOp.callee();
+            if (moduleOp.lookupSymbol(gradFuncName)) {
+              // How to specify the gradients of different arguments?
+              auto funcOp =
+                  dyn_cast<FuncOp>(moduleOp.lookupSymbol(gradFuncName));
+              rewriter.create<mlir::CallOp>(callOp.getLoc(), funcOp,
+                                            callOp.getOperands());
+              // TODO: Update vjp_value
+            } else {
+              auto primalFunc =
+                  dyn_cast<FuncOp>(moduleOp.lookupSymbol(callOp.calleeAttr()));
+              auto dFuncOp = copyFunctionDeclaration(primalFunc, rewriter);
+              // auto innerGradsOf = ArrayAttr::get()
+              // auto generatedAdjoint = differentiateFunction(dFuncOp,
+              // rewriter); auto adjontCall = rewriter.create<mlir::CallOp>(
+              //     callOp.getLoc(), generatedAdjoint, callOp.getOperands());
+            }
           } else {
             llvm::outs() << "Unrecognized op: " << opName << "\n";
           }
@@ -569,9 +589,8 @@ private:
     //                                         region->getArgument(0),
     //                                         rewriter);
     // }
-    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
-    SmallVector<Type> returnType(arg0Type.getNumInputs());
-    SmallVector<Value> returnValue(arg0Type.getNumInputs());
+    SmallVector<Type> returnType(funcOp.getType().getNumInputs());
+    SmallVector<Value> returnValue(funcOp.getType().getNumInputs());
     if (gradientsOf) {
       returnType.resize(gradientsOf.size());
       returnValue.resize(gradientsOf.size());

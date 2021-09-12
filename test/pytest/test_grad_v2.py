@@ -45,5 +45,9 @@ def test_einsum_compare():
     )
 
 
+def test_function_call():
+    print(jit_file(f"{MLIR_FILES}/functioncall.mlir"))
+
+
 def disabled_test_if_else():
     print(jit_file(f"{MLIR_FILES}/select.mlir"))
