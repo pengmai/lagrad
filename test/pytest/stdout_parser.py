@@ -30,3 +30,12 @@ def extract_2d(output: str):
     mat_regex = re.compile(rf"data=(\[{arr_regex}(?:,{arr_regex})*\])")
     m = json.loads(mat_regex.search(output).group(1))
     return m
+
+
+def extract_3d(output: str):
+    output = remove_whitespace(output)
+    arr_regex = rf"\[{float_regex}(?:,{float_regex})*\]"
+    mat_regex = rf"\[{arr_regex}(?:,{arr_regex})*\]"
+    tensor_regex = re.compile(rf"data=(\[{mat_regex}(?:,{mat_regex})*\])")
+    m = json.loads(tensor_regex.search(output).group(1))
+    return m

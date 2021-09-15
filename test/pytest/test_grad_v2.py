@@ -8,8 +8,9 @@ Some files are missing from transferring computers.
 
 import os.path as osp
 import numpy as np
-from toolchain import jit_file
-from stdout_parser import extract_1d, extract_2d, extract_3d
+from jinja2 import Template
+from toolchain import jit_file, jit
+from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
 
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 
@@ -45,9 +46,45 @@ def test_einsum_compare():
     )
 
 
-def test_function_call():
-    print(jit_file(f"{MLIR_FILES}/functioncall.mlir"))
+# def test_function_call():
+#     print(jit_file(f"{MLIR_FILES}/functioncall.mlir"))
+
+
+def test_broadcast_square():
+    assert (
+        extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast_square.mlir")) == 920
+    )
+
+
+def test_three_args():
+    with open(f"{MLIR_FILES}/generic/three_args.mlir") as f:
+        template = Template(f.read())
+    n, k, d = 4, 5, 6
+    np.random.seed(0)
+    x = np.random.rand(n, k, d)
+    lx = np.random.rand(n, k, d)
+    qs = np.random.rand(k, d)
+    config = {
+        "n": n,
+        "k": k,
+        "d": d,
+        "Qdiags": qs.tolist(),
+        "xcentered": x.tolist(),
+        "Lxcentered_intermediate": lx.tolist(),
+    }
+    expected = np.array(
+        [
+            [2.41878, 2.85677, 3.28829, 2.14895, 1.17637, 3.32838],
+            [4.05145, 1.80468, 5.16941, 0.990859, 4.65306, 2.9535],
+            [5.45383, 6.55693, 4.47996, 2.51914, 1.49559, 2.71785],
+            [3.55329, 3.4295, 3.53719, 1.918, 1.62634, 3.868],
+            [2.28258, 2.38696, 2.69382, 4.36002, 2.7146, 4.85282],
+        ]
+    )
+
+    mlir_res = np.array(extract_2d(jit(template.render(**config).encode("utf-8"))))
+    assert np.abs(mlir_res - expected).sum() < 1e-7
 
 
 def disabled_test_if_else():
-    print(jit_file(f"{MLIR_FILES}/select.mlir"))
+    print("if-else", jit_file(f"{MLIR_FILES}/select.mlir"))
