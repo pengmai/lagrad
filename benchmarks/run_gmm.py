@@ -1,5 +1,5 @@
 import argparse
-from compile import jit_mlir
+from compile import jit_mlir, compile_c, compile_mlir, link_and_run, run_grad
 from jinja2 import Environment, PackageLoader, select_autoescape
 import numpy as np
 
@@ -20,6 +20,49 @@ def sparse_identity(k) -> str:
     return f"{eye_indices}, {eye_values}"
 
 
+def compile_and_run_gmm(config):
+    compile_c(
+        config["driver"].render().encode("utf-8"),
+        "gmm_driver.o",
+    )
+    compile_c(
+        config["helpers"].render().encode("utf-8"),
+        "helpers.o",
+    )
+    compile_mlir(config["mlir"].render(**config).encode("utf-8"), "gmm_kernel.o")
+
+    stdout = link_and_run(
+        ["gmm_driver.o", "helpers.o", "gmm_kernel.o"],
+        "gmm_driver.out",
+        link_runner_utils=True,
+    )
+    print(stdout.decode("utf-8"))
+
+
+def main(args):
+    driver_template = driver_env.get_template("gmm_driver.c")
+    helpers_template = driver_env.get_template("mlir_c_abi.c")
+    mlir_template = mlir_env.get_template("gmm.mlir")
+    config = {
+        "k": 25,
+        "n": 1000,
+        "d": 10,
+        "driver": driver_template,
+        "helpers": helpers_template,
+        "mlir": mlir_template,
+    }
+
+    compile_and_run_gmm(config)
+
+    # print(mlir_template.render(**config))
+
+    # compile_mlir(mlir_template.render(**config).encode("utf-8"), "gmm_kernel.o")
+    # rendered = gmm_template.render(
+    #     n=n, k=k, d=d, eye=sparse_identity(k), data=data.tolist(), means=means.tolist()
+    # )
+    # print(jit_mlir(rendered.encode("utf-8"), print_loops=args.loops))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -30,18 +73,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gmm_template = mlir_env.get_template("gmm.mlir")
-    k = 3
-    n = 2
-    d = 4
-
-    data = np.around(np.random.rand(n, d), ROUND_TO)
-    means = np.around(np.random.rand(k, d), ROUND_TO)
-
-    print("data:\n", data)
-    print("means:\n", means)
-    print("centered:\n", np.stack([data[i] - means for i in range(n)]))
-    rendered = gmm_template.render(
-        n=n, k=k, d=d, eye=sparse_identity(k), data=data.tolist(), means=means.tolist()
-    )
-    print(jit_mlir(rendered.encode("utf-8"), print_loops=args.loops))
+    main(args)

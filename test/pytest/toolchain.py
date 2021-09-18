@@ -21,6 +21,7 @@ LOWERING = [
     "-convert-linalg-to-loops",
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
+    "-convert-math-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
     "-llvm-legalize-for-export",

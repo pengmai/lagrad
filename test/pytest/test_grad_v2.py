@@ -50,6 +50,10 @@ def test_einsum_compare():
 #     print(jit_file(f"{MLIR_FILES}/functioncall.mlir"))
 
 
+def test_broadcast():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast.mlir")) == 4
+
+
 def test_broadcast_square():
     assert (
         extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast_square.mlir")) == 920
@@ -84,6 +88,30 @@ def test_three_args():
 
     mlir_res = np.array(extract_2d(jit(template.render(**config).encode("utf-8"))))
     assert np.abs(mlir_res - expected).sum() < 1e-7
+
+
+def test_logsumexp():
+    with open(f"{MLIR_FILES}/generic/logsumexp.mlir") as f:
+        template = Template(f.read())
+    np.random.seed(0)
+    x = np.random.rand(3, 4)
+    expected = np.array(
+        [
+            [0.236266, 0.279034, 0.249362, 0.235339],
+            [0.205766, 0.256975, 0.208653, 0.328606],
+            [0.327953, 0.18358, 0.276146, 0.212321],
+        ]
+    )
+
+    mlir_res = np.array(
+        extract_2d(jit(template.render(data=x.tolist()).encode("utf-8")))
+    )
+
+    assert np.abs(expected - mlir_res).sum() < 1e-7
+
+
+def disabled_test_closure():
+    print(extract_scalar(jit_file(f"{MLIR_FILES}/generic/closure.mlir")))
 
 
 def disabled_test_if_else():

@@ -45,3 +45,34 @@ void print_ul_arr(unsigned long *arr, size_t n) {
   }
   printf("]\n");
 }
+
+void print_f_arr(float *arr, size_t n) {
+  printf("[");
+  for (size_t i = 0; i < n; i++) {
+    printf("%.3f", arr[i]);
+    if (i != n - 1) {
+      printf(", ");
+    }
+  }
+  printf("]\n");
+}
+
+void print_d_arr(double *arr, size_t n) {
+  printf("[");
+  for (size_t i = 0; i < n; i++) {
+    printf("%.3f", arr[i]);
+    if (i != n - 1) {
+      printf(", ");
+    }
+  }
+  printf("]\n");
+}
+
+void print_f_arr_2d(float *arr, size_t m, size_t n) {
+  printf("[\n");
+  for (size_t i = 0; i < m; i++) {
+    printf("  ");
+    print_f_arr(arr + i * n, n);
+  }
+  printf("]\n");
+}

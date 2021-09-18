@@ -13,6 +13,9 @@ ENZYME_DYLIB = osp.join(
     "Enzyme",
     "LLVMEnzyme-12.dylib",
 )
+RUNNER_UTILS = osp.join(
+    osp.expanduser("~"), ".local", "lib", "libmlir_runner_utils.dylib"
+)
 
 DRIVER_INCLUDES = osp.join(osp.dirname(__file__), "C", "templates")
 OPENBLAS_INCLUDES = osp.join(OPENBLAS_DIR, "include")
@@ -39,6 +42,7 @@ LOWER_TO_LIBRARY = ["-convert-linalg-to-std"]
 LOWER_TO_LLVM = [
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
+    "-convert-math-to-llvm",
     "-convert-std-to-llvm",
     "-llvm-legalize-for-export",
 ]
@@ -47,16 +51,34 @@ LOWER_TO_LLVM = [
 def run_safe(args, stdin: bytes = None):
     try:
         p = subprocess.run(args, input=stdin, check=True, capture_output=True)
+        if p.stderr:
+            print(p.stderr.decode("utf-8"))
     except subprocess.CalledProcessError as e:
         raise Exception(e.stderr.decode("utf-8"))
     return p.stdout
 
 
+def run_grad(contents):
+    print(
+        run_safe(
+            [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize"],
+            stdin=contents,
+        ).decode("utf-8")
+    )
+
+
 def compile_mlir(contents, output, lower_type="loops"):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
+    # print(
+    #     run_safe(
+    #         [f"{BIN}/standalone-opt", "-canonicalize", "-convert-elementwise-to-linalg"]
+    #         + BUFFERIZE + LOWER_TO_LOOPS + LOWER_TO_LLVM,
+    #         stdin=contents,
+    #     ).decode("utf-8")
+    # )
 
     llvm_dialect = run_safe(
-        [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize"]
+        [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize", "-convert-elementwise-to-linalg"]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
@@ -70,13 +92,10 @@ def compile_mlir(contents, output, lower_type="loops"):
 
 def jit_mlir(contents, lower_type="loops", print_loops=False):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
-    RUNNER_UTILS = osp.join(
-        osp.expanduser("~"), ".local", "lib", "libmlir_runner_utils.dylib"
-    )
 
     if print_loops:
         loops = run_safe(
-            [f"{BIN}/standalone-opt", "-convert-elementwise-to-linalg", "-canonicalize"]
+            [f"{BIN}/standalone-opt", "-take-grads", "-convert-elementwise-to-linalg", "-canonicalize"]
             + BUFFERIZE
             + ["-convert-linalg-to-affine-loops"],
             stdin=contents,
@@ -126,14 +145,20 @@ def compile_c(contents, output):
     includes = [f"-I{DRIVER_INCLUDES}", f"-I{OPENBLAS_INCLUDES}"]
     # The dash tells gcc to read from stdin
     run_safe(
-        ["gcc", "-O3"] + includes + ["-xc", "-c", "-", "-o", f"{TMP}/{output}"],
+        ["gcc", "-O3", "-Wall"]
+        + includes
+        + ["-xc", "-c", "-", "-o", f"{TMP}/{output}"],
         stdin=contents,
     )
 
 
-def link_and_run(objects, binary, link_openblas=True):
-    objects = [f"{TMP}/{obj}" for obj in objects] + (
-        [OPENBLAS_OBJ] if link_openblas else []
+def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
+    objects = (
+        [f"{TMP}/{obj}" for obj in objects]
+        + ([OPENBLAS_OBJ] if link_openblas else [])
+        + [RUNNER_UTILS]
+        if link_runner_utils
+        else []
     )
     run_safe(["gcc"] + objects + ["-o", f"{TMP}/{binary}"])
     return run_safe([f"{TMP}/{binary}"])

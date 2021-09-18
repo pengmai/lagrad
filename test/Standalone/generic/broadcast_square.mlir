@@ -17,7 +17,7 @@ func @broadcast_square(%a: tensor<f32>, %b: tensor<4xf32>) -> tensor<4xf32> {
 
 // primal (bb):  (a, b) -> (ab)^2
 // (a, b) -> 2 * ab * b
-// adjoint (bb): (a, b) -> 1 * b * 2 * b -> 2b^2
+// adjoint (bb): (a, b) -> 2ab^2
 func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
 func @main() {
