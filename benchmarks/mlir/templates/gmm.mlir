@@ -287,6 +287,8 @@ func @gmm_objective(
     linalg.yield %2 : f64
   } -> tensor<f64>
 
+  %wishart_out = subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
+
   // logsumexp alphas
   %sumexp_alphas_init = constant dense<0.0> : tensor<f64>
   %sumexp_alphas = linalg.generic
