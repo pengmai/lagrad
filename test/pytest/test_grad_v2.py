@@ -66,7 +66,6 @@ def test_three_args():
     n, k, d = 4, 5, 6
     np.random.seed(0)
     x = np.random.rand(n, k, d)
-    lx = np.random.rand(n, k, d)
     qs = np.random.rand(k, d)
     config = {
         "n": n,
@@ -74,20 +73,18 @@ def test_three_args():
         "d": d,
         "Qdiags": qs.tolist(),
         "xcentered": x.tolist(),
-        "Lxcentered_intermediate": lx.tolist(),
     }
-    expected = np.array(
-        [
-            [2.41878, 2.85677, 3.28829, 2.14895, 1.17637, 3.32838],
-            [4.05145, 1.80468, 5.16941, 0.990859, 4.65306, 2.9535],
-            [5.45383, 6.55693, 4.47996, 2.51914, 1.49559, 2.71785],
-            [3.55329, 3.4295, 3.53719, 1.918, 1.62634, 3.868],
-            [2.28258, 2.38696, 2.69382, 4.36002, 2.7146, 4.85282],
-        ]
-    )
+    cst = np.ones((k, d, d)) * 2.3
 
-    mlir_res = np.array(extract_2d(jit(template.render(**config).encode("utf-8"))))
-    assert np.abs(mlir_res - expected).sum() < 1e-7
+    def hand_grad():
+        g = np.ones((n, k, d))
+        dx_qs = qs * g
+        dx_einsum = np.einsum("ijk,mik->mij", cst, g)
+        return dx_qs + dx_einsum
+
+    hand = hand_grad()
+    mlir_res = np.array(extract_3d(jit(template.render(**config).encode("utf-8"))))
+    assert np.abs(mlir_res - hand).mean() < 1e-4
 
 
 def test_logsumexp():

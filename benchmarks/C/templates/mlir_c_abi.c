@@ -76,3 +76,12 @@ void print_f_arr_2d(float *arr, size_t m, size_t n) {
   }
   printf("]\n");
 }
+
+void print_d_arr_2d(double *arr, size_t m, size_t n) {
+  printf("[\n");
+  for (size_t i = 0; i < m; i++) {
+    printf("  ");
+    print_d_arr(arr + i * n, n);
+  }
+  printf("]\n");
+}

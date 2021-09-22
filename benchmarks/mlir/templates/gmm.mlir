@@ -72,8 +72,8 @@ func @gmm_objective(
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
-  // %subview = tensor.extract_slice %Ls[0, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<1x{{d}}x{{d}}xf64>
-  // %U = tensor.cast %subview : tensor<1x{{d}}x{{d}}xf64> to tensor<*xf64>
+  // // %subview = tensor.extract_slice %Ls[0, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<1x{{d}}x{{d}}xf64>
+  // // %U = tensor.cast %subview : tensor<1x{{d}}x{{d}}xf64> to tensor<*xf64>
   // %subview = tensor.extract_slice %Lxcentered_intermediate[0, 0, 0] [1, 1, {{d}}] [1, 1, 1] : tensor<{{n}}x{{k}}x{{d}}xf64> to tensor<1x1x{{d}}xf64>
   // %U = tensor.cast %subview : tensor<1x1x{{d}}xf64> to tensor<*xf64>
   // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
@@ -102,6 +102,10 @@ func @gmm_objective(
     %2 = mulf %1, %1 : f64
     linalg.yield %2 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
+
+  // %subview = tensor.extract_slice %Lxcentered[0, 2, 0] [1, 1, {{d}}] [1, 1, 1] : tensor<{{n}}x{{k}}x{{d}}xf64> to tensor<1x1x{{d}}xf64>
+  // %U = tensor.cast %subview : tensor<1x1x{{d}}xf64> to tensor<*xf64>
+  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
 
   %sqsum_Lxcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
   %sqsum_Lxcentered = linalg.generic
@@ -138,19 +142,19 @@ func @gmm_objective(
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}xf64>
 
-  // %sum_inner_term_init = constant dense<0.0> : tensor<f64>
-  // %sum_inner_term = linalg.generic
-  //   {
-  //     indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> ()>],
-  //     iterator_types = ["reduction", "reduction"]
-  //   }
-  //   ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
-  //   outs(%sum_inner_term_init : tensor<f64>) {
-  // ^bb0(%arg0: f64, %arg1: f64):
-  //   %0 = addf %arg0, %arg1 : f64
-  //   linalg.yield %0 : f64
-  // } -> tensor<f64>
-  // return %sum_inner_term : tensor<f64>
+  // // %sum_inner_term_init = constant dense<0.0> : tensor<f64>
+  // // %sum_inner_term = linalg.generic
+  // //   {
+  // //     indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> ()>],
+  // //     iterator_types = ["reduction", "reduction"]
+  // //   }
+  // //   ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
+  // //   outs(%sum_inner_term_init : tensor<f64>) {
+  // // ^bb0(%arg0: f64, %arg1: f64):
+  // //   %0 = addf %arg0, %arg1 : f64
+  // //   linalg.yield %0 : f64
+  // // } -> tensor<f64>
+  // // return %sum_inner_term : tensor<f64>
 
   // %max_init = constant dense<0.0> : tensor<{{n}}xf64>
   // %max = linalg.generic
@@ -166,9 +170,9 @@ func @gmm_objective(
   //   linalg.yield %arg0 : f64
   // } -> tensor<{{n}}xf64>
   
-  // %subview = tensor.extract_slice %inner_term[0, 0][1, {{k}}][1, 1] : tensor<{{n}}x{{k}}xf64> to tensor<1x{{k}}xf64>
-  // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
-  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  // // %subview = tensor.extract_slice %inner_term[0, 0][1, {{k}}][1, 1] : tensor<{{n}}x{{k}}xf64> to tensor<1x{{k}}xf64>
+  // // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
+  // // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
 
   %lse_init = constant dense<0.0> : tensor<{{n}}xf64>
   %lse_intermediate = linalg.generic
@@ -277,12 +281,11 @@ func @gmm_objective(
     ins(%sum_qs : tensor<{{k}}xf64>)
     outs(%wishart_sum_qs_init : tensor<f64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = mulf %wishart_gamma, %arg0 : f64
-    %1 = addf %0, %arg1 : f64
-    linalg.yield %1 : f64
+    %0 = sitofp %wishart_m : i64 to f64
+    %1 = mulf %0, %arg0 : f64
+    %2 = addf %1, %arg1 : f64
+    linalg.yield %2 : f64
   } -> tensor<f64>
-
-  %wishart_out = subf %wishart_out_init, %wishart_sum_qs : tensor<f64>
 
   // logsumexp alphas
   %sumexp_alphas_init = constant dense<0.0> : tensor<f64>
@@ -316,7 +319,7 @@ func @lagrad_gmm(
   %x: tensor<{{n}}x{{d}}xf64>,
   %wishart_gamma: f64,
   %wishart_m: i64
-) -> (tensor<{{k}}xf64>) {
+) -> (tensor<{{k}}x{{d}}xf64>) {
   %f = constant @gmm_objective : (
     tensor<{{k}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
@@ -326,7 +329,7 @@ func @lagrad_gmm(
     f64,
     i64
   ) -> tensor<f64>
-  %df = standalone.grad %f : (
+  %df = standalone.grad %f {of = [2]}: (
     tensor<{{k}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
@@ -342,7 +345,7 @@ func @lagrad_gmm(
     tensor<{{n}}x{{d}}xf64>,
     f64,
     i64
-  ) -> tensor<{{k}}xf64>
+  ) -> tensor<{{k}}x{{d}}xf64>
   %res = call_indirect %df(
     %alphas,
     %means,
@@ -359,8 +362,8 @@ func @lagrad_gmm(
     tensor<{{n}}x{{d}}xf64>,
     f64,
     i64
-  ) -> tensor<{{k}}xf64>
-  return %res : tensor<{{k}}xf64>
+  ) -> tensor<{{k}}x{{d}}xf64>
+  return %res : tensor<{{k}}x{{d}}xf64>
 }
 
 // func @diag(%x: tensor<{{k}}xf64>) -> tensor<{{k}}x{{k}}xf64> {

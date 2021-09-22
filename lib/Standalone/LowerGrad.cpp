@@ -47,9 +47,12 @@ cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
              "linalg.generic bb op with more than two results "
              "not yet "
              "supported");
-      assert(old_to_new[clonedOp->getOperand(i)] &&
-             "operand had no matching new value");
-      clonedOp->setOperand(i, old_to_new[clonedOp->getOperand(i)]);
+      // We assume that region arguments and intermediate values will populate
+      // this map. If an entry is missing, it should have been defined outside
+      // the linalg.generic body.
+      if (old_to_new[clonedOp->getOperand(i)]) {
+        clonedOp->setOperand(i, old_to_new[clonedOp->getOperand(i)]);
+      }
       if (op.getNumResults() == 1) {
         old_to_new[op.getResult(0)] = clonedOp->getResult(0);
       }
@@ -60,9 +63,14 @@ cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
   return genericRegionOps;
 }
 
-void populateVJP(Operation *op, ValueRange regionArgs,
-                 llvm::DenseMap<Value, Value> &env, OpBuilder &rewriter) {
+void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
+                 OpBuilder &rewriter) {
   auto opName = op->getName().getStringRef();
+  if (opName == "std.sitofp") {
+    // The input is an integer so can't have a gradient signal.
+    return;
+  }
+
   size_t op_index = 0;
   for (Value operand : op->getOperands()) {
     // Compute the pullback (VJP).
@@ -80,13 +88,13 @@ void populateVJP(Operation *op, ValueRange regionArgs,
       Value result = op->getResult(0);
       vjp_value = onesLike(result.getLoc(), result, rewriter);
       env[result] = vjp_value;
-      // llvm::outs() << "Initializing value (not yet initialized): "
-      //              << result << "\n";
+      llvm::outs() << "Initializing value (not yet initialized): " << result
+                   << "\n";
     }
 
     if (opName == "std.mulf") {
       vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                regionArgs[1 - op_index]);
+                                                op->getOperand(1 - op_index));
     } else if (opName == "std.addf") {
       // This has no effect on the VJP
     } else if (opName == "std.subf") {
@@ -108,6 +116,13 @@ void populateVJP(Operation *op, ValueRange regionArgs,
     // Add the gradient signals.
     if (!env[operand]) {
       env[operand] = vjp_value;
+      auto genericOp = op->getParentOfType<linalg::GenericOp>();
+      if (genericOp) {
+        llvm::outs() << "outer arg: "
+                     << (operand.getParentRegion() ==
+                         &genericOp.getBodyRegion())
+                     << "\n";
+      }
     } else {
       env[operand] =
           rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand], vjp_value);
@@ -256,7 +271,7 @@ private:
         while (!frontier.empty()) {
           mlir::Operation *next = frontier.front();
           frontier.pop();
-          populateVJP(next, next->getOperands(), selectEnv, rewriter);
+          populateVJP(next, selectEnv, rewriter);
           next->setAttr("visited",
                         mlir::BoolAttr::get(next->getContext(), true));
           for (auto operand : next->getOperands()) {
@@ -272,16 +287,20 @@ private:
             selectEnv[selectOp.getFalseValue()]);
         env[selectOp.getTrueValue()] = selectResult;
         env[selectOp.getFalseValue()] = selectResult;
+      } else if (opName == "tensor.cast" || opName == "tensor.extract_slice" ||
+                 opName == "memref.tensor_load") {
+        // TODO: tensor.cast ops are currently only used for debugging.
+        continue;
       } else {
         size_t op_index = 0;
+        if (op->getNumResults() == 0) {
+          continue;
+        }
+
         for (Value operand : op->getOperands()) {
           // Compute the pullback (VJP).
           // TODO: Gotta be a better way to structure/abstract this. It's
           // essentially a huge switch statement on the operator name.
-          if (op->getNumResults() == 0) {
-            op->emitError("op had zero results");
-            return nullptr;
-          }
           Value vjp_value = env[op->getResult(0)];
           // TODO: To what extent do I need this? I put it in as hack to avoid
           // changing the function type.
@@ -342,9 +361,11 @@ private:
             SmallVector<StringRef, 6> iterator_types(
                 numIterators, getParallelIteratorTypeName());
 
-            Value output = env[operand]
-                               ? env[operand]
-                               : getZero(operand.getLoc(), operand, rewriter);
+            // Value output = env[operand]
+            //                    ? env[operand]
+            //                    : getZero(operand.getLoc(), operand,
+            //                    rewriter);
+            Value output = getZero(operand.getLoc(), operand, rewriter);
             auto outputShape = output.getType().dyn_cast<ShapedType>();
             assert(outputShape.hasRank() && "output must be a ranked type");
             auto generic_indexing_maps = genericOp.getIndexingMaps();
@@ -366,16 +387,12 @@ private:
               }
             }
 
-            // SmallVector<mlir::Operation *> genericRegionOps;
-            // for (auto &op : genericOp.getOps()) {
-            //   genericRegionOps.push_back(&op);
-            // }
-
             llvm::DenseMap<Value, Value> bbEnv;
             llvm::SmallVector<Value> genericOperands;
             for (Value arg : genericOp.getBodyRegion().getArguments()) {
               genericOperands.push_back(arg);
             }
+            // Region *newGenericRegion;
 
             auto adjoint = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*resultTensorType=*/operand.getType(),
@@ -394,11 +411,16 @@ private:
                       bbEnv[rop->getOperand(0)] =
                           regionArgs[regionArgs.size() - 2];
                       rewriter.eraseOp(rop);
+                      // newGenericRegion = rop->getParentRegion();
                     } else {
-                      populateVJP(rop, rop->getOperands(), bbEnv, builder);
+                      populateVJP(rop, bbEnv, builder);
                     }
                   }
 
+                  // if (!bbEnv[regionArgs[op_index]]) {
+                  //   bbEnv[regionArgs[op_index]] =
+                  //       onesLike(loc, regionArgs[op_index], builder);
+                  // }
                   // This add operation is required in the case of undoing
                   // reductions. It might be possible to omit this, if the
                   // output argument is never used in the primal, or perhaps if
@@ -411,6 +433,20 @@ private:
                   // builder.create<linalg::YieldOp>(loc, regionArgs[0]);
                 });
             vjp_value = adjoint.getResult(0);
+
+            // Need to determine if this value was defined outside of the
+            // generic op
+            // for (auto pair : bbEnv) {
+            //   assert(newGenericRegion && "newGenericRegion was not defined");
+            //   if (pair.first.getParentRegion() != newGenericRegion) {
+            //     if (env[pair.first]) {
+            //       env[pair.first] = rewriter.create<mlir::AddFOp>(
+            //           pair.first.getLoc(), env[pair.first], pair.second);
+            //     } else {
+            //       env[pair.first] = pair.second;
+            //     }
+            //   }
+            // }
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
               continue;
@@ -680,6 +716,10 @@ private:
       returnType.resize(1);
       returnType[0] = region->getArgument(0).getType();
       returnValue.resize(1);
+      if (!env[region->getArgument(0)]) {
+        funcOp.emitError("Gradient of first argument not found");
+        return nullptr;
+      }
       returnValue[0] = env[region->getArgument(0)];
     }
     funcOp.setType(

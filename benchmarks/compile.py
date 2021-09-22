@@ -71,14 +71,23 @@ def compile_mlir(contents, output, lower_type="loops"):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
     # print(
     #     run_safe(
-    #         [f"{BIN}/standalone-opt", "-canonicalize", "-convert-elementwise-to-linalg"]
-    #         + BUFFERIZE + LOWER_TO_LOOPS + LOWER_TO_LLVM,
+    #         [
+    #             f"{BIN}/standalone-opt",
+    #             "-take-grads",
+    #             "-canonicalize",
+    #             "-convert-elementwise-to-linalg",
+    #         ],
     #         stdin=contents,
     #     ).decode("utf-8")
     # )
 
     llvm_dialect = run_safe(
-        [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize", "-convert-elementwise-to-linalg"]
+        [
+            f"{BIN}/standalone-opt",
+            "-take-grads",
+            "-canonicalize",
+            "-convert-elementwise-to-linalg",
+        ]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
@@ -95,7 +104,12 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
 
     if print_loops:
         loops = run_safe(
-            [f"{BIN}/standalone-opt", "-take-grads", "-convert-elementwise-to-linalg", "-canonicalize"]
+            [
+                f"{BIN}/standalone-opt",
+                "-take-grads",
+                "-convert-elementwise-to-linalg",
+                "-canonicalize",
+            ]
             + BUFFERIZE
             + ["-convert-linalg-to-affine-loops"],
             stdin=contents,

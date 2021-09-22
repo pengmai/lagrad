@@ -22,7 +22,7 @@ extern UnrankedMemref gmm_objective(
     /*wishart_gamma=*/double,
     /*wishart_m=*/int64_t);
 
-extern F64Descriptor1D lagrad_gmm(
+extern F64Descriptor2D lagrad_gmm(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
     /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -103,6 +103,8 @@ GMMInput read_data() {
   gmm_input.Qs = Qs;
   gmm_input.Ls = Ls;
   gmm_input.x = x;
+  gmm_input.wishart_gamma = wishart_gamma;
+  gmm_input.wishart_m = wishart_m;
   return gmm_input;
 }
 
@@ -116,7 +118,8 @@ void free_gmm_input(GMMInput gmm_input) {
 
 int main() {
   GMMInput gmm_input = read_data();
-  printf("d %d k %d n %d\n", gmm_input.d, gmm_input.k, gmm_input.n);
+  printf("d %d k %d n %d wishart_gamma: %f\n", gmm_input.d, gmm_input.k,
+         gmm_input.n, gmm_input.wishart_gamma);
   int d = gmm_input.d;
   int k = gmm_input.k;
   int n = gmm_input.n;
@@ -124,21 +127,24 @@ int main() {
   double *deadbeef = (double *)0xdeadbeef;
   // gmm_objective(
   //     /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-  //     gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
-  //     1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1, /*x=*/deadbeef,
-  //     gmm_input.x, 0, n, d, d, 1,
+  //     gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
+  //     d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+  //     /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
   //     /*wishart_gamma=*/gmm_input.wishart_gamma,
   //     /*wishart_m=*/gmm_input.wishart_m);
-  F64Descriptor1D primal_result = lagrad_gmm(
+  F64Descriptor2D primal_result = lagrad_gmm(
       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-      d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
       /*wishart_gamma=*/gmm_input.wishart_gamma,
       /*wishart_m=*/gmm_input.wishart_m);
 
-  printf("adjoint for first arg result:\n");
-  print_d_arr(primal_result.aligned, primal_result.size);
+  printf("adjoint for first arg result (%lld x %lld):\n", primal_result.size_0,
+         primal_result.size_1);
+  // print_d_arr(primal_result.aligned, primal_result.size);
+  print_d_arr_2d(primal_result.aligned, primal_result.size_0,
+                 primal_result.size_1);
   free_gmm_input(gmm_input);
 }
 
