@@ -37,7 +37,14 @@ cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
   SmallVector<mlir::Operation *> genericRegionOps;
   DenseMap<Value, Value> old_to_new;
   for (size_t i = 0; i < genericOperands.size(); i++) {
-    old_to_new[genericOperands[i]] = regionArgs[i];
+    // The last generic operand is shifted by one. It corresponds to the output
+    // in the primal, but the gradient signal is inserted at the end of the
+    // adjoint, hence the shift.
+    if (i == genericOperands.size() - 1) {
+      old_to_new[genericOperands[i]] = regionArgs[genericOperands.size()];
+    } else {
+      old_to_new[genericOperands[i]] = regionArgs[i];
+    }
   }
 
   for (auto &op : genericOp.getOps()) {

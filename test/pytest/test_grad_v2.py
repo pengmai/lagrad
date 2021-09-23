@@ -46,6 +46,24 @@ def test_einsum_compare():
     )
 
 
+def test_generic_function_call():
+    expected = np.array(
+        [
+            [3.30259, 3.30259, 3.30259, 3.30259],
+            [4.2581, 4.2581, 4.2581, 4.2581],
+            [4.73767, 4.73767, 4.73767, 4.73767],
+            [5.06044, 5.06044, 5.06044, 5.06044],
+        ]
+    )
+    assert (
+        np.abs(
+            np.array(extract_2d(jit_file(f"{MLIR_FILES}/generic/functioncall.mlir")))
+            - expected
+        ).mean()
+        < 1e-9
+    )
+
+
 def test_function_call():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/functioncall.mlir")) == 1192.58
 
