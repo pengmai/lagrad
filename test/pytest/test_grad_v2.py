@@ -46,8 +46,8 @@ def test_einsum_compare():
     )
 
 
-# def test_function_call():
-#     print(jit_file(f"{MLIR_FILES}/functioncall.mlir"))
+def test_function_call():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/functioncall.mlir")) == 1192.58
 
 
 def test_broadcast():

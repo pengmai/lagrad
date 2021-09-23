@@ -12,10 +12,14 @@ func @mymul(%arg0: f32, %arg1: f32) -> f32 {
   return %0 : f32
 }
 
+// autograd uses (ans, ...args, g) when constructing VJPs through
+// ans is leftover from the forward pass
+
+// function calls. The args are from the forward pass.
 func @f(%arg0: f32, %arg1: f32) -> f32 {
   %0 = call @square(%arg0) : (f32) -> f32
-  %1 = call @square(%arg0) : (f32) -> f32
-  %2 = call @mymul(%0, %1) : (f32, f32) -> f32
+  %1 = call @square(%0) : (f32) -> f32
+  %2 = call @mymul(%1, %arg1) : (f32, f32) -> f32
   return %2 : f32
 }
 

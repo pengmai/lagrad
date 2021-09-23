@@ -218,18 +218,35 @@ private:
     auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
     auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
 
-    FuncOp funcOp = copyFunctionDeclaration(originalFuncOp, rewriter);
-    return differentiateFunction(funcOp, gradientsOf, rewriter);
+    std::string adjointFuncName("__grad_");
+    adjointFuncName += originalFuncOp.getName();
+
+    FuncOp funcOp =
+        copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
+    return differentiateFunction(funcOp, gradientsOf, rewriter,
+                                 /*topLevel=*/true);
   }
 
+  // TODO: the topLevel flag here is poor API design, we need a way to determine
+  // if the gradient signal should be passed in or automatically initialized
+  // to 1.
   static FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
-                                      ConversionPatternRewriter &rewriter) {
+                                      ConversionPatternRewriter &rewriter,
+                                      bool topLevel = false) {
     Region *region = funcOp.getCallableRegion();
     auto *context = funcOp.getContext();
     auto moduleOp = funcOp->getParentOfType<ModuleOp>();
     if (!region) {
       funcOp->emitError("Function region cannot be null");
       return nullptr;
+    }
+
+    // Need to double check the return type.
+    assert(funcOp.getType().getNumResults() == 1 &&
+           "differentiating functions with more than one result not supported");
+    if (!topLevel) {
+      funcOp.insertArgument(funcOp.getNumArguments(),
+                            funcOp.getType().getResult(0), {});
     }
 
     std::vector<Operation *> ops;
@@ -249,7 +266,11 @@ private:
         rewriter.setInsertionPoint(op);
         Value operand = op->getOperand(0);
         // Initialize the gradient signal to 1.0
-        env[operand] = onesLike(op->getLoc(), operand, rewriter);
+        if (topLevel) {
+          env[operand] = onesLike(op->getLoc(), operand, rewriter);
+        } else {
+          env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
+        }
         rewriter.eraseOp(op);
       } else if (opName == "std.cmpf") {
         continue;
@@ -642,25 +663,28 @@ private:
             op->emitError("differentiating tensor.extract not yet supported");
           } else if (opName == "std.call") {
             auto callOp = dyn_cast<mlir::CallOp>(op);
-            std::string gradFuncName("__grad_");
-            gradFuncName += callOp.callee();
+            std::stringstream gradFuncStream;
+            gradFuncStream << "__grad_" << callOp.callee().str() << "_arg"
+                           << op_index;
+            auto gradFuncName = gradFuncStream.str();
             auto dFuncOp =
                 dyn_cast_or_null<FuncOp>(moduleOp.lookupSymbol(gradFuncName));
             if (!dFuncOp) {
               auto primalFunc =
                   dyn_cast<FuncOp>(moduleOp.lookupSymbol(callOp.calleeAttr()));
-              dFuncOp = copyFunctionDeclaration(primalFunc, rewriter);
-              llvm::SmallVector<Attribute> arange;
-              for (size_t i = 0; i < dFuncOp.getNumArguments(); i++) {
-                arange.push_back(
-                    IntegerAttr::get(IntegerType::get(context, 64), i));
-              }
+              dFuncOp =
+                  copyFunctionDeclaration(primalFunc, gradFuncName, rewriter);
 
-              auto innerGradsOf = ArrayAttr::get(context, arange);
+              auto innerGradsOf = ArrayAttr::get(
+                  context,
+                  {IntegerAttr::get(IntegerType::get(context, 64), op_index)});
+
               dFuncOp = differentiateFunction(dFuncOp, innerGradsOf, rewriter);
             }
-            auto adjointCall = rewriter.create<mlir::CallOp>(
-                callOp.getLoc(), dFuncOp, callOp.getOperands());
+            llvm::SmallVector<Value> operands(callOp.getOperands());
+            operands.push_back(vjp_value);
+            auto adjointCall = rewriter.create<mlir::CallOp>(callOp.getLoc(),
+                                                             dFuncOp, operands);
             vjp_value = adjointCall.getResult(op_index);
           } else {
             llvm::outs() << "Unrecognized op: " << opName << "\n";
@@ -728,15 +752,13 @@ private:
     return funcOp;
   }
 
-  static FuncOp copyFunctionDeclaration(FuncOp funcOp,
+  static FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
                                         ConversionPatternRewriter &rewriter) {
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointAfter(funcOp);
     auto newOp = static_cast<FuncOp>(rewriter.clone(*funcOp));
 
-    std::string gradFuncName = "__grad_";
-    gradFuncName += funcOp.getName();
-    newOp.setName(gradFuncName);
+    newOp.setName(funcName);
     return newOp;
   }
 
