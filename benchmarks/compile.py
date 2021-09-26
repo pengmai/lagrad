@@ -17,6 +17,20 @@ RUNNER_UTILS = osp.join(
     osp.expanduser("~"), ".local", "lib", "libmlir_runner_utils.dylib"
 )
 
+SYSTEM_INCLUDES = osp.join(
+    "/Applications",
+    "Xcode.app",
+    "Contents",
+    "Developer",
+    "Platforms",
+    "MacOSX.platform",
+    "Developer",
+    "SDKs",
+    "MacOSX.sdk",
+    "usr",
+    "include",
+)
+# Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
 DRIVER_INCLUDES = osp.join(osp.dirname(__file__), "C", "templates")
 OPENBLAS_INCLUDES = osp.join(OPENBLAS_DIR, "include")
 OPENBLAS_OBJ = osp.join(OPENBLAS_DIR, "lib", "libopenblas.a")
@@ -131,11 +145,11 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
 
 
 def compile_enzyme(contents, output):
-    includes = f"-I{DRIVER_INCLUDES}"
+    includes = [f"-I{DRIVER_INCLUDES}", f"-I{SYSTEM_INCLUDES}"]
     preenzyme = run_safe(
-        [
-            CLANG_12,
-            includes,
+        [CLANG_12]
+        + includes
+        + [
             "-S",
             "-emit-llvm",
             "-xc",

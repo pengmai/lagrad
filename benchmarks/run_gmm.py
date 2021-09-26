@@ -1,5 +1,12 @@
 import argparse
-from compile import jit_mlir, compile_c, compile_mlir, link_and_run, run_grad
+from compile import (
+    jit_mlir,
+    compile_c,
+    compile_enzyme,
+    compile_mlir,
+    link_and_run,
+    run_grad,
+)
 from jinja2 import Environment, PackageLoader, select_autoescape
 import numpy as np
 
@@ -29,10 +36,11 @@ def compile_and_run_gmm(config):
         config["helpers"].render().encode("utf-8"),
         "helpers.o",
     )
+    compile_enzyme(config["enzyme"].render().encode("utf-8"), "gmm_enzyme.o")
     compile_mlir(config["mlir"].render(**config).encode("utf-8"), "gmm_kernel.o")
 
     stdout = link_and_run(
-        ["gmm_driver.o", "helpers.o", "gmm_kernel.o"],
+        ["gmm_driver.o", "helpers.o", "gmm_enzyme.o", "gmm_kernel.o"],
         "gmm_driver.out",
         link_runner_utils=True,
     )
@@ -43,6 +51,7 @@ def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
+    enzyme_template = driver_env.get_template("enzyme_gmm.c")
     config = {
         "k": 25,
         "n": 1000,
@@ -50,6 +59,7 @@ def main(args):
         "driver": driver_template,
         "helpers": helpers_template,
         "mlir": mlir_template,
+        "enzyme": enzyme_template,
     }
 
     compile_and_run_gmm(config)

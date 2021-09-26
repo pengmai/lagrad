@@ -103,10 +103,6 @@ func @gmm_objective(
     linalg.yield %2 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
-  // %subview = tensor.extract_slice %Lxcentered[0, 2, 0] [1, 1, {{d}}] [1, 1, 1] : tensor<{{n}}x{{k}}x{{d}}xf64> to tensor<1x1x{{d}}xf64>
-  // %U = tensor.cast %subview : tensor<1x1x{{d}}xf64> to tensor<*xf64>
-  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-
   %sqsum_Lxcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
   %sqsum_Lxcentered = linalg.generic
     {indexing_maps = [
@@ -321,7 +317,7 @@ func @lagrad_gmm(
   %x: tensor<{{n}}x{{d}}xf64>,
   %wishart_gamma: f64,
   %wishart_m: i64
-) -> (tensor<{{k}}x{{d}}xf64>) {
+) -> (tensor<{{k}}x{{d}}x{{d}}xf64>) {
   %f = constant @gmm_objective : (
     tensor<{{k}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
@@ -331,7 +327,7 @@ func @lagrad_gmm(
     f64,
     i64
   ) -> tensor<f64>
-  %df = standalone.grad %f {of = [2]}: (
+  %df = standalone.grad %f {of = [3]}: (
     tensor<{{k}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
@@ -347,7 +343,7 @@ func @lagrad_gmm(
     tensor<{{n}}x{{d}}xf64>,
     f64,
     i64
-  ) -> tensor<{{k}}x{{d}}xf64>
+  ) -> tensor<{{k}}x{{d}}x{{d}}xf64>
   %res = call_indirect %df(
     %alphas,
     %means,
@@ -364,8 +360,8 @@ func @lagrad_gmm(
     tensor<{{n}}x{{d}}xf64>,
     f64,
     i64
-  ) -> tensor<{{k}}x{{d}}xf64>
-  return %res : tensor<{{k}}x{{d}}xf64>
+  ) -> tensor<{{k}}x{{d}}x{{d}}xf64>
+  return %res : tensor<{{k}}x{{d}}x{{d}}xf64>
 }
 
 // func @diag(%x: tensor<{{k}}xf64>) -> tensor<{{k}}x{{k}}xf64> {

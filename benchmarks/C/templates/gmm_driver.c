@@ -31,6 +31,8 @@ extern F64Descriptor3D lagrad_gmm(
     /*x=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*wishart_gamma=*/double,
     /*wishart_m=*/int64_t);
+extern void dgmm_objective(GMMInput gmm, double *alphasb, double *meansb,
+                           double *icfb, double *err, double *errb);
 
 GMMInput read_data() {
   FILE *fp;
@@ -105,6 +107,7 @@ GMMInput read_data() {
   gmm_input.means = means;
   gmm_input.Qs = Qs;
   gmm_input.Ls = Ls;
+  gmm_input.icf = icf;
   gmm_input.x = x;
   gmm_input.wishart_gamma = wishart_gamma;
   gmm_input.wishart_m = wishart_m;
@@ -155,13 +158,7 @@ int main() {
   int n = gmm_input.n;
 
   double *deadbeef = (double *)0xdeadbeef;
-  // gmm_objective(
-  //     /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-  //     gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-  //     d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-  //     /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-  //     /*wishart_gamma=*/gmm_input.wishart_gamma,
-  //     /*wishart_m=*/gmm_input.wishart_m);
+
   F64Descriptor3D primal_result = lagrad_gmm(
       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
@@ -170,14 +167,26 @@ int main() {
       /*wishart_gamma=*/gmm_input.wishart_gamma,
       /*wishart_m=*/gmm_input.wishart_m);
 
-  printf("adjoint for first arg result (%lld x %lld):\n", primal_result.size_0,
-         primal_result.size_1);
+  printf("adjoint for icf: (%lld x %lld x %lld):\n", primal_result.size_0,
+         primal_result.size_1, primal_result.size_2);
   double *collapsed = collapse_ltri(primal_result);
   int icf_size = d * (d - 1) / 2;
   // It's easier just to look at a single collapsed matrix in the batch.
-  print_d_arr(collapsed + icf_size, icf_size);
+  print_d_arr(collapsed, icf_size);
+
+  double *alphasb = (double *)malloc(k * sizeof(double));
+  double *meansb = (double *)malloc(d * k * sizeof(double));
+  double *icfb = (double *)malloc(icf_size * k * sizeof(double));
+  double err, errb;
+  dgmm_objective(gmm_input, alphasb, meansb, icfb, &err, &errb);
+
+  printf("Enzyme adjoint for icf:\n");
+  print_d_arr(icfb + d, icf_size);
   free_gmm_input(gmm_input);
   free(collapsed);
+  free(alphasb);
+  free(meansb);
+  free(icfb);
 }
 
 // extern F32Descriptor0D gmm_objective(

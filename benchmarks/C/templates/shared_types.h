@@ -12,7 +12,7 @@ typedef struct {
 
 typedef struct _GMMInput {
   int d, k, n;
-  double *alphas, *means, *Qs, *Ls, *x;
+  double *alphas, *means, *Qs, *Ls, *x, *icf;
   double wishart_gamma;
   int wishart_m;
 } GMMInput;
