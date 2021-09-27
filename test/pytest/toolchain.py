@@ -24,6 +24,7 @@ LOWERING = [
     "-convert-linalg-to-loops",
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
+    "-convert-math-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
     "-llvm-legalize-for-export",
@@ -141,23 +142,25 @@ def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     return exe_p.stdout
 
 
-def jit_file(filename: str) -> str:
+def jit_file(filename: str, debug=False) -> str:
     with open(filename, "rb") as f:
         contents = f.read()
-    return jit(contents)
+    return jit(contents, debug=debug)
 
 
-def jit(contents: bytes, args=None) -> str:
+def jit(contents: bytes, args=None, debug=False) -> str:
     """
     Execute the given MLIR file through MLIR's JIT, first generalizing any named
     linalg ops to linalg.generic.
     """
-    # print(
-    #     "\n",
-    #     run_opt(
-    #         contents, ["-linalg-generalize-named-ops", "-take-grads", "-canonicalize"]
-    #     ).decode("utf-8"),
-    # )
+    if debug:
+        print(
+            "\n",
+            run_opt(
+                contents,
+                ["-linalg-generalize-named-ops", "-take-grads", "-canonicalize"],
+            ).decode("utf-8"),
+        )
     dialect_ir = run_opt(
         contents,
         args

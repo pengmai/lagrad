@@ -7,6 +7,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "queue"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
@@ -19,7 +20,9 @@ mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
   }
   if (operand.getType().isa<ShapedType>()) {
     auto shapedType = operand.getType().dyn_cast<ShapedType>();
-    auto denseAttr = DenseFPElementsAttr::get(shapedType, {1.0f});
+    auto denseAttr = shapedType.getElementTypeBitWidth() == 32
+                         ? DenseFPElementsAttr::get(shapedType, {1.0f})
+                         : DenseFPElementsAttr::get(shapedType, {1.0});
     return builder.create<mlir::ConstantOp>(loc, denseAttr);
   }
   llvm::outs() << "ones for type " << operand.getType() << " not implemented\n";
@@ -27,9 +30,54 @@ mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
   return nullptr;
 }
 
-void populateVJP(Operation *op, ValueRange regionArgs,
-                 llvm::DenseMap<Value, Value> &env, OpBuilder &rewriter) {
+SmallVector<mlir::Operation *>
+cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
+                             ValueRange regionArgs,
+                             SmallVector<Value> genericOperands) {
+  SmallVector<mlir::Operation *> genericRegionOps;
+  DenseMap<Value, Value> old_to_new;
+  for (size_t i = 0; i < genericOperands.size(); i++) {
+    // The last generic operand is shifted by one. It corresponds to the output
+    // in the primal, but the gradient signal is inserted at the end of the
+    // adjoint, hence the shift.
+    if (i == genericOperands.size() - 1) {
+      old_to_new[genericOperands[i]] = regionArgs[genericOperands.size()];
+    } else {
+      old_to_new[genericOperands[i]] = regionArgs[i];
+    }
+  }
+
+  for (auto &op : genericOp.getOps()) {
+    auto clonedOp = builder.clone(op);
+    for (size_t i = 0; i < clonedOp->getNumOperands(); i++) {
+      assert(op.getNumResults() < 2 &&
+             "linalg.generic bb op with more than two results "
+             "not yet "
+             "supported");
+      // We assume that region arguments and intermediate values will populate
+      // this map. If an entry is missing, it should have been defined outside
+      // the linalg.generic body.
+      if (old_to_new[clonedOp->getOperand(i)]) {
+        clonedOp->setOperand(i, old_to_new[clonedOp->getOperand(i)]);
+      }
+      if (op.getNumResults() == 1) {
+        old_to_new[op.getResult(0)] = clonedOp->getResult(0);
+      }
+    }
+    genericRegionOps.push_back(clonedOp);
+  }
+
+  return genericRegionOps;
+}
+
+void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
+                 OpBuilder &rewriter) {
   auto opName = op->getName().getStringRef();
+  if (opName == "std.sitofp") {
+    // The input is an integer so can't have a gradient signal.
+    return;
+  }
+
   size_t op_index = 0;
   for (Value operand : op->getOperands()) {
     // Compute the pullback (VJP).
@@ -47,13 +95,13 @@ void populateVJP(Operation *op, ValueRange regionArgs,
       Value result = op->getResult(0);
       vjp_value = onesLike(result.getLoc(), result, rewriter);
       env[result] = vjp_value;
-      // llvm::outs() << "Initializing value (not yet initialized): "
-      //              << result << "\n";
+      llvm::outs() << "Initializing value (not yet initialized): " << result
+                   << "\n";
     }
 
     if (opName == "std.mulf") {
       vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                regionArgs[1 - op_index]);
+                                                op->getOperand(1 - op_index));
     } else if (opName == "std.addf") {
       // This has no effect on the VJP
     } else if (opName == "std.subf") {
@@ -63,13 +111,25 @@ void populateVJP(Operation *op, ValueRange regionArgs,
     } else if (opName == "std.select") {
       // auto selectOp = dyn_cast<mlir::SelectOp>(op);
       llvm_unreachable("std.select not yet implemented");
+    } else if (opName == "math.exp") {
+      assert(op->getNumResults() == 1 &&
+             "math.exp op did not have exactly 1 result");
+      vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                op->getResult(0));
     } else {
-      llvm::outs() << "Unrecognized op: " << opName << "\n";
+      llvm::outs() << "(linalg.generic) unrecognized op: " << opName << "\n";
     }
 
     // Add the gradient signals.
     if (!env[operand]) {
       env[operand] = vjp_value;
+      auto genericOp = op->getParentOfType<linalg::GenericOp>();
+      if (genericOp) {
+        llvm::outs() << "outer arg: "
+                     << (operand.getParentRegion() ==
+                         &genericOp.getBodyRegion())
+                     << "\n";
+      }
     } else {
       env[operand] =
           rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand], vjp_value);
@@ -163,13 +223,37 @@ private:
     auto attr = definingOp->getAttrOfType<FlatSymbolRefAttr>("value");
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
     auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
+    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
 
-    FuncOp funcOp = copyFunctionDeclaration(originalFuncOp, rewriter);
+    std::string adjointFuncName("__grad_");
+    adjointFuncName += originalFuncOp.getName();
 
+    FuncOp funcOp =
+        copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
+    return differentiateFunction(funcOp, gradientsOf, rewriter,
+                                 /*topLevel=*/true);
+  }
+
+  // TODO: the topLevel flag here is poor API design, we need a way to determine
+  // if the gradient signal should be passed in or automatically initialized
+  // to 1.
+  static FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
+                                      ConversionPatternRewriter &rewriter,
+                                      bool topLevel = false) {
     Region *region = funcOp.getCallableRegion();
+    auto *context = funcOp.getContext();
+    auto moduleOp = funcOp->getParentOfType<ModuleOp>();
     if (!region) {
-      definingOp->emitError("Function region cannot be null");
+      funcOp->emitError("Function region cannot be null");
       return nullptr;
+    }
+
+    // Need to double check the return type.
+    assert(funcOp.getType().getNumResults() == 1 &&
+           "differentiating functions with more than one result not supported");
+    if (!topLevel) {
+      funcOp.insertArgument(funcOp.getNumArguments(),
+                            funcOp.getType().getResult(0), {});
     }
 
     std::vector<Operation *> ops;
@@ -189,53 +273,62 @@ private:
         rewriter.setInsertionPoint(op);
         Value operand = op->getOperand(0);
         // Initialize the gradient signal to 1.0
-        env[operand] = onesLike(op->getLoc(), operand, rewriter);
+        if (topLevel) {
+          env[operand] = onesLike(op->getLoc(), operand, rewriter);
+        } else {
+          env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
+        }
         rewriter.eraseOp(op);
       } else if (opName == "std.cmpf") {
         continue;
-      } else {
-        if (opName == "std.select") {
-          auto selectOp = dyn_cast<mlir::SelectOp>(op);
-          auto trueDefiningOp = selectOp.getTrueValue().getDefiningOp();
-          llvm::DenseMap<Value, Value> selectEnv;
-          Value dTrue;
-          if (trueDefiningOp) {
-            for (const auto key : selectEnv) {
-              llvm::outs() << "first: " << key.first
-                           << "; second: " << key.second << "\n";
-            }
-            dTrue = selectEnv[selectOp.getTrueValue()];
-          } else {
-            dTrue =
-                onesLike(selectOp.getLoc(), selectOp.getTrueValue(), rewriter);
-          }
+      } else if (opName == "std.select") {
+        auto selectOp = dyn_cast<mlir::SelectOp>(op);
+        auto trueDefiningOp = selectOp.getTrueValue().getDefiningOp();
+        llvm::DenseMap<Value, Value> selectEnv;
+        std::queue<mlir::Operation *> frontier;
+        if (trueDefiningOp) {
+          frontier.push(trueDefiningOp);
+        }
 
-          auto falseDefiningOp = selectOp.getFalseValue().getDefiningOp();
-          // TODO: Will there be issues with overlapping the selectEnv for
-          // both true and false VJP generation?
-          Value dFalse;
-          if (falseDefiningOp) {
-            dFalse = selectEnv[selectOp.getFalseValue()];
-          } else {
-            dFalse =
-                onesLike(selectOp.getLoc(), selectOp.getFalseValue(), rewriter);
+        auto falseDefiningOp = selectOp.getFalseValue().getDefiningOp();
+        if (falseDefiningOp) {
+          frontier.push(falseDefiningOp);
+        }
+
+        // Traverse the use chain here, computing derivatives.
+        while (!frontier.empty()) {
+          mlir::Operation *next = frontier.front();
+          frontier.pop();
+          populateVJP(next, selectEnv, rewriter);
+          next->setAttr("visited",
+                        mlir::BoolAttr::get(next->getContext(), true));
+          for (auto operand : next->getOperands()) {
+            if (operand.getDefiningOp()) {
+              frontier.push(operand.getDefiningOp());
+            }
           }
-          env[selectOp.getTrueValue()] = rewriter.create<mlir::SelectOp>(
-              selectOp.getLoc(), selectOp.getCondition(), dTrue, dFalse);
-          env[selectOp.getFalseValue()] = rewriter.create<mlir::SelectOp>(
-              selectOp.getLoc(), selectOp.getCondition(), dFalse, dTrue);
+        }
+
+        Value selectResult = rewriter.create<mlir::SelectOp>(
+            selectOp.getLoc(), selectOp.getCondition(),
+            selectEnv[selectOp.getTrueValue()],
+            selectEnv[selectOp.getFalseValue()]);
+        env[selectOp.getTrueValue()] = selectResult;
+        env[selectOp.getFalseValue()] = selectResult;
+      } else if (opName == "tensor.cast" || opName == "tensor.extract_slice" ||
+                 opName == "memref.tensor_load") {
+        // TODO: tensor.cast ops are currently only used for debugging.
+        continue;
+      } else {
+        size_t op_index = 0;
+        if (op->getNumResults() == 0) {
           continue;
         }
 
-        size_t op_index = 0;
         for (Value operand : op->getOperands()) {
           // Compute the pullback (VJP).
           // TODO: Gotta be a better way to structure/abstract this. It's
           // essentially a huge switch statement on the operator name.
-          if (op->getNumResults() == 0) {
-            op->emitError("op had zero results");
-            return nullptr;
-          }
           Value vjp_value = env[op->getResult(0)];
           // TODO: To what extent do I need this? I put it in as hack to avoid
           // changing the function type.
@@ -245,7 +338,8 @@ private:
             env[result] = vjp_value;
             // llvm::outs() << "Initializing value (not yet initialized): "
             //              << result << "\n";
-          } else if (opName == "std.mulf") {
+          }
+          if (opName == "std.mulf") {
             vjp_value = rewriter.create<mlir::MulFOp>(
                 op->getLoc(), vjp_value, op->getOperand(1 - op_index));
           } else if (opName == "std.addf") {
@@ -277,6 +371,9 @@ private:
                    "math.exp op did not have exactly 1 result");
             vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
                                                       op->getResult(0));
+          } else if (opName == "math.log") {
+            vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
+                                                      op->getOperand(0));
           } else if (opName == "scf.if") {
             auto ifOp = dyn_cast<scf::IfOp>(op);
             vjp_value = reverseIfOp(ifOp, rewriter);
@@ -287,16 +384,16 @@ private:
 
             auto numIterators = genericOp.iterator_types().size();
             SmallVector<AffineMap, 6> indexing_maps(
-                op->getNumOperands(),
+                op->getNumOperands() + 1,
                 rewriter.getMultiDimIdentityMap(numIterators));
             SmallVector<StringRef, 6> iterator_types(
                 numIterators, getParallelIteratorTypeName());
 
-            Value output = env[operand]
-                               ? env[operand]
-                               : getZero(operand.getLoc(), operand, rewriter);
-            assert(genericOp.getNumInputs() <= 2 &&
-                   "support for more ops than 2 not yet implemented");
+            // Value output = env[operand]
+            //                    ? env[operand]
+            //                    : getZero(operand.getLoc(), operand,
+            //                    rewriter);
+            Value output = getZero(operand.getLoc(), operand, rewriter);
             auto outputShape = output.getType().dyn_cast<ShapedType>();
             assert(outputShape.hasRank() && "output must be a ranked type");
             auto generic_indexing_maps = genericOp.getIndexingMaps();
@@ -304,22 +401,26 @@ private:
             SmallVector<Value> inputs;
             for (size_t i = 0; i < op_count; i++) {
               if (i == op_index) {
-                indexing_maps[i] = generic_indexing_maps[op_count - 1];
-                inputs.push_back(vjp_value);
+                indexing_maps[i] = generic_indexing_maps[i];
+                inputs.push_back(op->getOperand(i));
               } else if (i == op_count - 1) {
-                indexing_maps[i] = generic_indexing_maps[op_index];
+                indexing_maps[i + 1] = generic_indexing_maps[op_index];
+                // Add the gradient signal as an argument at the end of the
+                // inputs.
+                inputs.push_back(vjp_value);
+                indexing_maps[i] = generic_indexing_maps[op_count - 1];
               } else {
                 indexing_maps[i] = generic_indexing_maps[i];
                 inputs.push_back(op->getOperand(i));
               }
             }
 
-            SmallVector<mlir::Operation *> genericRegionOps;
-            for (auto &op : genericOp.getOps()) {
-              genericRegionOps.push_back(&op);
-            }
-
             llvm::DenseMap<Value, Value> bbEnv;
+            llvm::SmallVector<Value> genericOperands;
+            for (Value arg : genericOp.getBodyRegion().getArguments()) {
+              genericOperands.push_back(arg);
+            }
+            // Region *newGenericRegion;
 
             auto adjoint = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*resultTensorType=*/operand.getType(),
@@ -327,27 +428,53 @@ private:
                 /*indexing_maps=*/indexing_maps,
                 /*iterator_types=*/iterator_types,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+                  SmallVector<mlir::Operation *> genericRegionOps =
+                      cloneLinalgGenericBasicBlock(genericOp, builder,
+                                                   regionArgs, genericOperands);
+
                   for (auto it = genericRegionOps.rbegin();
                        it != genericRegionOps.rend(); it++) {
                     auto rop = *it;
                     if (rop->getName().getStringRef() == "linalg.yield") {
-                      bbEnv[rop->getOperand(0)] = regionArgs[op_index];
+                      bbEnv[rop->getOperand(0)] =
+                          regionArgs[regionArgs.size() - 2];
+                      rewriter.eraseOp(rop);
+                      // newGenericRegion = rop->getParentRegion();
                     } else {
-                      populateVJP(rop, regionArgs, bbEnv, builder);
+                      populateVJP(rop, bbEnv, builder);
                     }
                   }
 
+                  // if (!bbEnv[regionArgs[op_index]]) {
+                  //   bbEnv[regionArgs[op_index]] =
+                  //       onesLike(loc, regionArgs[op_index], builder);
+                  // }
                   // This add operation is required in the case of undoing
                   // reductions. It might be possible to omit this, if the
                   // output argument is never used in the primal, or perhaps if
                   // the primal iterator types do not include reductions.
                   Value add_res = builder.create<mlir::AddFOp>(
-                      loc, bbEnv[genericOp.getRegion().getArgument(op_index)],
+                      loc, bbEnv[regionArgs[op_index]],
                       regionArgs[regionArgs.size() - 1]);
 
                   builder.create<linalg::YieldOp>(loc, add_res);
+                  // builder.create<linalg::YieldOp>(loc, regionArgs[0]);
                 });
             vjp_value = adjoint.getResult(0);
+
+            // Need to determine if this value was defined outside of the
+            // generic op
+            // for (auto pair : bbEnv) {
+            //   assert(newGenericRegion && "newGenericRegion was not defined");
+            //   if (pair.first.getParentRegion() != newGenericRegion) {
+            //     if (env[pair.first]) {
+            //       env[pair.first] = rewriter.create<mlir::AddFOp>(
+            //           pair.first.getLoc(), env[pair.first], pair.second);
+            //     } else {
+            //       env[pair.first] = pair.second;
+            //     }
+            //   }
+            // }
           } else if (opName == "linalg.dot") {
             if (op_index > 1)
               continue;
@@ -541,18 +668,39 @@ private:
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
             op->emitError("differentiating tensor.extract not yet supported");
-            // Value index = rewriter.create<mlir::ConstantOp>(
-            //     operand.getLoc(),
-            //     IntegerAttr::get(IndexType::get(operand.getContext()), 0));
-            // auto genOp = rewriter.create<tensor::GenerateOp>(
-            //     operand.getLoc(), env[operand].getType(), index);
-            // vjp_value = genOp.getResult();
+          } else if (opName == "std.call") {
+            auto callOp = dyn_cast<mlir::CallOp>(op);
+            std::stringstream gradFuncStream;
+            gradFuncStream << "__grad_" << callOp.callee().str() << "_arg"
+                           << op_index;
+            auto gradFuncName = gradFuncStream.str();
+            auto dFuncOp =
+                dyn_cast_or_null<FuncOp>(moduleOp.lookupSymbol(gradFuncName));
+            if (!dFuncOp) {
+              auto primalFunc =
+                  dyn_cast<FuncOp>(moduleOp.lookupSymbol(callOp.calleeAttr()));
+              dFuncOp =
+                  copyFunctionDeclaration(primalFunc, gradFuncName, rewriter);
+
+              auto innerGradsOf = ArrayAttr::get(
+                  context,
+                  {IntegerAttr::get(IntegerType::get(context, 64), op_index)});
+
+              dFuncOp = differentiateFunction(dFuncOp, innerGradsOf, rewriter);
+            }
+            llvm::SmallVector<Value> operands(callOp.getOperands());
+            operands.push_back(vjp_value);
+            auto adjointCall = rewriter.create<mlir::CallOp>(callOp.getLoc(),
+                                                             dFuncOp, operands);
+            vjp_value = adjointCall.getResult(op_index);
           } else {
             llvm::outs() << "Unrecognized op: " << opName << "\n";
           }
 
           // Add the gradient signals.
-          if (!env[operand]) {
+          if (op->hasAttr("visited")) {
+            // Do nothing
+          } else if (!env[operand]) {
             env[operand] = vjp_value;
           } else {
             env[operand] = rewriter.create<mlir::AddFOp>(
@@ -563,15 +711,29 @@ private:
       }
     }
 
+    // for (auto it = ops.rbegin(); it != ops.rend(); it++) {
+    //   Operation *op = *it;
+    //   auto opName = op->getName().getStringRef();
+    //   if (opName == "std.select") {
+    //     auto selectOp = dyn_cast<mlir::SelectOp>(op);
+    //     env[selectOp.getResult()] = rewriter.create<SelectOp>(
+    //         selectOp.getLoc(), selectOp.getCondition(),
+    //         env[selectOp.getTrueValue()], env[selectOp.getFalseValue()]);
+
+    //     // TODO: double check gradient accumulation for correctness.
+    //     env[selectOp.getTrueValue()] = env[selectOp.getResult()];
+    //     env[selectOp.getFalseValue()] = env[selectOp.getResult()];
+    //   }
+    // }
+
     auto fntyp = funcOp.getType();
     // if (!env[region->getArgument(0)]) {
     //   env[region->getArgument(0)] = getZero(region->getArgument(0).getLoc(),
     //                                         region->getArgument(0),
     //                                         rewriter);
     // }
-    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
-    SmallVector<Type> returnType(arg0Type.getNumInputs());
-    SmallVector<Value> returnValue(arg0Type.getNumInputs());
+    SmallVector<Type> returnType(funcOp.getType().getNumInputs());
+    SmallVector<Value> returnValue(funcOp.getType().getNumInputs());
     if (gradientsOf) {
       returnType.resize(gradientsOf.size());
       returnValue.resize(gradientsOf.size());
@@ -585,6 +747,10 @@ private:
       returnType.resize(1);
       returnType[0] = region->getArgument(0).getType();
       returnValue.resize(1);
+      if (!env[region->getArgument(0)]) {
+        funcOp.emitError("Gradient of first argument not found");
+        return nullptr;
+      }
       returnValue[0] = env[region->getArgument(0)];
     }
     funcOp.setType(
@@ -593,15 +759,13 @@ private:
     return funcOp;
   }
 
-  static FuncOp copyFunctionDeclaration(FuncOp funcOp,
+  static FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
                                         ConversionPatternRewriter &rewriter) {
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointAfter(funcOp);
     auto newOp = static_cast<FuncOp>(rewriter.clone(*funcOp));
 
-    std::string gradFuncName = "__grad_";
-    gradFuncName += funcOp.getName();
-    newOp.setName(gradFuncName);
+    newOp.setName(funcName);
     return newOp;
   }
 
@@ -614,7 +778,9 @@ private:
     if (operand.getType().isa<ShapedType>()) {
       auto shapedType = operand.getType().dyn_cast<ShapedType>();
       // Will automatically be broadcasted to the right shape.
-      auto denseAttr = DenseFPElementsAttr::get(shapedType, {0.0f});
+      auto denseAttr = shapedType.getElementTypeBitWidth() == 32
+                           ? DenseFPElementsAttr::get(shapedType, {0.0f})
+                           : DenseFPElementsAttr::get(shapedType, {0.0});
       return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
     }
     llvm_unreachable("not yet implemented");

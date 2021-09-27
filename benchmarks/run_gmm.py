@@ -1,5 +1,12 @@
 import argparse
-from compile import jit_mlir
+from compile import (
+    jit_mlir,
+    compile_c,
+    compile_enzyme,
+    compile_mlir,
+    link_and_run,
+    run_grad,
+)
 from jinja2 import Environment, PackageLoader, select_autoescape
 import numpy as np
 

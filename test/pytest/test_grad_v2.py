@@ -8,8 +8,9 @@ Some files are missing from transferring computers.
 
 import os.path as osp
 import numpy as np
-from toolchain import jit_file
-from stdout_parser import extract_1d, extract_2d, extract_3d
+from jinja2 import Template
+from toolchain import jit_file, jit
+from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
 
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 
@@ -45,5 +46,88 @@ def test_einsum_compare():
     )
 
 
+def test_generic_function_call():
+    expected = np.array(
+        [
+            [3.30259, 3.30259, 3.30259, 3.30259],
+            [4.2581, 4.2581, 4.2581, 4.2581],
+            [4.73767, 4.73767, 4.73767, 4.73767],
+            [5.06044, 5.06044, 5.06044, 5.06044],
+        ]
+    )
+    assert (
+        np.abs(
+            np.array(extract_2d(jit_file(f"{MLIR_FILES}/generic/functioncall.mlir")))
+            - expected
+        ).mean()
+        < 1e-9
+    )
+
+
+def test_function_call():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/functioncall.mlir")) == 1192.58
+
+
+def test_broadcast():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast.mlir")) == 4
+
+
+def test_broadcast_square():
+    assert (
+        extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast_square.mlir")) == 920
+    )
+
+
+def test_three_args():
+    with open(f"{MLIR_FILES}/generic/three_args.mlir") as f:
+        template = Template(f.read())
+    n, k, d = 4, 5, 6
+    np.random.seed(0)
+    x = np.random.rand(n, k, d)
+    qs = np.random.rand(k, d)
+    config = {
+        "n": n,
+        "k": k,
+        "d": d,
+        "Qdiags": qs.tolist(),
+        "xcentered": x.tolist(),
+    }
+    cst = np.ones((k, d, d)) * 2.3
+
+    def hand_grad():
+        g = np.ones((n, k, d))
+        dx_qs = qs * g
+        dx_einsum = np.einsum("ijk,mik->mij", cst, g)
+        return dx_qs + dx_einsum
+
+    hand = hand_grad()
+    mlir_res = np.array(extract_3d(jit(template.render(**config).encode("utf-8"))))
+    assert np.abs(mlir_res - hand).mean() < 1e-4
+
+
+def test_logsumexp():
+    with open(f"{MLIR_FILES}/generic/logsumexp.mlir") as f:
+        template = Template(f.read())
+    np.random.seed(0)
+    x = np.random.rand(3, 4)
+    expected = np.array(
+        [
+            [0.236266, 0.279034, 0.249362, 0.235339],
+            [0.205766, 0.256975, 0.208653, 0.328606],
+            [0.327953, 0.18358, 0.276146, 0.212321],
+        ]
+    )
+
+    mlir_res = np.array(
+        extract_2d(jit(template.render(data=x.tolist()).encode("utf-8")))
+    )
+
+    assert np.abs(expected - mlir_res).sum() < 1e-7
+
+
+def disabled_test_closure():
+    print(extract_scalar(jit_file(f"{MLIR_FILES}/generic/closure.mlir")))
+
+
 def disabled_test_if_else():
-    print(jit_file(f"{MLIR_FILES}/select.mlir"))
+    print("if-else", jit_file(f"{MLIR_FILES}/select.mlir"))
