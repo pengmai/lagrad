@@ -4,6 +4,9 @@ import os.path as osp
 import subprocess
 from typing import List, Literal
 
+LLVM_12_BIN = osp.join(osp.expanduser("~"), ".local", "LLVM12", "bin")
+OPT_12 = osp.join(LLVM_12_BIN, "opt")
+LLC_12 = osp.join(LLVM_12_BIN, "llc")
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
@@ -25,13 +28,23 @@ LOWERING = [
     "-convert-std-to-llvm",
     "-llvm-legalize-for-export",
 ]
+LOWERING_ENZYME = [
+    "-convert-linalg-to-loops",
+    "-convert-scf-to-std",
+    "-convert-memref-to-llvm",
+    "-convert-math-to-llvm",
+    "-convert-standalone-to-llvm",
+    "-convert-linalg-to-llvm",
+    "-convert-std-to-llvm",
+    "-llvm-legalize-for-export",
+]
 ENZYME_DYLIB = osp.join(
-    osp.dirname(__file__),
-    "..",
-    "..",
-    "..",
-    "playground",
-    "enzyme_test",
+    osp.expanduser("~"),
+    "Research",
+    "Enzyme",
+    "enzyme",
+    "build",
+    "Enzyme",
     "LLVMEnzyme-12.dylib",
 )
 LIB = osp.expanduser(osp.join("~", ".local", "lib"))
@@ -60,7 +73,7 @@ def lower_to_llvm_dialect(contents: bytes, take_grads=False) -> bytes:
         (["-take-grads"] if take_grads else [])
         + TENSOR_PREPROCESS
         + BUFFERIZE
-        + LOWERING,
+        + (LOWERING if take_grads else LOWERING_ENZYME),
     )
 
 
@@ -77,14 +90,14 @@ def lower_to_llvm(llvm_dialect: bytes) -> bytes:
 def run_enzyme(llvm_ir: bytes, optimize=True):
     # opt "$LLVM_FILE" -load $ENZYME_DYLIB -enzyme -o "$ENZYME_OUTPUT" -S
     enzyme_p = subprocess.run(
-        ["opt", "-load", ENZYME_DYLIB, "-enzyme", "-S"],
+        [OPT_12, "-load", ENZYME_DYLIB, "-enzyme", "-S"],
         input=llvm_ir,
         capture_output=True,
         check=True,
     )
     if optimize:
         opt_p = subprocess.run(
-            ["opt", "-O3", "-S"], input=enzyme_p.stdout, capture_output=True, check=True
+            [OPT_12, "-O3", "-S"], input=enzyme_p.stdout, capture_output=True, check=True
         )
         return opt_p.stdout
     return enzyme_p.stdout

@@ -27,16 +27,16 @@ ENZYME_OPT_ARGS="-convert-linalg-to-loops -convert-standalone-to-llvm"
 
 # For debugging
 # LINALG_OPTS="-linalg-fuse-elementwise-ops -linalg-inline-scalar-operands"
-# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -linalg-generalize-named-ops -take-grads -canonicalize $HIGH_LEVEL_OPTS $LINALG_OPTS #$TENSOR_PREPROCESSING $BUFFERIZE #$LOWERING $TO_LLVM
+$BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads -canonicalize #$TENSOR_PREPROCESSING $BUFFERIZE #$LOWERING $TO_LLVM
 
 # For execution
-$BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -linalg-generalize-named-ops -take-grads $HIGH_LEVEL_OPTS $OPT_ARGS | mlir-translate -mlir-to-llvmir > "$LLVM_FILE"
-# opt "$LLVM_FILE" -O3 -o "$LLVM_FILE" -S
-llc -filetype=obj < "$LLVM_FILE" > "$OBJ_FILE"
+# $BIN/standalone-opt "$MLIR_KERNELS/$FILE.mlir" -take-grads $HIGH_LEVEL_OPTS $OPT_ARGS | mlir-translate -mlir-to-llvmir > "$LLVM_FILE"
+# # opt "$LLVM_FILE" -O3 -o "$LLVM_FILE" -S
+# llc -filetype=obj < "$LLVM_FILE" > "$OBJ_FILE"
 
-CC=gcc
-"$CC" -c "$DRIVERS/$FILE.c" -o "$TMP_DIR/driver.o"
-# "$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" "$TMP_DIR/postenzyme.o" -o "$TMP_DIR/$FILE.out"
-"$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" -o "$TMP_DIR/$FILE.out"
+# CC=gcc
+# "$CC" -c "$DRIVERS/$FILE.c" -o "$TMP_DIR/driver.o"
+# # "$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" "$TMP_DIR/postenzyme.o" -o "$TMP_DIR/$FILE.out"
+# "$CC" "$TMP_DIR/driver.o" "$OBJ_FILE" -o "$TMP_DIR/$FILE.out"
 
-"$TMP_DIR/$FILE.out"
+# "$TMP_DIR/$FILE.out"

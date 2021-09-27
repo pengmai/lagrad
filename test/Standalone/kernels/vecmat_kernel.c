@@ -1,4 +1,4 @@
-#include <cblas.h>
+#include "cblas.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -36,8 +36,8 @@ void _mlir_ciface_souter(Descriptor1D *x, Descriptor1D *y, Descriptor2D *out) {
   // }
 
   // cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, out->size_0,
-  //             out->size_1, 1, 1.0, x->aligned, 1, y->aligned, out->size_1, 0.0,
-  //             out->aligned, out->size_1);
+  //             out->size_1, 1, 1.0, x->aligned, 1, y->aligned, out->size_1,
+  //             0.0, out->aligned, out->size_1);
   // cblas_sger(CblasRowMajor, out->size_0, out->size_1, 1.0, x->aligned, 1,
   //            y->aligned, 1, out->aligned, out->size_1);
 }

@@ -7,6 +7,9 @@
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
+#include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
+#include "mlir/Conversion/LinalgToLLVM/LinalgToLLVM.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Dialect/Affine/IR/AffineOpsDialect.h.inc"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -174,14 +177,19 @@ struct StandaloneToLLVMLoweringPass
 void StandaloneToLLVMLoweringPass::runOnOperation() {
   LLVMConversionTarget target(getContext());
   target.addLegalOp<ModuleOp>();
+  // target.addLegalOp<FuncOp>();
+  // target.addLegalOp<ConstantOp>();
 
   LLVMTypeConverter typeConverter(&getContext());
 
   OwningRewritePatternList patterns(&getContext());
   populateAffineToStdConversionPatterns(patterns);
   populateLoopToStdConversionPatterns(patterns);
+  populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
+  // populateLinalgToLLVMConversionPatterns(typeConverter, patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
-
+  // populateStdToLLVMFuncOpConversionPattern(typeConverter, patterns);
+  populateMathToLLVMConversionPatterns(typeConverter, patterns);
   patterns.insert<DiffOpLowering>(&getContext());
 
   auto mod = getOperation();

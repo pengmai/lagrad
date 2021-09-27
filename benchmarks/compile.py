@@ -29,6 +29,7 @@ BUFFERIZE = [
     "-linalg-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
+    "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
     "-convert-linalg-to-affine-loops",
@@ -44,9 +45,11 @@ LOWER_TO_LLVM = [
 ]
 
 
-def run_safe(args, stdin: bytes = None):
+def run_safe(args, stdin: bytes = None, suppress_stderr=False):
     try:
         p = subprocess.run(args, input=stdin, check=True, capture_output=True)
+        if p.stderr and not suppress_stderr:
+            print(p.stderr.decode("utf-8"))
     except subprocess.CalledProcessError as e:
         raise Exception(e.stderr.decode("utf-8"))
     return p.stdout
@@ -54,6 +57,17 @@ def run_safe(args, stdin: bytes = None):
 
 def compile_mlir(contents, output, lower_type="loops"):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
+    # print(
+    #     run_safe(
+    #         [
+    #             f"{BIN}/standalone-opt",
+    #             "-take-grads",
+    #             "-canonicalize",
+    #             "-convert-elementwise-to-linalg",
+    #         ] + BUFFERIZE,
+    #         stdin=contents,
+    #     ).decode("utf-8")
+    # )
 
     llvm_dialect = run_safe(
         [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize"]
@@ -115,6 +129,7 @@ def compile_enzyme(contents, output):
             "-fno-unroll-loops",
         ],
         stdin=contents,
+        suppress_stderr=True,
     )
     postenzyme = run_safe(
         [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme

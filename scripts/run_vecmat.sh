@@ -6,10 +6,10 @@ KERNELS="$SCRIPT_DIR/../test/Standalone/kernels"
 TMP="$SCRIPT_DIR/../build/tmp"
 BIN="$SCRIPT_DIR/../build/bin"
 
-BUFFERIZE="-convert-elementwise-to-linalg -tensor-constant-bufferize -linalg-bufferize -tensor-bufferize -func-bufferize"
+BUFFERIZE="-convert-elementwise-to-linalg -tensor-constant-bufferize -linalg-bufferize -tensor-bufferize -func-bufferize -finalizing-bufferize"
 AFFINE_OPTS="-convert-linalg-to-affine-loops"
 # LOWERING="-finalizing-bufferize -buffer-deallocation -convert-scf-to-std -convert-linalg-to-llvm"
-LOWERING="-finalizing-bufferize -convert-scf-to-std -convert-linalg-to-llvm"
+LOWERING="-finalizing-bufferize -lower-affine -convert-scf-to-std -convert-memref-to-llvm -convert-linalg-to-llvm"
 EXPORT="mlir-translate -mlir-to-llvmir"
 COMPILE="llc -filetype=obj"
 

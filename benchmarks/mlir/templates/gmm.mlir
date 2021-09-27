@@ -219,59 +219,153 @@ func @gmm_objective(
     linalg.yield %0 : f32
   } -> tensor<f32>
 
-  return %slse : tensor<f32>
+  %wishart_sum_qs_init = constant dense<0.0> : tensor<f64>
+  %wishart_sum_qs = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
+      iterator_types = ["reduction"]
+    }
+    ins(%sum_qs : tensor<{{k}}xf64>)
+    outs(%wishart_sum_qs_init : tensor<f64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = sitofp %wishart_m : i64 to f64
+    %1 = mulf %0, %arg0 : f64
+    %2 = addf %1, %arg1 : f64
+    linalg.yield %2 : f64
+  } -> tensor<f64>
+
+  %wishart_out = subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
+
+  // logsumexp alphas
+  %sumexp_alphas_init = constant dense<0.0> : tensor<f64>
+  %sumexp_alphas = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
+      iterator_types = ["reduction"]
+    }
+    ins(%alphas : tensor<{{k}}xf64>)
+    outs(%sumexp_alphas_init : tensor<f64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = math.exp %arg0 : f64
+    %1 = addf %0, %arg1 : f64
+    linalg.yield %1 : f64
+  } -> tensor<f64>
+  %logsumexp_alphas = math.log %sumexp_alphas : tensor<f64>
+
+  %n_tensor = constant dense<{{n}}.> : tensor<f64>
+  %n_logsumexp_alphas = mulf %n_tensor, %logsumexp_alphas : tensor<f64>
+
+  %final_0 = subf %slse, %n_logsumexp_alphas : tensor<f64>
+  %final_1 = addf %final_0, %wishart_out : tensor<f64>
+  return %final_1 : tensor<f64>
 }
 
-// func @diag(%x: tensor<{{k}}xf32>) -> tensor<{{k}}x{{k}}xf32> {
-//   %eye = constant sparse<{{eye}}> : tensor<{{k}}x{{k}}xf32>
-//   %ones = constant dense<1.0> : tensor<{{k}}xf32>
-//   %outer_shape = constant dense<0.0> : tensor<{{k}}x{{k}}xf32>
-//   %outer = linalg.generic
-//     {
-//       indexing_maps = [affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d1)>, affine_map<(d0, d1) -> (d0, d1)>],
-//       iterator_types = ["parallel", "parallel"],
-//       doc = "vector outer product"
-//     }
-//     ins(%x, %ones : tensor<{{k}}xf32>, tensor<{{k}}xf32>)
-//     outs(%outer_shape: tensor<{{k}}x{{k}}xf32>) {
-//   ^bb0(%arg0: f32, %arg1: f32, %arg2: f32):
-//     %0 = mulf %arg0, %arg1 : f32
-//     linalg.yield %0 : f32
-//   } -> tensor<{{k}}x{{k}}xf32>
-//   %out = mulf %eye, %outer : tensor<{{k}}x{{k}}xf32>
-//   return %out : tensor<{{k}}x{{k}}xf32>
+// func @lagrad_gmm( 
+//   %alphas: tensor<{{k}}xf64>,
+//   %means: tensor<{{k}}x{{d}}xf64>,
+//   %Qs: tensor<{{k}}x{{d}}xf64>,
+//   %Ls: tensor<{{k}}x{{d}}x{{d}}xf64>,
+//   %x: tensor<{{n}}x{{d}}xf64>,
+//   %wishart_gamma: f64,
+//   %wishart_m: i64
+// ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>) {
+//   %f = constant @gmm_objective : (
+//     tensor<{{k}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}x{{d}}xf64>,
+//     tensor<{{n}}x{{d}}xf64>,
+//     f64,
+//     i64
+//   ) -> tensor<f64>
+//   %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
+//     tensor<{{k}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}x{{d}}xf64>,
+//     tensor<{{n}}x{{d}}xf64>,
+//     f64,
+//     i64
+//   ) -> tensor<f64>, (
+//     tensor<{{k}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}x{{d}}xf64>,
+//     tensor<{{n}}x{{d}}xf64>,
+//     f64,
+//     i64
+//   ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>)
+//   %res:4 = call_indirect %df(
+//     %alphas,
+//     %means,
+//     %Qs,
+//     %Ls,
+//     %x,
+//     %wishart_gamma,
+//     %wishart_m
+//   ) : (
+//     tensor<{{k}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}xf64>,
+//     tensor<{{k}}x{{d}}x{{d}}xf64>,
+//     tensor<{{n}}x{{d}}xf64>,
+//     f64,
+//     i64
+//   ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>)
+//   return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>
 // }
 
-// func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
-
-// func @main() {
-//   // %x = constant dense<{{data}}> : tensor<{{n}}x{{d}}xf32>
-//   // %means = constant dense<{{means}}> : tensor<{{k}}x{{d}}xf32>
-//   %vec = constant dense<[
-//     [1., 2.],
-//     [3., 4.],
-//     [5., 6.]
-//   ]> : tensor<3x2xf32>
-
-//   %out_init = constant dense<0.0> : tensor<3xf32>
-//   %intermediate = linalg.generic
-//     {
-//       indexing_maps = [
-//         affine_map<(d0, d1) -> (d0, d1)>,
-//         affine_map<(d0, d1) -> (d0)>
-//       ],
-//       iterator_types = ["parallel", "reduction"]
-//     }
-//     ins(%vec : tensor<3x2xf32>)
-//     outs(%out_init: tensor<3xf32>) {
-//   ^bb0(%arg0: f32, %arg1: f32):
-//     %0 = math.exp %arg0 : f32
-//     %1 = addf %0, %arg1 : f32
-//     linalg.yield %1 : f32
-//   } -> tensor<3xf32>
-//   %out = math.log %intermediate : tensor<3xf32>
-
-//   %U = tensor.cast %out : tensor<3xf32> to tensor<*xf32>
-//   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
-//   return
-// }
+func @diff_gmm( 
+  %alphas: tensor<{{k}}xf64>,
+  %means: tensor<{{k}}x{{d}}xf64>,
+  %Qs: tensor<{{k}}x{{d}}xf64>,
+  %Ls: tensor<{{k}}x{{d}}x{{d}}xf64>,
+  %x: tensor<{{n}}x{{d}}xf64>,
+  %wishart_gamma: f64,
+  %wishart_m: i64
+) -> tensor<{{k}}xf64> {
+  %f = constant @gmm_objective : (
+    tensor<{{k}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}x{{d}}xf64>,
+    tensor<{{n}}x{{d}}xf64>,
+    f64,
+    i64
+  ) -> tensor<f64>
+  %df = standalone.diff %f : (
+    tensor<{{k}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}x{{d}}xf64>,
+    tensor<{{n}}x{{d}}xf64>,
+    f64,
+    i64
+  ) -> tensor<f64>, (
+    tensor<{{k}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}x{{d}}xf64>,
+    tensor<{{n}}x{{d}}xf64>,
+    f64,
+    i64
+  ) -> tensor<{{k}}xf64>
+  %res = call_indirect %df(
+    %alphas,
+    %means,
+    %Qs,
+    %Ls,
+    %x,
+    %wishart_gamma,
+    %wishart_m
+  ) : (
+    tensor<{{k}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}x{{d}}xf64>,
+    tensor<{{n}}x{{d}}xf64>,
+    f64,
+    i64
+  ) -> tensor<{{k}}xf64>
+  return %res : tensor<{{k}}xf64>
+}

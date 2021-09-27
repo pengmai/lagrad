@@ -1,9 +1,9 @@
 func @vecmat(%x : tensor<3xf32>, %M : tensor<3x4xf32>) -> tensor<4xf32> {
   %shape = constant dense<0.0> : tensor<4xf32>
   %res = linalg.vecmat ins(%x, %M : tensor<3xf32>, tensor<3x4xf32>) outs(%shape : tensor<4xf32>) -> tensor<4xf32>
-  %cst = constant dense<[2.0, 1.0, 1.0, 1.0]> : tensor<4xf32>
-  %final = mulf %res, %cst : tensor<4xf32>
-  return %final : tensor<4xf32>
+  // %cst = constant dense<[2.0, 1.0, 1.0, 1.0]> : tensor<4xf32>
+  // %final = mulf %res, %cst : tensor<4xf32>
+  return %res : tensor<4xf32>
 }
 
 // #map0 = affine_map<(d0, d1) -> (d1)>
@@ -25,10 +25,17 @@ func @vecmat(%x : tensor<3xf32>, %M : tensor<3x4xf32>) -> tensor<4xf32> {
 //   return %res : tensor<3xf32>
 // }
 
-func @grad_vecmat(%x : tensor<3xf32>, %M : tensor<3x4xf32>) -> tensor<3x4xf32> {
+func @grad_vecmat(%x : tensor<3xf32>, %M : tensor<3x4xf32>) -> tensor<3xf32> {
   %f = constant @vecmat : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>
-  %df = standalone.grad %f {of = [1]} : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>, (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3x4xf32>
-  %res = call_indirect %df(%x, %M) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3x4xf32>
-//   %res = call @__grad_vecmat(%x, %M) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
-  return %res : tensor<3x4xf32>
+  %df = standalone.grad %f {of = [0]} : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>, (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
+  %res = call_indirect %df(%x, %M) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
+  return %res : tensor<3xf32>
 }
+
+// func @grad_vecmat(%x : tensor<3xf32>, %M : tensor<3x4xf32>) -> tensor<3x4xf32> {
+//   %f = constant @vecmat : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>
+//   %df = standalone.grad %f {of = [1]} : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>, (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3x4xf32>
+//   %res = call_indirect %df(%x, %M) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3x4xf32>
+// //   %res = call @__grad_vecmat(%x, %M) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
+//   return %res : tensor<3x4xf32>
+// }

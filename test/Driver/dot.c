@@ -15,8 +15,8 @@ typedef struct {
   Descriptor1D db;
 } DotGradient;
 
-extern DotGradient ddot(float *, float *, int64_t, int64_t, int64_t, float *,
-                        float *, int64_t, int64_t, int64_t);
+extern Descriptor1D ddot(float *, float *, int64_t, int64_t, int64_t, float *,
+                         float *, int64_t, int64_t, int64_t);
 // extern void denzyme_dot(int, float *, float *, float *, float *);
 
 // extern DotGradient enzyme_dot(float *, float *, int64_t, int64_t, int64_t,
@@ -40,30 +40,30 @@ int main() {
     struct timeval start, stop;
 
     gettimeofday(&start, NULL);
-    DotGradient dot_grad =
+    Descriptor1D dot_grad =
         ddot(deadbeef, a, 0, size, 1, deadbeef, b, 0, size, 1);
     gettimeofday(&stop, NULL);
 
     grad_results[run] = timediff(start, stop);
     if (check_val) {
       float error = 0;
-      for (int i = 0; i < dot_grad.da.size; ++i) {
-        error += fabs(dot_grad.da.aligned[i] - b[i]);
+      for (int i = 0; i < dot_grad.size; ++i) {
+        error += fabs(dot_grad.aligned[i] - b[i]);
       }
       if (error > 1e-9) {
         printf("Grad total absolute error: %f\n", error);
       }
-      error = 0;
-      for (size_t i = 0; i < dot_grad.db.size; i++)
-      {
-        error += fabs(dot_grad.db.aligned[i] - a[i]);
-      }
-      if (error > 1e-9) {
-        printf("Grad total absolute error (second arg): %f\n", error);
-      }
+      // error = 0;
+      // for (size_t i = 0; i < dot_grad.db.size; i++)
+      // {
+      //   error += fabs(dot_grad.db.aligned[i] - a[i]);
+      // }
+      // if (error > 1e-9) {
+      //   printf("Grad total absolute error (second arg): %f\n", error);
+      // }
     }
-    free(dot_grad.da.aligned);
-    free(dot_grad.db.aligned);
+    free(dot_grad.aligned);
+    // free(dot_grad.db.aligned);
   }
 
   // for (int run = 0; run < NUM_RUNS; run++) {
