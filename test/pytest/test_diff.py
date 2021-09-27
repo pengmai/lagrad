@@ -21,7 +21,7 @@ def test_1d_sum():
     assert extract_1d(output.decode("utf-8")) == [1.0] * 4
 
 
-def disabled_test_scf_dot():
+def test_scf_dot():
     output = compile_pipeline(f"{MLIR_FILES}/scfdot.mlir")
     assert extract_1d(output.decode("utf-8")) == [-0.3, 1.4, 2.2, -3.0]
 
