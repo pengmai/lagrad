@@ -90,15 +90,21 @@ def lower_to_llvm(llvm_dialect: bytes) -> bytes:
 
 def run_enzyme(llvm_ir: bytes, optimize=True):
     # opt "$LLVM_FILE" -load $ENZYME_DYLIB -enzyme -o "$ENZYME_OUTPUT" -S
-    enzyme_p = subprocess.run(
-        [OPT_12, "-load", ENZYME_DYLIB, "-enzyme", "-S"],
-        input=llvm_ir,
-        capture_output=True,
-        check=True,
-    )
+    try:
+        enzyme_p = subprocess.run(
+            [OPT_12, "-load", ENZYME_DYLIB, "-enzyme", "-S"],
+            input=llvm_ir,
+            capture_output=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise Exception(e.stderr.decode("utf-8"))
     if optimize:
         opt_p = subprocess.run(
-            [OPT_12, "-O3", "-S"], input=enzyme_p.stdout, capture_output=True, check=True
+            [OPT_12, "-O3", "-S"],
+            input=enzyme_p.stdout,
+            capture_output=True,
+            check=True,
         )
         return opt_p.stdout
     return enzyme_p.stdout

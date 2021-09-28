@@ -26,6 +26,16 @@ def test_scf_dot():
     assert extract_1d(output.decode("utf-8")) == [-0.3, 1.4, 2.2, -3.0]
 
 
-def disabled_test_2d_sum():
+def test_2d_sum():
     output = compile_pipeline(f"{MLIR_FILES}/matsum.mlir")
     assert extract_2d(output.decode("utf-8")) == [[1.0] * 4] * 4
+
+
+def test_linalg_dot():
+    output = compile_pipeline(f"{MLIR_FILES}/diff/dot.mlir")
+    print(output.decode("utf-8"))
+
+
+def disabled_test_generic():
+    output = compile_pipeline(f"{MLIR_FILES}/diff/generic.mlir")
+    print(output.decode("utf-8"))

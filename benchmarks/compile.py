@@ -186,9 +186,7 @@ def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
     objects = (
         [f"{TMP}/{obj}" for obj in objects]
         + ([OPENBLAS_OBJ] if link_openblas else [])
-        + [RUNNER_UTILS]
-        if link_runner_utils
-        else []
+        + ([RUNNER_UTILS] if link_runner_utils else [])
     )
     run_safe(["gcc"] + objects + ["-o", f"{TMP}/{binary}"])
     return run_safe([f"{TMP}/{binary}"])
