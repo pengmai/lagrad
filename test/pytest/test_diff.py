@@ -31,7 +31,12 @@ def test_2d_sum():
     assert extract_2d(output.decode("utf-8")) == [[1.0] * 4] * 4
 
 
-def test_linalg_dot():
+def test_memref():
+    output = compile_pipeline(f"{MLIR_FILES}/diff/memref.mlir")
+    print(output.decode("utf-8"))
+
+
+def disabled_test_linalg_dot():
     output = compile_pipeline(f"{MLIR_FILES}/diff/dot.mlir")
     print(output.decode("utf-8"))
 

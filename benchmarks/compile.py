@@ -109,6 +109,7 @@ def compile_mlir(contents, output, lower_type="loops"):
         stdin=contents,
     )
     llvm_ir = run_safe(["mlir-translate", "-mlir-to-llvmir"], stdin=llvm_dialect)
+    llvm_ir = run_safe(["opt", "-O3"], stdin=llvm_ir)
     obj = run_safe(["llc", "-filetype=obj"], stdin=llvm_ir)
     with open(f"{TMP}/{output}", "wb") as f:
         f.write(obj)
