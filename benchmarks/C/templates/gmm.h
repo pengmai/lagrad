@@ -189,7 +189,7 @@ void check_gmm_err(size_t d, size_t k, size_t n, double *dalphas,
  * becomes:
  * [a b c d e f]
  */
-void collapse_ltri(size_t k, size_t d, double *Ls, double *out) {
+void collapse_ltri(size_t d, double *Ls, double *out) {
   size_t icf_idx = 0;
   for (size_t j = 0; j < d; j++) {
     for (size_t l = j + 1; l < d; l++) {
@@ -209,6 +209,6 @@ void convert_ql_to_icf(size_t d, size_t k, size_t n, double *Qs, double *Ls,
     for (size_t d1 = 0; d1 < d; d1++) {
       icf[d0 * icf_sz + d1] = Qs[d0 * d + d1];
     }
-    collapse_ltri(k, d, &Ls[d0 * d * d], &icf[d0 * icf_sz + d]);
+    collapse_ltri(d, &Ls[d0 * d * d], &icf[d0 * icf_sz + d]);
   }
 }
