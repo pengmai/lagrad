@@ -1,3 +1,4 @@
+#include "gmm.h"
 #include "mlir_c_abi.h"
 #include "shared_types.h"
 #include <assert.h>
@@ -37,6 +38,9 @@ extern GMMGrad lagrad_gmm(
     /*wishart_m=*/int64_t);
 extern void dgmm_objective(GMMInput *gmm, double *alphasb, double *meansb,
                            double *icfb, double *err, double *errb);
+extern void dgmm_objective_full_L(GMMInput *gmm, double *alphasb,
+                                  double *meansb, double *Qsb, double *Lsb,
+                                  double *err, double *errb);
 
 // Running the forward pass to see if that segfaults
 extern double enzyme_gmm_primal(GMMInput gmm);
@@ -134,49 +138,29 @@ void free_gmm_input(GMMInput gmm_input) {
   free(gmm_input.x);
 }
 
-/**
- * Convert a batch of lower triangular matrix into its packed representation.
- * Example:
- * [[0 0 0 0]
- *  [a 0 0 0]
- *  [b d 0 0]
- *  [c e f 0]]
- * becomes:
- * [a b c d e f]
- */
-double *collapse_ltri(F64Descriptor3D expanded) {
-  int d = expanded.size_1;
-  int icf_sz = expanded.size_1 * (expanded.size_1 - 1) / 2;
-  double *result = (double *)malloc(expanded.size_0 * icf_sz * sizeof(double));
-  for (size_t i = 0; i < expanded.size_0; i++) {
-    size_t icf_idx = 0;
-    for (size_t j = 0; j < d; j++) {
-      for (size_t k = j + 1; k < d; k++) {
-        result[i * icf_sz + icf_idx] = expanded.aligned[i * d * d + k * d + j];
-        icf_idx++;
-      }
-    }
-  }
-
-  return result;
-}
-
 int main() {
   GMMInput gmm_input = read_data();
   int d = gmm_input.d;
   int k = gmm_input.k;
   int n = gmm_input.n;
-  int icf_size = d * (d - 1) / 2;
+  int icf_size = d * (d + 1) / 2;
   double *deadbeef = (double *)0xdeadbeef;
 
-  unsigned long *grad_results =
-      (unsigned long *)malloc((NUM_RUNS + NUM_WARMUPS) * sizeof(unsigned long));
-  unsigned long *enzyme_results =
-      (unsigned long *)malloc((NUM_RUNS + NUM_WARMUPS) * sizeof(unsigned long));
+  unsigned long grad_results[NUM_RUNS + NUM_WARMUPS];
+  unsigned long enzyme_results[NUM_RUNS + NUM_WARMUPS];
+  unsigned long enzyme_notri_results[NUM_RUNS + NUM_WARMUPS];
 
   double *alphasb = (double *)malloc(k * sizeof(double));
   double *meansb = (double *)malloc(d * k * sizeof(double));
+  // double *Qsb = (double *)malloc(d * k * sizeof(double));
+  // double *Lsb = (double *)malloc(k * d * d * sizeof(double));
   double *icfb = (double *)malloc(icf_size * k * sizeof(double));
+
+  double *ref_alphas = (double *)malloc(k * sizeof(double));
+  double *ref_means = (double *)malloc(d * k * sizeof(double));
+  double *ref_icf = (double *)malloc(icf_size * k * sizeof(double));
+
+  read_gmm_grads(d, k, n, ref_alphas, ref_means, ref_icf);
 
   for (size_t run = 0; run < NUM_RUNS + NUM_WARMUPS; run++) {
     struct timeval start, stop;
@@ -192,41 +176,67 @@ int main() {
     gettimeofday(&stop, NULL);
 
     grad_results[run] = timediff(start, stop);
+    // printf("Before conversion of icfb:\n");
+    // print_d_arr(ref_icf, icf_size);
+    convert_ql_to_icf(d, k, n, lagrad_result.dqs.aligned,
+                      lagrad_result.dls.aligned, icfb);
+    // printf("After conversion:\n");
+    // print_d_arr(ref_icf, icf_size);
+    check_gmm_err(d, k, n, lagrad_result.dalphas.aligned, ref_alphas,
+                  lagrad_result.dmeans.aligned, ref_means, icfb, ref_icf,
+                  "LAGrad");
+    // serialize_gmm_grads(d, k, n, lagrad_result.dalphas.aligned,
+    //                     lagrad_result.dmeans.aligned, ref_icf);
 
     gettimeofday(&start, NULL);
-    double err = 0.0, errb = 1.0;
-    for (size_t i = 0; i < k; i++) {
-      alphasb[i] = 0;
-    }
-    for (size_t i = 0; i < d * k; i++) {
-      meansb[i] = 0;
-    }
-    for (size_t i = 0; i < icf_size * k; i++) {
-      icfb[i] = 0;
-    }
-    dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
+    // double err = 0.0, errb = 1.0;
+    // for (size_t i = 0; i < k; i++) {
+    //   alphasb[i] = 0;
+    // }
+    // for (size_t i = 0; i < d * k; i++) {
+    //   meansb[i] = 0;
+    // }
+    // for (size_t i = 0; i < icf_size * k; i++) {
+    //   icfb[i] = 0;
+    // }
+    // dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
     gettimeofday(&stop, NULL);
 
     enzyme_results[run] = timediff(start, stop);
 
     double alphas_err = 0.0;
-    // if (run == 0) {
-    //   printf("Enzyme alphas: ");
-    // }
     for (size_t i = 0; i < k; i++) {
       // printf("");
       alphas_err += fabs(alphasb[i] - lagrad_result.dalphas.aligned[i]);
     }
     if (alphas_err > 1e-6) {
-      printf("(Run %lu) Alphas err: %f\n", run, alphas_err);
+      // printf("(Run %lu) Alphas err: %f\n", run, alphas_err);
     }
     double means_err = 0.0;
     for (size_t i = 0; i < d * k; i++) {
       means_err += fabs(meansb[i] - lagrad_result.dmeans.aligned[i]);
     }
     if (means_err > 1e-6) {
-      printf("(Run %lu) Means err: %f\n", run, means_err);
+      // printf("(Run %lu) Means err: %f\n", run, means_err);
     }
+
+    gettimeofday(&start, NULL);
+    // err = 0.0, errb = 1.0;
+    // for (size_t i = 0; i < k; i++) {
+    //   alphasb[i] = 0;
+    // }
+    // for (size_t i = 0; i < d * k; i++) {
+    //   meansb[i] = 0;
+    //   Qsb[i] = 0;
+    // }
+    // for (size_t i = 0; i < k * d * d; i++) {
+    //   Lsb[i] = 0;
+    // }
+
+    // dgmm_objective_full_L(&gmm_input, alphasb, meansb, Qsb, Lsb, &err,
+    // &errb);
+    gettimeofday(&stop, NULL);
+    enzyme_notri_results[run] = timediff(start, stop);
 
     free(lagrad_result.dalphas.aligned);
     free(lagrad_result.dmeans.aligned);
@@ -234,24 +244,18 @@ int main() {
     free(lagrad_result.dls.aligned);
   }
 
-  double lagrad_avg = 0.0;
-  double enzyme_avg = 0.0;
-  for (size_t run = NUM_WARMUPS; run < NUM_WARMUPS + NUM_RUNS; run++) {
-    lagrad_avg += grad_results[run];
-    enzyme_avg += enzyme_results[run];
-  }
-  printf("LAGrad avg: %f\n", lagrad_avg / NUM_RUNS);
-  printf("Enzyme avg: %f\n", enzyme_avg / NUM_RUNS);
-  printf("Slowdown: %f\n", lagrad_avg / enzyme_avg);
-
-  double enzyme_primal_err = 0.0;
-  enzyme_gmm_objective_full_L(d, k, n, gmm_input.alphas, gmm_input.means,
-                              gmm_input.Qs, gmm_input.Ls, gmm_input.x,
-                              gmm_input.wishart_gamma, gmm_input.wishart_m,
-                              &enzyme_primal_err);
-  double reference_err = enzyme_gmm_primal(gmm_input);
-  printf("Primal err with full L: %f\n", enzyme_primal_err);
-  printf("Primal err without full L: %f\n", reference_err);
+  // double lagrad_avg = 0.0;
+  // double enzyme_avg = 0.0;
+  // double enzyme_notri_avg = 0.0;
+  // for (size_t run = NUM_WARMUPS; run < NUM_WARMUPS + NUM_RUNS; run++) {
+  //   lagrad_avg += grad_results[run];
+  //   enzyme_notri_avg += enzyme_notri_results[run];
+  //   enzyme_avg += enzyme_results[run];
+  // }
+  // printf("LAGrad avg: %f\n", lagrad_avg / NUM_RUNS);
+  // printf("Enzyme avg: %f\n", enzyme_avg / NUM_RUNS);
+  // printf("Enzyme avg (notri): %f\n", enzyme_notri_avg / NUM_RUNS);
+  // printf("Slowdown: %f\n", lagrad_avg / enzyme_avg);
 
   // printf("adjoint for icf: (%lld x %lld x %lld):\n", primal_result.size_0,
   //        primal_result.size_1, primal_result.size_2);
@@ -262,9 +266,10 @@ int main() {
   // free(alphasb);
   // free(meansb);
   // free(icfb);
-  // free(enzyme_results);
-  // free(grad_results);
-  // free_gmm_input(gmm_input);
+  free_gmm_input(gmm_input);
+  free(ref_alphas);
+  free(ref_means);
+  free(ref_icf);
 }
 
 // extern F32Descriptor0D gmm_objective(
