@@ -6,6 +6,7 @@ from typing import List, Literal
 
 LLVM_12_BIN = osp.join(osp.expanduser("~"), ".local", "LLVM12", "bin")
 OPT_12 = osp.join(LLVM_12_BIN, "opt")
+CLANG_12 = osp.join(LLVM_12_BIN, "clang")
 LLC_12 = osp.join(LLVM_12_BIN, "llc")
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
@@ -90,6 +91,27 @@ def lower_to_llvm(llvm_dialect: bytes) -> bytes:
 
 def run_enzyme(llvm_ir: bytes, optimize=True):
     # opt "$LLVM_FILE" -load $ENZYME_DYLIB -enzyme -o "$ENZYME_OUTPUT" -S
+    # try:
+    #     first_opt = subprocess.run(
+    #         [
+    #             CLANG_12,
+    #             "-S",
+    #             "-emit-llvm",
+    #             "-xc",
+    #             "-",
+    #             "-o",
+    #             "/dev/stdout",
+    #             "-O2",
+    #             "-fno-vectorize",
+    #             "-fno-slp-vectorize",
+    #             "-fno-unroll-loops",
+    #         ],
+    #         input=llvm_ir,
+    #         capture_output=True,
+    #         check=True,
+    #     )
+    # except subprocess.CalledProcessError as e:
+    #     raise Exception(e.stderr.decode("utf-8"))
     try:
         enzyme_p = subprocess.run(
             [OPT_12, "-load", ENZYME_DYLIB, "-enzyme", "-S"],

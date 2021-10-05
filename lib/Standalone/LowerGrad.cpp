@@ -13,7 +13,28 @@
 using namespace mlir;
 
 namespace {
-mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
+// Forward declarations.
+void populateVJP(Operation *op, DenseMap<Value, Value> &env,
+                 OpBuilder &rewriter);
+
+Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
+  if (operand.getType().isa<FloatType>()) {
+    return rewriter.create<mlir::ConstantOp>(
+        loc, FloatAttr::get(operand.getType(), 0.0));
+  }
+  if (operand.getType().isa<ShapedType>()) {
+    auto shapedType = operand.getType().dyn_cast<ShapedType>();
+    // Will automatically be broadcasted to the right shape.
+    auto denseAttr = shapedType.getElementTypeBitWidth() == 32
+                         ? DenseFPElementsAttr::get(shapedType, {0.0f})
+                         : DenseFPElementsAttr::get(shapedType, {0.0});
+    return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
+  }
+  llvm_unreachable("not yet implemented");
+  return nullptr;
+}
+
+Value onesLike(Location loc, Value operand, OpBuilder &builder) {
   if (operand.getType().isa<FloatType>()) {
     return builder.create<mlir::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 1.0));
@@ -69,6 +90,14 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
 
   for (auto &op : bbOps) {
     auto clonedOp = builder.clone(op);
+    // Need to perform this old_to_new remapping for nested regions/blocks
+    clonedOp->walk([&](Operation *nestedOp) {
+      for (size_t i = 0; i < nestedOp->getNumOperands(); i++) {
+        if (old_to_new[nestedOp->getOperand(i)]) {
+          nestedOp->setOperand(i, old_to_new[nestedOp->getOperand(i)]);
+        }
+      }
+    });
     for (size_t i = 0; i < clonedOp->getNumOperands(); i++) {
       assert(op.getNumResults() < 2 &&
              "basic block op with more than two results "
@@ -90,11 +119,74 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
   return newRegionOps;
 }
 
+mlir::Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
+                        DenseMap<Value, Value> outer_env, OpBuilder &rewriter) {
+  auto reverseIfBlock = [&](Region &ifRegion) {
+    return [&](OpBuilder &builder, Location loc) {
+      auto primalRegionOps =
+          cloneBasicBlock(ifRegion.getOps(), builder, {}, {});
+      DenseMap<Value, Value> env;
+      for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
+           it++) {
+        auto op = *it;
+        auto opName = op->getName().getStringRef();
+        if (opName == "scf.yield") {
+          Value operand = op->getOperand(0);
+          env[operand] = vjp_value;
+          op->erase();
+        } else {
+          populateVJP(op, env, builder);
+        }
+      }
+      // The free operand might only appear in one block but not the other.
+      if (!env[freeOperand]) {
+        builder.create<scf::YieldOp>(loc, getZero(loc, freeOperand, builder));
+      } else {
+        builder.create<scf::YieldOp>(loc, env[freeOperand]);
+      }
+    };
+  };
+
+  auto adjointIf = rewriter.create<scf::IfOp>(
+      ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
+      /*cond=*/ifOp.condition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+  return adjointIf.getResult(0);
+}
+
 void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
                  OpBuilder &rewriter) {
   auto opName = op->getName().getStringRef();
   if (opName == "std.sitofp") {
     // The input is an integer so can't have a gradient signal.
+    return;
+  }
+  if (opName == "scf.if") {
+    auto ifOp = dyn_cast<scf::IfOp>(op);
+    assert(ifOp.getNumResults() == 1 &&
+           "if ops with num results != 1 not yet supported");
+    auto vjp_value = env[ifOp.getResult(0)];
+    if (!vjp_value) {
+      Value result = ifOp.getResult(0);
+      vjp_value = onesLike(result.getLoc(), result, rewriter);
+      env[result] = vjp_value;
+    }
+
+    // Collect the free variables in the then block of the if op
+    SmallVector<Value> freeOperands;
+    collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion().getOps(), freeOperands);
+    collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion().getOps(), freeOperands);
+
+    for (auto freeOperand : freeOperands) {
+      auto result = reverseIfOp(ifOp, freeOperand, vjp_value, env, rewriter);
+      if (!env[freeOperand]) {
+        env[freeOperand] = result;
+      } else {
+        env[freeOperand] = rewriter.create<mlir::AddFOp>(
+            freeOperand.getLoc(), result, env[freeOperand]);
+      }
+    }
     return;
   }
 
@@ -427,10 +519,6 @@ private:
             SmallVector<StringRef, 6> iterator_types(
                 numIterators, getParallelIteratorTypeName());
 
-            // Value output = env[operand]
-            //                    ? env[operand]
-            //                    : getZero(operand.getLoc(), operand,
-            //                    rewriter);
             Value output = getZero(operand.getLoc(), operand, rewriter);
             auto outputShape = output.getType().dyn_cast<ShapedType>();
             assert(outputShape.hasRank() && "output must be a ranked type");
@@ -453,8 +541,8 @@ private:
               }
             }
 
-            llvm::DenseMap<Value, Value> bbEnv;
-            llvm::SmallVector<Value> genericOperands;
+            DenseMap<Value, Value> bbEnv;
+            SmallVector<Value> genericOperands;
             for (Value arg : genericOp.getBodyRegion().getArguments()) {
               genericOperands.push_back(arg);
             }
@@ -478,6 +566,8 @@ private:
                           regionArgs[regionArgs.size() - 2];
                       rewriter.eraseOp(rop);
                       // newGenericRegion = rop->getParentRegion();
+                    } else if (rop->getName().getStringRef() == "std.cmpf") {
+                      continue;
                     } else {
                       populateVJP(rop, bbEnv, builder);
                     }
@@ -491,12 +581,15 @@ private:
                   // reductions. It might be possible to omit this, if the
                   // output argument is never used in the primal, or perhaps if
                   // the primal iterator types do not include reductions.
+                  if (!bbEnv[regionArgs[op_index]]) {
+                    llvm::outs() << "op index: " << op_index << "\n";
+                    assert(false && "Adjoint for this region arg was null");
+                  }
                   Value add_res = builder.create<mlir::AddFOp>(
                       loc, bbEnv[regionArgs[op_index]],
                       regionArgs[regionArgs.size() - 1]);
 
                   builder.create<linalg::YieldOp>(loc, add_res);
-                  // builder.create<linalg::YieldOp>(loc, regionArgs[0]);
                 });
             vjp_value = adjoint.getResult(0);
 
@@ -807,8 +900,7 @@ private:
     return newOp;
   }
 
-  static mlir::Value getZero(Location loc, mlir::Value operand,
-                             OpBuilder &rewriter) {
+  static Value getZero(Location loc, mlir::Value operand, OpBuilder &rewriter) {
     if (operand.getType().isa<FloatType>()) {
       return rewriter.create<mlir::ConstantOp>(
           loc, FloatAttr::get(operand.getType(), 0.0));
@@ -823,44 +915,6 @@ private:
     }
     llvm_unreachable("not yet implemented");
     return nullptr;
-  }
-
-  static mlir::Value reverseIfOp(scf::IfOp ifOp, Value freeOperand,
-                                 Value vjp_value,
-                                 DenseMap<Value, Value> outer_env,
-                                 ConversionPatternRewriter &rewriter) {
-    auto reverseIfBlock = [&](Region &ifRegion) {
-      return [&](OpBuilder &builder, Location loc) {
-        auto primalRegionOps =
-            cloneBasicBlock(ifRegion.getOps(), builder, {}, {});
-        DenseMap<Value, Value> env;
-        for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
-             it++) {
-          auto op = *it;
-          auto opName = op->getName().getStringRef();
-          if (opName == "scf.yield") {
-            Value operand = op->getOperand(0);
-            env[operand] = vjp_value;
-            rewriter.eraseOp(op);
-          } else {
-            populateVJP(op, env, builder);
-          }
-        }
-        // The free operand might only appear in one block but not the other.
-        if (!env[freeOperand]) {
-          builder.create<scf::YieldOp>(loc, getZero(loc, freeOperand, builder));
-        } else {
-          builder.create<scf::YieldOp>(loc, env[freeOperand]);
-        }
-      };
-    };
-
-    auto adjointIf = rewriter.create<scf::IfOp>(
-        ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
-        /*cond=*/ifOp.condition(),
-        /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
-        /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
-    return adjointIf.getResult(0);
   }
 
   static mlir::Value broadcast(Location loc, Type type,
