@@ -125,8 +125,18 @@ def test_logsumexp():
     assert np.abs(expected - mlir_res).sum() < 1e-7
 
 
+def disabled_test_tensor_slice():
+    print(jit_file(f"{MLIR_FILES}/tensor_slice.mlir"))
+
+
 def disabled_test_closure():
     print(extract_scalar(jit_file(f"{MLIR_FILES}/generic/closure.mlir")))
+
+
+def test_if_else():
+    output = jit_file(f"{MLIR_FILES}/ifelse.mlir").split("Unranked")[1:]
+    parsed = [extract_scalar(line) for line in output]
+    assert parsed == [9.0, 1.0, 0.0, 15.3, 353.736]
 
 
 def disabled_test_if_else():

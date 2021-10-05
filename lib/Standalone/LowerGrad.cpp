@@ -30,28 +30,48 @@ mlir::Value onesLike(Location loc, mlir::Value operand, OpBuilder &builder) {
   return nullptr;
 }
 
+// Currently only used to collect the free variables in scf.if ops.
+void collectFreeVars(Block *parentBlock,
+                     llvm::iterator_range<Region::OpIterator> ops,
+                     SmallVector<Value> &out) {
+  for (auto &regionOp : ops) {
+    for (auto operand : regionOp.getOperands()) {
+      auto definingOp = operand.getDefiningOp();
+      if (dyn_cast_or_null<mlir::ConstantOp>(definingOp)) {
+        continue;
+      }
+      if (operand.getParentBlock() != parentBlock &&
+          (std::find(out.begin(), out.end(), operand) == out.end())) {
+        out.push_back(operand);
+      }
+    }
+  }
+}
+
+// Should this be called cloneRegion? I may be getting my MLIR terminology mixed
+// up. It's only been tested cloning regions with exactly one basic block.
 SmallVector<mlir::Operation *>
-cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
-                             ValueRange regionArgs,
-                             SmallVector<Value> genericOperands) {
-  SmallVector<mlir::Operation *> genericRegionOps;
+cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
+                OpBuilder &builder, ValueRange regionArgs,
+                SmallVector<Value> bbOperands) {
+  SmallVector<mlir::Operation *> newRegionOps;
   DenseMap<Value, Value> old_to_new;
-  for (size_t i = 0; i < genericOperands.size(); i++) {
+  for (size_t i = 0; i < bbOperands.size(); i++) {
     // The last generic operand is shifted by one. It corresponds to the output
     // in the primal, but the gradient signal is inserted at the end of the
     // adjoint, hence the shift.
-    if (i == genericOperands.size() - 1) {
-      old_to_new[genericOperands[i]] = regionArgs[genericOperands.size()];
+    if (i == bbOperands.size() - 1) {
+      old_to_new[bbOperands[i]] = regionArgs[bbOperands.size()];
     } else {
-      old_to_new[genericOperands[i]] = regionArgs[i];
+      old_to_new[bbOperands[i]] = regionArgs[i];
     }
   }
 
-  for (auto &op : genericOp.getOps()) {
+  for (auto &op : bbOps) {
     auto clonedOp = builder.clone(op);
     for (size_t i = 0; i < clonedOp->getNumOperands(); i++) {
       assert(op.getNumResults() < 2 &&
-             "linalg.generic bb op with more than two results "
+             "basic block op with more than two results "
              "not yet "
              "supported");
       // We assume that region arguments and intermediate values will populate
@@ -64,10 +84,10 @@ cloneLinalgGenericBasicBlock(linalg::GenericOp genericOp, OpBuilder &builder,
         old_to_new[op.getResult(0)] = clonedOp->getResult(0);
       }
     }
-    genericRegionOps.push_back(clonedOp);
+    newRegionOps.push_back(clonedOp);
   }
 
-  return genericRegionOps;
+  return newRegionOps;
 }
 
 void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
@@ -117,19 +137,12 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
       vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
                                                 op->getResult(0));
     } else {
-      llvm::outs() << "(linalg.generic) unrecognized op: " << opName << "\n";
+      llvm::outs() << "(populateVJP) unrecognized op: " << opName << "\n";
     }
 
     // Add the gradient signals.
     if (!env[operand]) {
       env[operand] = vjp_value;
-      auto genericOp = op->getParentOfType<linalg::GenericOp>();
-      if (genericOp) {
-        llvm::outs() << "outer arg: "
-                     << (operand.getParentRegion() ==
-                         &genericOp.getBodyRegion())
-                     << "\n";
-      }
     } else {
       env[operand] =
           rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand], vjp_value);
@@ -315,6 +328,34 @@ private:
             selectEnv[selectOp.getFalseValue()]);
         env[selectOp.getTrueValue()] = selectResult;
         env[selectOp.getFalseValue()] = selectResult;
+      } else if (opName == "scf.if") {
+        auto ifOp = dyn_cast<scf::IfOp>(op);
+        assert(ifOp.getNumResults() == 1 &&
+               "if ops with num results != 1 not yet supported");
+        auto vjp_value = env[ifOp.getResult(0)];
+        if (!vjp_value) {
+          Value result = ifOp.getResult(0);
+          vjp_value = onesLike(result.getLoc(), result, rewriter);
+          env[result] = vjp_value;
+        }
+
+        // Collect the free variables in the then block of the if op
+        SmallVector<Value> freeOperands;
+        collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion().getOps(),
+                        freeOperands);
+        collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion().getOps(),
+                        freeOperands);
+
+        for (auto freeOperand : freeOperands) {
+          auto result =
+              reverseIfOp(ifOp, freeOperand, vjp_value, env, rewriter);
+          if (!env[freeOperand]) {
+            env[freeOperand] = result;
+          } else {
+            env[freeOperand] = rewriter.create<mlir::AddFOp>(
+                freeOperand.getLoc(), result, env[freeOperand]);
+          }
+        }
       } else if (opName == "tensor.cast" || opName == "tensor.extract_slice" ||
                  opName == "memref.tensor_load") {
         // TODO: tensor.cast ops are currently only used for debugging.
@@ -374,9 +415,6 @@ private:
           } else if (opName == "math.log") {
             vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
                                                       op->getOperand(0));
-          } else if (opName == "scf.if") {
-            auto ifOp = dyn_cast<scf::IfOp>(op);
-            vjp_value = reverseIfOp(ifOp, rewriter);
           } else if (opName == "linalg.generic") {
             auto genericOp = dyn_cast<linalg::GenericOp>(op);
             if (op_index > (size_t)genericOp.getNumInputs() - 1)
@@ -429,8 +467,8 @@ private:
                 /*iterator_types=*/iterator_types,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
                   SmallVector<mlir::Operation *> genericRegionOps =
-                      cloneLinalgGenericBasicBlock(genericOp, builder,
-                                                   regionArgs, genericOperands);
+                      cloneBasicBlock(genericOp.getOps(), builder, regionArgs,
+                                      genericOperands);
 
                   for (auto it = genericRegionOps.rbegin();
                        it != genericRegionOps.rend(); it++) {
@@ -770,7 +808,7 @@ private:
   }
 
   static mlir::Value getZero(Location loc, mlir::Value operand,
-                             ConversionPatternRewriter &rewriter) {
+                             OpBuilder &rewriter) {
     if (operand.getType().isa<FloatType>()) {
       return rewriter.create<mlir::ConstantOp>(
           loc, FloatAttr::get(operand.getType(), 0.0));
@@ -787,68 +825,41 @@ private:
     return nullptr;
   }
 
-  static mlir::Value reverseIfOp(scf::IfOp ifOp,
+  static mlir::Value reverseIfOp(scf::IfOp ifOp, Value freeOperand,
+                                 Value vjp_value,
+                                 DenseMap<Value, Value> outer_env,
                                  ConversionPatternRewriter &rewriter) {
-    // TODO: This is incomplete. I need a procedure to collect free variables in
-    // the thenBlock of the primal operation.
+    auto reverseIfBlock = [&](Region &ifRegion) {
+      return [&](OpBuilder &builder, Location loc) {
+        auto primalRegionOps =
+            cloneBasicBlock(ifRegion.getOps(), builder, {}, {});
+        DenseMap<Value, Value> env;
+        for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
+             it++) {
+          auto op = *it;
+          auto opName = op->getName().getStringRef();
+          if (opName == "scf.yield") {
+            Value operand = op->getOperand(0);
+            env[operand] = vjp_value;
+            rewriter.eraseOp(op);
+          } else {
+            populateVJP(op, env, builder);
+          }
+        }
+        // The free operand might only appear in one block but not the other.
+        if (!env[freeOperand]) {
+          builder.create<scf::YieldOp>(loc, getZero(loc, freeOperand, builder));
+        } else {
+          builder.create<scf::YieldOp>(loc, env[freeOperand]);
+        }
+      };
+    };
+
     auto adjointIf = rewriter.create<scf::IfOp>(
         ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
         /*cond=*/ifOp.condition(),
-        /*thenBuilder=*/
-        [&](OpBuilder &builder, Location loc) {
-          // TODO: Need to make a "reverse block" or "reverse region" function.
-          llvm::SmallVector<Operation *> thenRegionOps;
-          for (auto &thenRegionOp : ifOp.thenRegion().getOps()) {
-            thenRegionOps.push_back(&thenRegionOp);
-          }
-          llvm::DenseMap<Value, Value> env;
-          for (auto it = thenRegionOps.rbegin(); it != thenRegionOps.rend();
-               it++) {
-            auto op = *it;
-            auto opName = op->getName().getStringRef();
-            if (opName == "scf.yield") {
-              Value operand = op->getOperand(0);
-              // Initialize the gradient signal to 1.0
-              env[operand] = builder.create<mlir::ConstantOp>(
-                  loc, FloatAttr::get(operand.getType(), 1.0));
-            } else {
-              size_t op_index = 0;
-              for (Value operand : op->getOperands()) {
-                if (ifOp->getNumResults() == 0) {
-                  ifOp->emitError("op had zero results");
-                  return;
-                }
-
-                Value vjp_value = env[op->getResult(0)];
-                if (opName == "std.mulf") {
-                  vjp_value = rewriter.create<mlir::MulFOp>(
-                      loc, vjp_value, op->getOperand(1 - op_index));
-                } else {
-                  llvm::outs()
-                      << "(SCF if thenBuilder) unrecognized op: " << opName
-                      << "\n";
-                }
-
-                // Add the gradient signals.
-                if (!env[operand]) {
-                  env[operand] = vjp_value;
-                } else {
-                  env[operand] = builder.create<mlir::AddFOp>(loc, env[operand],
-                                                              vjp_value);
-                }
-                op_index++;
-              }
-            }
-          }
-          builder.create<scf::YieldOp>(
-              loc, env[thenRegionOps.pop_back_val()->getOperand(0)]);
-        },
-        /*elseBuilder=*/
-        [&](OpBuilder &builder, Location loc) {
-          Value cst = rewriter.create<mlir::ConstantOp>(
-              loc, FloatAttr::get(ifOp->getResult(0).getType(), 0.0));
-          builder.create<scf::YieldOp>(loc, cst);
-        });
+        /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
+        /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
     return adjointIf.getResult(0);
   }
 
