@@ -798,7 +798,33 @@ private:
                 });
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
-            op->emitError("differentiating tensor.extract not yet supported");
+            // Basically need to cast this to a tensor type. tensor.insert
+            // doesn't appear to be bufferizing properly, so I'm using a memref.
+            // This could cause issues with nested differentiation.
+            auto space = rewriter.create<memref::AllocOp>(
+                operand.getLoc(), MemRefType::get({}, vjp_value.getType()));
+            rewriter.create<memref::StoreOp>(operand.getLoc(), vjp_value,
+                                             space);
+            vjp_value =
+                rewriter.create<memref::TensorLoadOp>(operand.getLoc(), space);
+            // This is an implementation using linalg.generic. This could
+            // potentially be easier to use with nested automatic
+            // differentiation. auto space = getZero(operand.getLoc(), operand,
+            // rewriter); auto map = rewriter.getEmptyAffineMap();
+            // SmallVector<AffineMap> indexing_maps(2, map);
+            // SmallVector<StringRef> iterator_types;
+            // // How is this hard to insert an element into a tensor?
+            // // tensor.insert doesn't appear to bufferize properly.
+            // // Both the input and output here are dummies.
+            // auto insertOp = rewriter.create<linalg::GenericOp>(
+            //     operand.getLoc(), /*result tensor type=*/operand.getType(),
+            //     /*inputs=*/ValueRange({space}),
+            //     /*outputs=*/ValueRange({space}),
+            //     /*indexing maps*/ indexing_maps, iterator_types,
+            //     [&](OpBuilder &builder, Location loc, ValueRange bbArgs) {
+            //       builder.create<linalg::YieldOp>(loc, vjp_value);
+            //     });
+            // vjp_value = insertOp.getResult(0);
           } else if (opName == "std.call") {
             auto callOp = dyn_cast<mlir::CallOp>(op);
             std::stringstream gradFuncStream;
@@ -984,7 +1010,9 @@ struct GradTarget : public ConversionTarget {
 namespace {
 struct GradConversionPass
     : public PassWrapper<GradConversionPass, OperationPass<ModuleOp>> {
-  void getDependentDialects(DialectRegistry &registry) const override {}
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<linalg::LinalgDialect, memref::MemRefDialect>();
+  }
   StringRef getArgument() const override { return "take-grads"; }
   StringRef getDescription() const override {
     return "Run the autodiff procedure for standalone.grad";

@@ -129,6 +129,10 @@ def test_cross():
     assert extract_1d(jit_file(f"{MLIR_FILES}/cross_product.mlir")) == [-1, 2, -1]
 
 
+def test_extract_scalar():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/tensor_extract.mlir")) == 15.64
+
+
 def disabled_test_scalar_recursion():
     print(jit_file(f"{MLIR_FILES}/recursion.mlir"))
 

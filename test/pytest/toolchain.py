@@ -13,12 +13,9 @@ MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
     "-tensor-constant-bufferize",
-    "-linalg-bufferize",
-    "-canonicalize",
-    "-func-bufferize",
-    # According to the discussion -func-bufferize should be last, but for some
-    # reason in this case, -tensor-bufferize must be last.
     "-tensor-bufferize",
+    "-linalg-bufferize",
+    "-func-bufferize",
     "-finalizing-bufferize",
 ]
 LOWERING = [
