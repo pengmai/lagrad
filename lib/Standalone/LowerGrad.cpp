@@ -820,7 +820,8 @@ private:
                 operand.getLoc(), /*result tensor type=*/operand.getType(),
                 /*inputs=*/ValueRange({space}),
                 /*outputs=*/ValueRange({space}),
-                /*indexing maps*/ indexing_maps, iterator_types,
+                /*indexing maps=*/indexing_maps,
+                /*iterator types=*/iterator_types,
                 [&](OpBuilder &builder, Location loc, ValueRange bbArgs) {
                   builder.create<linalg::YieldOp>(loc, vjp_value);
                 });
