@@ -152,19 +152,23 @@ func @gmm_objective(
   // // } -> tensor<f64>
   // // return %sum_inner_term : tensor<f64>
 
-  // %max_init = constant dense<0.0> : tensor<{{n}}xf64>
-  // %max = linalg.generic
-  //   {
-  //     indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
-  //     iterator_types = ["parallel", "reduction"]
-  //   }
-  //   ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
-  //   outs(%max_init : tensor<{{n}}xf64>) {
-  // ^bb0(%arg0: f64, %arg1: f64):
-  //   // %0 = cmpf "ogt", %arg0, %arg1 : f64
-  //   // %1 = select %0, %arg0, %arg1 : f64
-  //   linalg.yield %arg0 : f64
-  // } -> tensor<{{n}}xf64>
+  %max_init = constant dense<0.0> : tensor<{{n}}xf64>
+  %max = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
+      iterator_types = ["parallel", "reduction"]
+    }
+    ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
+    outs(%max_init : tensor<{{n}}xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = cmpf "ogt", %arg0, %arg1 : f64
+    %1 = scf.if %0 -> f64 {
+      scf.yield %arg0 : f64
+    } else {
+      scf.yield %arg1 : f64
+    }
+    linalg.yield %1 : f64
+  } -> tensor<{{n}}xf64>
   
   // // %subview = tensor.extract_slice %inner_term[0, 0][1, {{k}}][1, 1] : tensor<{{n}}x{{k}}xf64> to tensor<1x{{k}}xf64>
   // // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
@@ -175,26 +179,21 @@ func @gmm_objective(
     {
       indexing_maps = [
         affine_map<(d0, d1) -> (d0, d1)>,
-        // affine_map<(d0, d1) -> (d0)>,
+        affine_map<(d0, d1) -> (d0)>,
         affine_map<(d0, d1) -> (d0)>
       ],
       iterator_types = ["parallel", "reduction"]
     }
-    // ins(%inner_term, %max : tensor<{{n}}x{{k}}xf64>, tensor<{{n}}xf64>)
-    ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
+    ins(%inner_term, %max : tensor<{{n}}x{{k}}xf64>, tensor<{{n}}xf64>)
     outs(%lse_init : tensor<{{n}}xf64>) {
-  // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-  //   %0 = subf %arg0, %arg1 : f64
-  //   %1 = math.exp %0 : f64
-  //   %2 = addf %1, %arg2 : f64
-  ^bb0(%arg0: f64, %arg1: f64):
-    %1 = math.exp %arg0 : f64
-    %2 = addf %1, %arg1 : f64
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = subf %arg0, %arg1 : f64
+    %1 = math.exp %0 : f64
+    %2 = addf %1, %arg2 : f64
     linalg.yield %2 : f64
   } -> tensor<{{n}}xf64>
-  // %lse_before_add = math.log %lse_intermediate : tensor<{{n}}xf64>
-  // %lse = addf %lse_before_add, %max : tensor<{{n}}xf64>
-  %lse = math.log %lse_intermediate : tensor<{{n}}xf64>
+  %lse_before_add = math.log %lse_intermediate : tensor<{{n}}xf64>
+  %lse = addf %lse_before_add, %max : tensor<{{n}}xf64>
 
   %slse_init = constant dense<0.0> : tensor<f64>
   %slse = linalg.generic

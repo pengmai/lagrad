@@ -125,6 +125,14 @@ def test_logsumexp():
     assert np.abs(expected - mlir_res).sum() < 1e-7
 
 
+def test_cross():
+    assert extract_1d(jit_file(f"{MLIR_FILES}/cross_product.mlir")) == [-1, 2, -1]
+
+
+def disabled_test_scalar_recursion():
+    print(jit_file(f"{MLIR_FILES}/recursion.mlir"))
+
+
 def disabled_test_tensor_slice():
     print(jit_file(f"{MLIR_FILES}/tensor_slice.mlir"))
 
