@@ -448,8 +448,7 @@ private:
                 freeOperand.getLoc(), result, env[freeOperand]);
           }
         }
-      } else if (opName == "tensor.cast" || opName == "tensor.extract_slice" ||
-                 opName == "memref.tensor_load") {
+      } else if (opName == "tensor.cast") {
         // TODO: tensor.cast ops are currently only used for debugging.
         continue;
       } else {
@@ -798,6 +797,9 @@ private:
                 });
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
+            auto extractOp = dyn_cast<tensor::ExtractOp>(op);
+            assert(extractOp.indices().size() == 0 &&
+                   "tensor.extract currently only supports 0d tensors");
             // Basically need to cast this to a tensor type. tensor.insert
             // doesn't appear to be bufferizing properly, so I'm using a memref.
             // This could cause issues with nested differentiation.
@@ -810,22 +812,24 @@ private:
             //     space);
             // This is an implementation using linalg.generic. This could
             // potentially be easier to use with nested automatic
-            // differentiation.
-            auto space = getZero(operand.getLoc(), operand, rewriter);
+            // differentiation. This dummy variable still causes a heap
+            // allocation unless it gets promoted to the stack.
+            auto dummy = getZero(operand.getLoc(), operand, rewriter);
             auto map = rewriter.getEmptyAffineMap();
             SmallVector<AffineMap> indexing_maps(2, map);
             SmallVector<StringRef> iterator_types;
-            // Both the input and output here are dummies.
             auto insertOp = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*result tensor type=*/operand.getType(),
-                /*inputs=*/ValueRange({space}),
-                /*outputs=*/ValueRange({space}),
+                /*inputs=*/ValueRange({dummy}),
+                /*outputs=*/ValueRange({dummy}),
                 /*indexing maps=*/indexing_maps,
                 /*iterator types=*/iterator_types,
                 [&](OpBuilder &builder, Location loc, ValueRange bbArgs) {
                   builder.create<linalg::YieldOp>(loc, vjp_value);
                 });
             vjp_value = insertOp.getResult(0);
+          } else if (opName == "tensor.extract_slice") {
+
           } else if (opName == "std.call") {
             auto callOp = dyn_cast<mlir::CallOp>(op);
             std::stringstream gradFuncStream;
