@@ -133,6 +133,13 @@ def test_extract_scalar():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/tensor_extract.mlir")) == 15.64
 
 
+def test_extract_slice():
+    assert extract_2d(jit_file(f"{MLIR_FILES}/tensor_extract_slice.mlir")) == [
+        [1, 2],
+        [1, 2],
+    ]
+
+
 def disabled_test_scalar_recursion():
     print(jit_file(f"{MLIR_FILES}/recursion.mlir"))
 

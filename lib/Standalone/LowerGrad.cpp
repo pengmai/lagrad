@@ -829,7 +829,13 @@ private:
                 });
             vjp_value = insertOp.getResult(0);
           } else if (opName == "tensor.extract_slice") {
-
+            auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
+            auto space = getZero(operand.getLoc(), operand, rewriter);
+            vjp_value = rewriter.create<tensor::InsertSliceOp>(
+                operand.getLoc(), space.getType(), vjp_value, space,
+                extractSliceOp.offsets(), extractSliceOp.sizes(),
+                extractSliceOp.strides(), extractSliceOp.static_offsets(),
+                extractSliceOp.static_sizes(), extractSliceOp.static_strides());
           } else if (opName == "std.call") {
             auto callOp = dyn_cast<mlir::CallOp>(op);
             std::stringstream gradFuncStream;

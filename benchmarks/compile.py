@@ -44,9 +44,10 @@ BUFFERIZE = [
     "-tensor-constant-bufferize",
     "-tensor-bufferize",
     "-linalg-bufferize",
+    "-scf-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
-    "-buffer-deallocation",
+    # "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
     "-convert-linalg-to-affine-loops",
