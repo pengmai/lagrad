@@ -146,10 +146,6 @@ def disabled_test_scalar_recursion():
     print(jit_file(f"{MLIR_FILES}/recursion.mlir"))
 
 
-def disabled_test_tensor_slice():
-    print(jit_file(f"{MLIR_FILES}/tensor_slice.mlir"))
-
-
 def test_relu():
     assert extract_1d(jit_file(f"{MLIR_FILES}/relu.mlir")) == [1, 0, 1, 0]
 
