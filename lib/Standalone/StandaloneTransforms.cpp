@@ -22,11 +22,11 @@ struct DiffTransform : public mlir::OpRewritePattern<DiffOp> {
     op.getLoc().print(llvm::outs());
     llvm::outs() << "\n";
 
-    // mlir::visitUsedValuesDefinedAbove();
-    auto autodiffRef = rewriter.getSymbolRefAttr("__enzyme_autodiff");
-    autodiffRef.print(llvm::outs());
-    llvm::outs() << "\n";
-    // auto newOp = rewriter.create<mlir::LLVM::CallOp>(op->getLoc(), autodiffRef,
+    // auto autodiffRef = rewriter.getSymbolRefAttr("__enzyme_autodiff");
+    // autodiffRef.print(llvm::outs());
+    // llvm::outs() << "\n";
+    // auto newOp = rewriter.create<mlir::LLVM::CallOp>(op->getLoc(),
+    // autodiffRef,
     //                                                  rewriter.getF32Type());
     // rewriter.insert(newOp);
 

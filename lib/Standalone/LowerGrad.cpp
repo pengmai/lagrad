@@ -545,7 +545,6 @@ private:
             for (Value arg : genericOp.getBodyRegion().getArguments()) {
               genericOperands.push_back(arg);
             }
-            // Region *newGenericRegion;
 
             auto adjoint = rewriter.create<linalg::GenericOp>(
                 operand.getLoc(), /*resultTensorType=*/operand.getType(),
@@ -797,9 +796,19 @@ private:
                 });
             vjp_value = matmulOp.getResult(0);
           } else if (opName == "tensor.extract") {
+            if (op_index > 0) {
+              continue;
+            }
             auto extractOp = dyn_cast<tensor::ExtractOp>(op);
-            assert(extractOp.indices().size() == 0 &&
-                   "tensor.extract currently only supports 0d tensors");
+            auto space =
+                getZero(operand.getLoc(), extractOp.tensor(), rewriter);
+            vjp_value = rewriter.create<tensor::InsertOp>(
+                extractOp.getLoc(), vjp_value, space, extractOp.indices());
+            // llvm::outs() << "extract op indices: " <<
+            // extractOp.indices().size()
+            //              << "\n";
+            // assert(extractOp.indices().size() == 0 &&
+            //        "tensor.extract currently only supports 0d tensors");
             // Basically need to cast this to a tensor type. tensor.insert
             // doesn't appear to be bufferizing properly, so I'm using a memref.
             // This could cause issues with nested differentiation.
@@ -814,20 +823,20 @@ private:
             // potentially be easier to use with nested automatic
             // differentiation. This dummy variable still causes a heap
             // allocation unless it gets promoted to the stack.
-            auto dummy = getZero(operand.getLoc(), operand, rewriter);
-            auto map = rewriter.getEmptyAffineMap();
-            SmallVector<AffineMap> indexing_maps(2, map);
-            SmallVector<StringRef> iterator_types;
-            auto insertOp = rewriter.create<linalg::GenericOp>(
-                operand.getLoc(), /*result tensor type=*/operand.getType(),
-                /*inputs=*/ValueRange({dummy}),
-                /*outputs=*/ValueRange({dummy}),
-                /*indexing maps=*/indexing_maps,
-                /*iterator types=*/iterator_types,
-                [&](OpBuilder &builder, Location loc, ValueRange bbArgs) {
-                  builder.create<linalg::YieldOp>(loc, vjp_value);
-                });
-            vjp_value = insertOp.getResult(0);
+            // auto dummy = getZero(operand.getLoc(), operand, rewriter);
+            // auto map = rewriter.getEmptyAffineMap();
+            // SmallVector<AffineMap> indexing_maps(2, map);
+            // SmallVector<StringRef> iterator_types;
+            // auto insertOp = rewriter.create<linalg::GenericOp>(
+            //     operand.getLoc(), /*result tensor type=*/operand.getType(),
+            //     /*inputs=*/ValueRange({dummy}),
+            //     /*outputs=*/ValueRange({dummy}),
+            //     /*indexing maps=*/indexing_maps,
+            //     /*iterator types=*/iterator_types,
+            //     [&](OpBuilder &builder, Location loc, ValueRange bbArgs) {
+            //       builder.create<linalg::YieldOp>(loc, vjp_value);
+            //     });
+            // vjp_value = insertOp.getResult(0);
           } else if (opName == "tensor.extract_slice") {
             auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
             auto space = getZero(operand.getLoc(), operand, rewriter);
@@ -935,23 +944,6 @@ private:
 
     newOp.setName(funcName);
     return newOp;
-  }
-
-  static Value getZero(Location loc, mlir::Value operand, OpBuilder &rewriter) {
-    if (operand.getType().isa<FloatType>()) {
-      return rewriter.create<mlir::ConstantOp>(
-          loc, FloatAttr::get(operand.getType(), 0.0));
-    }
-    if (operand.getType().isa<ShapedType>()) {
-      auto shapedType = operand.getType().dyn_cast<ShapedType>();
-      // Will automatically be broadcasted to the right shape.
-      auto denseAttr = shapedType.getElementTypeBitWidth() == 32
-                           ? DenseFPElementsAttr::get(shapedType, {0.0f})
-                           : DenseFPElementsAttr::get(shapedType, {0.0});
-      return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
-    }
-    llvm_unreachable("not yet implemented");
-    return nullptr;
   }
 
   static mlir::Value broadcast(Location loc, Type type,

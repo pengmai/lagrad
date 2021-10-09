@@ -130,7 +130,9 @@ def test_cross():
 
 
 def test_extract_scalar():
-    assert extract_scalar(jit_file(f"{MLIR_FILES}/tensor_extract.mlir")) == 15.64
+    [line1, line2] = jit_file(f"{MLIR_FILES}/tensor_extract.mlir").split("Unranked")[1:]
+    assert extract_scalar(line1) == 15.64
+    assert extract_1d(line2) == [0, 0, 0, 7.48]
 
 
 def test_extract_slice():

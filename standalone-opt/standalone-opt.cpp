@@ -27,17 +27,18 @@ int main(int argc, char **argv) {
   mlir::registerPass(mlir::Standalone::createLowerToLLVMPass);
   mlir::registerPass(mlir::Standalone::createGradPass);
   mlir::registerPass(mlir::Standalone::createElementwiseToAffinePass);
+  mlir::registerPass(mlir::Standalone::createBufferizePass);
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::standalone::StandaloneDialect>();
-  registry.insert<mlir::StandardOpsDialect>();
+  // registry.insert<mlir::StandardOpsDialect>();
+  // registry.insert<mlir::linalg::LinalgDialect>();
+  // registry.insert<mlir::LLVM::LLVMDialect>();
+  // registry.insert<mlir::scf::SCFDialect>();
+  // registry.insert<mlir::tensor::TensorDialect>();
   // Add the following to include *all* MLIR Core dialects, or selectively
   // include what you need like above. You only need to register dialects that
   // will be *parsed* by the tool, not the one generated
-  registry.insert<mlir::linalg::LinalgDialect>();
-  registry.insert<mlir::LLVM::LLVMDialect>();
-  registry.insert<mlir::scf::SCFDialect>();
-  registry.insert<mlir::tensor::TensorDialect>();
 
   registerAllDialects(registry);
 

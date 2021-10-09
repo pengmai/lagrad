@@ -4,6 +4,7 @@ add_mlir_dialect_library(MLIRStandalone
         StandaloneTransforms.cpp
         LowerToLLVM.cpp
         LowerGrad.cpp
+        Bufferize.cpp
         TensorConstantFolding.cpp
         ElementwiseToAffine.cpp
 

@@ -139,11 +139,10 @@ private:
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(moduleOp.getBody());
     auto llvmI32Ty = IntegerType::get(context, 32);
-    rewriter.create<LLVM::GlobalOp>(
-        moduleOp.getLoc(), llvmI32Ty, /*isConstant=*/true,
-        LLVM::Linkage::External, "enzyme_const", nullptr);
-    // rewriter.setInsertionPointAfter(op);
-    // rewriter.create<LLVM::AddressOfOp>(op->getLoc(), globalOp);
+    rewriter.create<LLVM::GlobalOp>(moduleOp.getLoc(), llvmI32Ty,
+                                    /*isConstant=*/true,
+                                    LLVM::Linkage::External, "enzyme_const",
+                                    IntegerAttr::get(llvmI32Ty, 0));
     return SymbolRefAttr::get(context, "enzyme_const");
   }
 

@@ -14,6 +14,7 @@ TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
     "-tensor-constant-bufferize",
     "-tensor-bufferize",
+    "-standalone-bufferize",
     "-linalg-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
@@ -26,6 +27,7 @@ LOWERING = [
     "-convert-math-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
+    "-reconcile-unrealized-casts",
     "-llvm-legalize-for-export",
 ]
 LOWERING_ENZYME = [

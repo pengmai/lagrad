@@ -18,7 +18,7 @@
 #include "Standalone/StandaloneDialect.h"
 
 int main(int argc, char **argv) {
-  mlir::registerAllTranslations();
+  // mlir::registerAllTranslations();
 
   // TODO: Register standalone translations here.
 
