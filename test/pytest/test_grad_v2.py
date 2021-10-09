@@ -68,6 +68,10 @@ def test_function_call():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/functioncall.mlir")) == 1192.58
 
 
+def test_nested_call():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/nestedcall.mlir")) == 2.4
+
+
 def test_broadcast():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast.mlir")) == 4
 

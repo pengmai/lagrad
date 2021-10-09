@@ -18,7 +18,8 @@ void populateVJP(Operation *op, DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter);
 
 Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
-                  DenseMap<Value, Value> outer_env, ConversionPatternRewriter &builder);
+                  DenseMap<Value, Value> outer_env,
+                  ConversionPatternRewriter &rewriter);
 
 Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
                     ConversionPatternRewriter &rewriter);
@@ -86,7 +87,8 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
   for (size_t i = 0; i < bbOperands.size(); i++) {
     // The last generic operand is shifted by one. It corresponds to the output
     // in the primal, but the gradient signal is inserted at the end of the
-    // adjoint, hence the shift.
+    // adjoint, hence the shift. This is also currently used with more ops than
+    // linalg.generic.
     if (i == bbOperands.size() - 1) {
       old_to_new[bbOperands[i]] = regionArgs[bbOperands.size()];
     } else {
@@ -139,8 +141,6 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel = false) {
   Region *region = funcOp.getCallableRegion();
-  // auto *context = funcOp.getContext();
-  // auto moduleOp = funcOp->getParentOfType<ModuleOp>();
   if (!region) {
     funcOp->emitError("Function region cannot be null");
     return nullptr;
@@ -381,20 +381,6 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                 rewriter.create<linalg::YieldOp>(loc, add_res);
               });
           vjp_value = adjoint.getResult(0);
-
-          // Need to determine if this value was defined outside of the
-          // generic op
-          // for (auto pair : bbEnv) {
-          //   assert(newGenericRegion && "newGenericRegion was not defined");
-          //   if (pair.first.getParentRegion() != newGenericRegion) {
-          //     if (env[pair.first]) {
-          //       env[pair.first] = rewriter.create<mlir::AddFOp>(
-          //           pair.first.getLoc(), env[pair.first], pair.second);
-          //     } else {
-          //       env[pair.first] = pair.second;
-          //     }
-          //   }
-          // }
         } else if (opName == "linalg.dot") {
           if (op_index > 1)
             continue;
@@ -670,7 +656,9 @@ Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
   operands.push_back(vjp_value);
   auto adjointCall =
       rewriter.create<mlir::CallOp>(op.getLoc(), dFuncOp, operands);
-  return adjointCall.getResult(op_index);
+  assert(adjointCall.getNumResults() == 1 &&
+         "expected adjoint call to produce 1 result");
+  return adjointCall.getResult(0);
 }
 
 Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
