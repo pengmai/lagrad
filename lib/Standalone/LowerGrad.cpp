@@ -24,6 +24,9 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
 Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
                     ConversionPatternRewriter &rewriter);
 
+Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
+                       int op_index, ConversionPatternRewriter &rewriter);
+
 Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
   if (operand.getType().isa<FloatType>()) {
     return rewriter.create<mlir::ConstantOp>(
@@ -58,7 +61,27 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder) {
   return nullptr;
 }
 
-// Currently only used to collect the free variables in scf.if ops.
+Value constLike(Location loc, Value operand, double scalar,
+                OpBuilder &builder) {
+  if (operand.getType().isa<FloatType>()) {
+    return builder.create<mlir::ConstantOp>(
+        loc, FloatAttr::get(operand.getType(), scalar));
+  }
+  if (operand.getType().isa<ShapedType>()) {
+    auto shapedType = operand.getType().dyn_cast<ShapedType>();
+    auto denseAttr =
+        shapedType.getElementTypeBitWidth() == 32
+            ? DenseFPElementsAttr::get(shapedType, {static_cast<float>(scalar)})
+            : DenseFPElementsAttr::get(shapedType, {scalar});
+    return builder.create<mlir::ConstantOp>(loc, denseAttr);
+  }
+  llvm::outs() << "scalar for type " << operand.getType()
+               << " not implemented\n";
+  llvm_unreachable("");
+  return nullptr;
+}
+
+// TODO: Need to use walk here. Also, what constitutes a free variable here?
 void collectFreeVars(Block *parentBlock,
                      llvm::iterator_range<Region::OpIterator> ops,
                      SmallVector<Value> &out) {
@@ -297,90 +320,35 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                                                     op->getOperand(0));
         } else if (opName == "linalg.generic") {
           auto genericOp = dyn_cast<linalg::GenericOp>(op);
-          if (op_index > (size_t)genericOp.getNumInputs() - 1)
+          if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
             continue;
 
-          auto numIterators = genericOp.iterator_types().size();
-          SmallVector<AffineMap, 6> indexing_maps(
-              op->getNumOperands() + 1,
-              rewriter.getMultiDimIdentityMap(numIterators));
-          SmallVector<StringRef, 6> iterator_types(
-              numIterators, getParallelIteratorTypeName());
-
-          Value output = getZero(operand.getLoc(), operand, rewriter);
-          auto outputShape = output.getType().dyn_cast<ShapedType>();
-          assert(outputShape.hasRank() && "output must be a ranked type");
-          auto generic_indexing_maps = genericOp.getIndexingMaps();
-          auto op_count = genericOp.getNumOperands();
-          SmallVector<Value> inputs;
-          for (size_t i = 0; i < op_count; i++) {
-            if (i == op_index) {
-              indexing_maps[i] = generic_indexing_maps[i];
-              inputs.push_back(op->getOperand(i));
-            } else if (i == op_count - 1) {
-              indexing_maps[i + 1] = generic_indexing_maps[op_index];
-              // Add the gradient signal as an argument at the end of the
-              // inputs.
-              inputs.push_back(vjp_value);
-              indexing_maps[i] = generic_indexing_maps[op_count - 1];
-            } else {
-              indexing_maps[i] = generic_indexing_maps[i];
-              inputs.push_back(op->getOperand(i));
+          // Additionally compute adjoints for all free variables. We only want
+          // this to run once, hence the if op_index == 0.
+          if (op_index == 0) {
+            SmallVector<Value> freeOperands;
+            collectFreeVars(genericOp.getBody(),
+                            genericOp.getBodyRegion().getOps(), freeOperands);
+            for (auto freeOperand : freeOperands) {
+              if (!freeOperand.getType().isa<FloatType>()) {
+                continue;
+              }
+              // Not totally sure if we can use the VJP value as-is, watch out
+              // for bugs.
+              auto out = reverseGenericOp(genericOp, freeOperand, vjp_value, -1,
+                                          rewriter);
+              auto result =
+                  rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
+              if (!env[freeOperand]) {
+                env[freeOperand] = result;
+              } else {
+                env[freeOperand] = rewriter.create<AddFOp>(
+                    freeOperand.getLoc(), result, env[freeOperand]);
+              }
             }
           }
-
-          DenseMap<Value, Value> bbEnv;
-          SmallVector<Value> genericOperands;
-          for (Value arg : genericOp.getBodyRegion().getArguments()) {
-            genericOperands.push_back(arg);
-          }
-
-          auto adjoint = rewriter.create<linalg::GenericOp>(
-              operand.getLoc(), /*resultTensorType=*/operand.getType(),
-              /*inputs=*/inputs, /*outputs=*/ValueRange({output}),
-              /*indexing_maps=*/indexing_maps,
-              /*iterator_types=*/iterator_types,
-              [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                PatternRewriter::InsertionGuard insertionGuard(rewriter);
-                SmallVector<mlir::Operation *> genericRegionOps =
-                    cloneBasicBlock(genericOp.getOps(), builder, regionArgs,
-                                    genericOperands);
-
-                for (auto it = genericRegionOps.rbegin();
-                     it != genericRegionOps.rend(); it++) {
-                  auto rop = *it;
-                  if (rop->getName().getStringRef() == "linalg.yield") {
-                    bbEnv[rop->getOperand(0)] =
-                        regionArgs[regionArgs.size() - 2];
-                    rewriter.setInsertionPointAfter(rop);
-                    rewriter.eraseOp(rop);
-                    // newGenericRegion = rop->getParentRegion();
-                  } else if (rop->getName().getStringRef() == "std.cmpf") {
-                    continue;
-                  } else {
-                    populateVJP(rop, bbEnv, rewriter);
-                  }
-                }
-
-                // if (!bbEnv[regionArgs[op_index]]) {
-                //   bbEnv[regionArgs[op_index]] =
-                //       onesLike(loc, regionArgs[op_index], builder);
-                // }
-                // This add operation is required in the case of undoing
-                // reductions. It might be possible to omit this, if the
-                // output argument is never used in the primal, or perhaps if
-                // the primal iterator types do not include reductions.
-                if (!bbEnv[regionArgs[op_index]]) {
-                  llvm::outs() << "op index: " << op_index << "\n";
-                  assert(false && "Adjoint for this region arg was null");
-                }
-                Value add_res = rewriter.create<mlir::AddFOp>(
-                    loc, bbEnv[regionArgs[op_index]],
-                    regionArgs[regionArgs.size() - 1]);
-
-                rewriter.create<linalg::YieldOp>(loc, add_res);
-              });
-          vjp_value = adjoint.getResult(0);
+          vjp_value = reverseGenericOp(genericOp, operand, vjp_value, op_index,
+                                       rewriter);
         } else if (opName == "linalg.dot") {
           if (op_index > 1)
             continue;
@@ -638,7 +606,15 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
 Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
                     ConversionPatternRewriter &rewriter) {
   auto *context = op.getContext();
+  // TODO: There has to be a better way of getting the moduleOp in nested
+  // conditions.
   auto moduleOp = op->getParentOfType<ModuleOp>();
+  if (!moduleOp) {
+    moduleOp = vjp_value.getDefiningOp()->getParentOfType<ModuleOp>();
+  }
+  if (!moduleOp) {
+    llvm_unreachable("(reverseCallOp) failed to find moduleOp");
+  }
   std::stringstream gradFuncStream;
   gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
@@ -659,6 +635,106 @@ Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
   assert(adjointCall.getNumResults() == 1 &&
          "expected adjoint call to produce 1 result");
   return adjointCall.getResult(0);
+}
+
+Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
+                       int op_index, ConversionPatternRewriter &rewriter) {
+  // Need to ensure:
+  // if (op_index > (size_t)genericOp.getNumInputs() - 1)
+  //   continue;
+  auto numIterators = op.iterator_types().size();
+  SmallVector<AffineMap, 6> indexing_maps(
+      op->getNumOperands() + 1, rewriter.getMultiDimIdentityMap(numIterators));
+  SmallVector<StringRef, 6> iterator_types(numIterators,
+                                           getParallelIteratorTypeName());
+
+  Value output;
+  if (op_index == -1) {
+    auto zeroDTensorType = RankedTensorType::get({}, operand.getType());
+    auto denseFPAttr = operand.getType().getIntOrFloatBitWidth() == 32
+                           ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
+                           : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
+    output = rewriter.create<ConstantOp>(operand.getLoc(), denseFPAttr);
+  } else {
+    output = getZero(operand.getLoc(), operand, rewriter);
+  }
+  auto outputShape = output.getType().dyn_cast<ShapedType>();
+  assert(outputShape.hasRank() && "output must be a ranked type");
+  auto generic_indexing_maps = op.getIndexingMaps();
+  auto op_count = op.getNumOperands();
+  SmallVector<Value> inputs;
+  for (size_t i = 0; i < op_count; i++) {
+    if (i == static_cast<size_t>(op_index)) {
+      indexing_maps[i] = generic_indexing_maps[i];
+      inputs.push_back(op.getOperand(i));
+    } else if (i == op_count - 1) {
+      if (op_index == -1) {
+        // In the case of free variables, the output is assumed to be 0d.
+        indexing_maps[i + 1] = indexing_maps[i + 1].getSubMap({});
+      } else {
+        // The output has to map the shape of the current argument.
+        indexing_maps[i + 1] = generic_indexing_maps[op_index];
+      }
+      // Add the gradient signal as an argument at the end of the
+      // inputs.
+      inputs.push_back(vjp_value);
+      indexing_maps[i] = generic_indexing_maps[op_count - 1];
+    } else {
+      indexing_maps[i] = generic_indexing_maps[i];
+      inputs.push_back(op.getOperand(i));
+    }
+  }
+
+  DenseMap<Value, Value> bbEnv;
+  SmallVector<Value> genericOperands;
+  for (Value arg : op.getBodyRegion().getArguments()) {
+    genericOperands.push_back(arg);
+  }
+
+  auto adjoint = rewriter.create<linalg::GenericOp>(
+      operand.getLoc(), /*resultTensorType=*/outputShape,
+      /*inputs=*/inputs, /*outputs=*/ValueRange({output}),
+      /*indexing_maps=*/indexing_maps,
+      /*iterator_types=*/iterator_types,
+      [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+        PatternRewriter::InsertionGuard insertionGuard(rewriter);
+        SmallVector<mlir::Operation *> genericRegionOps =
+            cloneBasicBlock(op.getOps(), builder, regionArgs, genericOperands);
+
+        for (auto it = genericRegionOps.rbegin(); it != genericRegionOps.rend();
+             it++) {
+          auto rop = *it;
+          if (rop->getName().getStringRef() == "linalg.yield") {
+            bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
+            rewriter.setInsertionPointAfter(rop);
+            rewriter.eraseOp(rop);
+          } else if (rop->getName().getStringRef() == "std.cmpf") {
+            continue;
+          } else {
+            populateVJP(rop, bbEnv, rewriter);
+          }
+        }
+
+        // if (!bbEnv[regionArgs[op_index]]) {
+        //   bbEnv[regionArgs[op_index]] =
+        //       onesLike(loc, regionArgs[op_index], builder);
+        // }
+        // This add operation is required in the case of undoing
+        // reductions. It might be possible to omit this, if the
+        // output argument is never used in the primal, or perhaps if
+        // the primal iterator types do not include reductions.
+        auto new_operand = op_index == -1 ? operand : regionArgs[op_index];
+        if (!bbEnv[new_operand]) {
+          rewriter.create<linalg::YieldOp>(loc,
+                                           getZero(loc, new_operand, rewriter));
+        } else {
+          Value add_res = rewriter.create<mlir::AddFOp>(
+              loc, bbEnv[new_operand], regionArgs[regionArgs.size() - 1]);
+
+          rewriter.create<linalg::YieldOp>(loc, add_res);
+        }
+      });
+  return adjoint.getResult(0);
 }
 
 Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
@@ -765,6 +841,20 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
       if (op_index == 1) {
         vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
       }
+    } else if (opName == "std.divf") {
+      if (op_index == 0) {
+        vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
+                                                  op->getOperand(1));
+      } else {
+        assert(op_index == 1 && "std.divf op had more than 2 args");
+        vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
+                                                  op->getOperand(0));
+        vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+        Value denom =
+            rewriter.create<mlir::MulFOp>(op->getLoc(), operand, operand);
+        vjp_value =
+            rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value, denom);
+      }
     } else if (opName == "std.select") {
       // auto selectOp = dyn_cast<mlir::SelectOp>(op);
       llvm_unreachable("std.select not yet implemented");
@@ -773,6 +863,19 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
              "math.exp op did not have exactly 1 result");
       vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
                                                 op->getResult(0));
+    } else if (opName == "math.sin") {
+      auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
+      vjp_value = rewriter.create<MulFOp>(op->getLoc(), cos, vjp_value);
+    } else if (opName == "math.cos") {
+      auto sin = rewriter.create<math::SinOp>(op->getLoc(), vjp_value);
+      vjp_value = rewriter.create<MulFOp>(op->getLoc(), sin, vjp_value);
+      vjp_value = rewriter.create<NegFOp>(op->getLoc(), vjp_value);
+    } else if (opName == "math.sqrt") {
+      auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
+      vjp_value = rewriter.create<MulFOp>(op->getLoc(), vjp_value, half);
+      // This is a bit of a math trick. Note the result is sqrt(operand)
+      vjp_value =
+          rewriter.create<DivFOp>(op->getLoc(), vjp_value, op->getResult(0));
     } else if (opName == "std.call") {
       vjp_value =
           reverseCallOp(dyn_cast<CallOp>(op), vjp_value, op_index, rewriter);
