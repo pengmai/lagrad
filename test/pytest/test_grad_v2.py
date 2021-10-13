@@ -168,5 +168,13 @@ def test_if_else():
     assert parsed == [9.0, 1.0, 0.0, 15.3, 353.736]
 
 
+def test_if_different_type():
+    """
+    This tests the case where the result of an scf.if op is a different type than
+    the variable being differentiated.
+    """
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/ifdifferenttype.mlir")) == 9.96035
+
+
 def disabled_test_if_else():
     print("if-else", jit_file(f"{MLIR_FILES}/select.mlir"))

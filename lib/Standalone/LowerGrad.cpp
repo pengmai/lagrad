@@ -81,14 +81,12 @@ Value constLike(Location loc, Value operand, double scalar,
   return nullptr;
 }
 
-// TODO: Need to use walk here. Also, what constitutes a free variable here?
-void collectFreeVars(Block *parentBlock,
-                     llvm::iterator_range<Region::OpIterator> ops,
+void collectFreeVars(Block *parentBlock, Region &region,
                      SmallVector<Value> &out) {
-  for (auto &regionOp : ops) {
-    for (auto operand : regionOp.getOperands()) {
+  region.walk([&](Operation *regionOp) {
+    for (auto operand : regionOp->getOperands()) {
       auto definingOp = operand.getDefiningOp();
-      if (dyn_cast_or_null<mlir::ConstantOp>(definingOp)) {
+      if (dyn_cast_or_null<ConstantOp>(definingOp)) {
         continue;
       }
       if (operand.getParentBlock() != parentBlock &&
@@ -96,7 +94,7 @@ void collectFreeVars(Block *parentBlock,
         out.push_back(operand);
       }
     }
-  }
+  });
 }
 
 // Should this be called cloneRegion? I may be getting my MLIR terminology mixed
@@ -248,10 +246,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
 
       // Collect the free variables in the then block of the if op
       SmallVector<Value> freeOperands;
-      collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion().getOps(),
-                      freeOperands);
-      collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion().getOps(),
-                      freeOperands);
+      collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion(), freeOperands);
+      collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
 
       for (auto freeOperand : freeOperands) {
         auto result = reverseIfOp(ifOp, freeOperand, vjp_value, env, rewriter);
@@ -327,8 +323,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
           // this to run once, hence the if op_index == 0.
           if (op_index == 0) {
             SmallVector<Value> freeOperands;
-            collectFreeVars(genericOp.getBody(),
-                            genericOp.getBodyRegion().getOps(), freeOperands);
+            collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
+                            freeOperands);
             for (auto freeOperand : freeOperands) {
               if (!freeOperand.getType().isa<FloatType>()) {
                 continue;
@@ -769,7 +765,7 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
   };
 
   auto adjointIf = rewriter.create<scf::IfOp>(
-      ifOp->getLoc(), /*resultTypes=*/ifOp->getResult(0).getType(),
+      ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
       /*cond=*/ifOp.condition(),
       /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
       /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
@@ -796,8 +792,8 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
 
     // Collect the free variables in the then block of the if op
     SmallVector<Value> freeOperands;
-    collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion().getOps(), freeOperands);
-    collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion().getOps(), freeOperands);
+    collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion(), freeOperands);
+    collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
 
     for (auto freeOperand : freeOperands) {
       auto result = reverseIfOp(ifOp, freeOperand, vjp_value, env, rewriter);
@@ -879,6 +875,37 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
     } else if (opName == "std.call") {
       vjp_value =
           reverseCallOp(dyn_cast<CallOp>(op), vjp_value, op_index, rewriter);
+    } else if (opName == "linalg.generic") {
+      auto genericOp = dyn_cast<linalg::GenericOp>(op);
+      if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
+        continue;
+
+      // Additionally compute adjoints for all free variables. We only want
+      // this to run once, hence the if op_index == 0.
+      if (op_index == 0) {
+        SmallVector<Value> freeOperands;
+        collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
+                        freeOperands);
+        for (auto freeOperand : freeOperands) {
+          if (!freeOperand.getType().isa<FloatType>()) {
+            continue;
+          }
+          // Not totally sure if we can use the VJP value as-is, watch out
+          // for bugs.
+          auto out =
+              reverseGenericOp(genericOp, freeOperand, vjp_value, -1, rewriter);
+          auto result =
+              rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
+          if (!env[freeOperand]) {
+            env[freeOperand] = result;
+          } else {
+            env[freeOperand] = rewriter.create<AddFOp>(
+                freeOperand.getLoc(), result, env[freeOperand]);
+          }
+        }
+      }
+      vjp_value =
+          reverseGenericOp(genericOp, operand, vjp_value, op_index, rewriter);
     } else {
       llvm::outs() << "(populateVJP) unrecognized op: " << opName << "\n";
     }
