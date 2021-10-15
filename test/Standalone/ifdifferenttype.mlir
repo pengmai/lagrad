@@ -1,7 +1,7 @@
 func @ifdifferenttype(%arg0: f64) -> tensor<3xf64> {
-  %cst = constant dense<0.0> : tensor<3xf64>
-  %cst_0 = constant 0.0 : f64
-  %0 = cmpf "oge", %arg0, %cst_0 : f64
+  %cst = arith.constant dense<0.0> : tensor<3xf64>
+  %cst_0 = arith.constant 0.0 : f64
+  %0 = arith.cmpf "oge", %arg0, %cst_0 : f64
   %1 = scf.if %0 -> tensor<3xf64> {
     %2 = linalg.generic
       {
@@ -32,7 +32,7 @@ func @print(%arg0: f64) {
 }
 
 func @main() {
-  %arg = constant 1.2 : f64
+  %arg = arith.constant 1.2 : f64
   %f = constant @ifdifferenttype : (f64) -> tensor<3xf64>
   %df = standalone.grad %f : (f64) -> tensor<3xf64>, (f64) -> f64
   %res = call_indirect %df(%arg) : (f64) -> f64

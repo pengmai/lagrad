@@ -16,3 +16,7 @@ cmake --build . --target mlir-doc
 ```
 **Note**: Make sure to pass `-DLLVM_INSTALL_UTILS=ON` when building LLVM with CMake in order to install `FileCheck` to the chosen installation prefix.
 
+## Note for LLVM installation
+
+Make sure to use the custom build scripts in the LLVM repo. Especially make sure to use the `-DCMAKE_INSTALL_PREFIX` flag.
+

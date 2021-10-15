@@ -1,14 +1,14 @@
 func @square(%arg0: f64) -> f64{
-  %0 = mulf %arg0, %arg0 : f64
+  %0 = arith.mulf %arg0, %arg0 : f64
   return %0 : f64
 }
 
 func @ifelsefunc(%arg0: f64) -> f64 {
-  %cst = constant 0.0 : f64
-  %0 = cmpf "oge", %arg0, %cst : f64
+  %cst = arith.constant 0.0 : f64
+  %0 = arith.cmpf "oge", %arg0, %cst : f64
   %1 = scf.if %0 -> f64 {
     %2 = call @square(%arg0) : (f64) -> f64
-    %3 = addf %2, %cst : f64
+    %3 = arith.addf %2, %cst : f64
     scf.yield %3 : f64
   } else {
     scf.yield %arg0 : f64
@@ -27,7 +27,7 @@ func @print(%arg0: f64) {
 }
 
 func @main() {
-  %arg = constant 4.2 : f64
+  %arg = arith.constant 4.2 : f64
   %f = constant @ifelsefunc : (f64) -> f64
   %df = standalone.grad %f : (f64) -> f64, (f64) -> f64
   %res = call_indirect %df(%arg) : (f64) -> f64

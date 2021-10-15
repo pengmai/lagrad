@@ -6,7 +6,7 @@ func @square(%arg0: f64) -> f64 {
 }
 
 func @mul(%arg0: f64, %arg1: f64) -> f64 {
-  %0 = mulf %arg0, %arg1 : f64
+  %0 = arith.mulf %arg0, %arg1 : f64
   return %0 : f64
 }
 
@@ -19,7 +19,7 @@ func private @print_memref_f64(memref<*xf64>) attributes { llvm.emit_c_interface
 
 func @main() {
   %f = constant @outer : (f64) -> f64
-  %arg = constant 1.2 : f64
+  %arg = arith.constant 1.2 : f64
   %df = standalone.grad %f : (f64) -> f64, (f64) -> f64
 
   %res = call_indirect %df(%arg) : (f64) -> f64

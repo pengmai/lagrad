@@ -4,6 +4,7 @@
  */
 #include "mlir/Transforms/Bufferize.h"
 #include "Standalone/Passes.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -53,7 +54,8 @@ struct StandaloneBufferizePass
 
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
     target.addLegalDialect<memref::MemRefDialect>();
-    target.addDynamicallyLegalDialect<StandardOpsDialect>(
+    target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
+                                      StandardOpsDialect>(
         [&](Operation *op) { return typeConverter.isLegal(op); });
     target.addLegalOp<CallOp>();
     target.addLegalOp<ReturnOp>();

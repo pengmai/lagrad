@@ -4,7 +4,7 @@ func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface
 #map1 = affine_map<(d0) -> ()>
 
 func @dot(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<f32> {
-  %cst = constant dense<0.0> : tensor<f32>
+  %cst = arith.constant dense<0.0> : tensor<f32>
   %0 = linalg.generic
     {
       indexing_maps = [#map0, #map0, #map1],
@@ -13,16 +13,16 @@ func @dot(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<f32> {
     ins(%arg0, %arg1 : tensor<4xf32>, tensor<4xf32>)
     outs(%cst : tensor<f32>) {
   ^bb0(%arg2: f32, %arg3: f32, %arg4: f32):
-    %1 = mulf %arg2, %arg3 : f32
-    %2 = addf %1, %arg4 : f32
+    %1 = arith.mulf %arg2, %arg3 : f32
+    %2 = arith.addf %1, %arg4 : f32
     linalg.yield %2 : f32
   } -> tensor<f32>
   return %0 : tensor<f32>
 }
 
 func @main() {
-  %cst = constant dense<[1.0, 2.0, 3.0, 4.0]> : tensor<4xf32>
-  %cst_0 = constant dense<[5.0, 6.0, 7.0, 8.0]> : tensor<4xf32>
+  %cst = arith.constant dense<[1.0, 2.0, 3.0, 4.0]> : tensor<4xf32>
+  %cst_0 = arith.constant dense<[5.0, 6.0, 7.0, 8.0]> : tensor<4xf32>
 
   %f = constant @dot : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>
   %df = standalone.grad %f : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>, (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>

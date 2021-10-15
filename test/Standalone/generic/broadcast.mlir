@@ -1,5 +1,5 @@
 func @broadcast_square(%a: tensor<f32>) -> tensor<4xf32> {
-  %out_init = constant dense<0.0> : tensor<4xf32>
+  %out_init = arith.constant dense<0.0> : tensor<4xf32>
   %out = linalg.generic
     {
       indexing_maps = [affine_map<(d0) -> ()>, affine_map<(d0) -> (d0)>],
@@ -19,7 +19,7 @@ func @broadcast_square(%a: tensor<f32>) -> tensor<4xf32> {
 func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
 func @main() {
-  %a = constant dense<2.2> : tensor<f32>
+  %a = arith.constant dense<2.2> : tensor<f32>
 
   %f = constant @broadcast_square : (tensor<f32>) -> tensor<4xf32>
   %df = standalone.grad %f : (tensor<f32>) -> tensor<4xf32>, (tensor<f32>) -> tensor<f32>

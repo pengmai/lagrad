@@ -1,5 +1,5 @@
 func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
-  %cst = constant dense<0.0> : tensor<5xf32>
+  %cst = arith.constant dense<0.0> : tensor<5xf32>
   %0 = linalg.generic
     {
       indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>],
@@ -8,7 +8,7 @@ func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
     ins(%arg0 : tensor<4x5xf32>)
     outs(%cst : tensor<5xf32>) {
   ^bb0(%arg1: f32, %arg2: f32):
-    %1 = addf %arg1, %arg2 : f32
+    %1 = arith.addf %arg1, %arg2 : f32
     linalg.yield %1 : f32
   } -> tensor<5xf32>
   return %0 : tensor<5xf32>
@@ -17,7 +17,7 @@ func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
 func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
 func @main() {
-  %cst = constant dense<[
+  %cst = arith.constant dense<[
     [0.95033034, 0.04059763, 0.63056314, 0.21032931, 0.9302365 ],
     [0.46717497, 0.72913109, 0.00538126, 0.63545051, 0.46740388],
     [0.7444556 , 0.70883291, 0.27864411, 0.54437905, 0.7263821 ],

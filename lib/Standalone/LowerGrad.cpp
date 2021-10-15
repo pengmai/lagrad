@@ -1,6 +1,7 @@
 #include "Standalone/Passes.h"
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -14,22 +15,22 @@ using namespace mlir;
 
 namespace {
 // Forward declarations.
-void populateVJP(Operation *op, DenseMap<Value, Value> &env,
+void populateVJP(Operation *op, ModuleOp moduleOp, DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter);
 
 Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
                   DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter);
 
-Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
-                    ConversionPatternRewriter &rewriter);
+Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
+                    size_t op_index, ConversionPatternRewriter &rewriter);
 
 Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
                        int op_index, ConversionPatternRewriter &rewriter);
 
 Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
   if (operand.getType().isa<FloatType>()) {
-    return rewriter.create<mlir::ConstantOp>(
+    return rewriter.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 0.0));
   }
   if (operand.getType().isa<ShapedType>()) {
@@ -38,7 +39,7 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
     auto denseAttr = shapedType.getElementTypeBitWidth() == 32
                          ? DenseFPElementsAttr::get(shapedType, {0.0f})
                          : DenseFPElementsAttr::get(shapedType, {0.0});
-    return rewriter.create<mlir::ConstantOp>(loc, denseAttr);
+    return rewriter.create<arith::ConstantOp>(loc, denseAttr);
   }
   llvm_unreachable("not yet implemented");
   return nullptr;
@@ -46,7 +47,7 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
 
 Value onesLike(Location loc, Value operand, OpBuilder &builder) {
   if (operand.getType().isa<FloatType>()) {
-    return builder.create<mlir::ConstantOp>(
+    return builder.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 1.0));
   }
   if (operand.getType().isa<ShapedType>()) {
@@ -54,7 +55,7 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder) {
     auto denseAttr = shapedType.getElementTypeBitWidth() == 32
                          ? DenseFPElementsAttr::get(shapedType, {1.0f})
                          : DenseFPElementsAttr::get(shapedType, {1.0});
-    return builder.create<mlir::ConstantOp>(loc, denseAttr);
+    return builder.create<arith::ConstantOp>(loc, denseAttr);
   }
   llvm::outs() << "ones for type " << operand.getType() << " not implemented\n";
   llvm_unreachable("");
@@ -64,7 +65,7 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder) {
 Value constLike(Location loc, Value operand, double scalar,
                 OpBuilder &builder) {
   if (operand.getType().isa<FloatType>()) {
-    return builder.create<mlir::ConstantOp>(
+    return builder.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), scalar));
   }
   if (operand.getType().isa<ShapedType>()) {
@@ -73,7 +74,7 @@ Value constLike(Location loc, Value operand, double scalar,
         shapedType.getElementTypeBitWidth() == 32
             ? DenseFPElementsAttr::get(shapedType, {static_cast<float>(scalar)})
             : DenseFPElementsAttr::get(shapedType, {scalar});
-    return builder.create<mlir::ConstantOp>(loc, denseAttr);
+    return builder.create<arith::ConstantOp>(loc, denseAttr);
   }
   llvm::outs() << "scalar for type " << operand.getType()
                << " not implemented\n";
@@ -86,7 +87,7 @@ void collectFreeVars(Block *parentBlock, Region &region,
   region.walk([&](Operation *regionOp) {
     for (auto operand : regionOp->getOperands()) {
       auto definingOp = operand.getDefiningOp();
-      if (dyn_cast_or_null<ConstantOp>(definingOp)) {
+      if (dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
         continue;
       }
       if (operand.getParentBlock() != parentBlock &&
@@ -162,6 +163,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel = false) {
   Region *region = funcOp.getCallableRegion();
+  auto moduleOp = funcOp->getParentOfType<ModuleOp>();
   if (!region) {
     funcOp->emitError("Function region cannot be null");
     return nullptr;
@@ -198,41 +200,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
         env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
       rewriter.eraseOp(op);
-    } else if (opName == "std.cmpf") {
+    } else if (opName == "arith.cmpf") {
       continue;
-    } else if (opName == "std.select") {
-      auto selectOp = dyn_cast<mlir::SelectOp>(op);
-      auto trueDefiningOp = selectOp.getTrueValue().getDefiningOp();
-      llvm::DenseMap<Value, Value> selectEnv;
-      std::queue<mlir::Operation *> frontier;
-      if (trueDefiningOp) {
-        frontier.push(trueDefiningOp);
-      }
-
-      auto falseDefiningOp = selectOp.getFalseValue().getDefiningOp();
-      if (falseDefiningOp) {
-        frontier.push(falseDefiningOp);
-      }
-
-      // Traverse the use chain here, computing derivatives.
-      while (!frontier.empty()) {
-        mlir::Operation *next = frontier.front();
-        frontier.pop();
-        populateVJP(next, selectEnv, rewriter);
-        next->setAttr("visited", mlir::BoolAttr::get(next->getContext(), true));
-        for (auto operand : next->getOperands()) {
-          if (operand.getDefiningOp()) {
-            frontier.push(operand.getDefiningOp());
-          }
-        }
-      }
-
-      Value selectResult = rewriter.create<mlir::SelectOp>(
-          selectOp.getLoc(), selectOp.getCondition(),
-          selectEnv[selectOp.getTrueValue()],
-          selectEnv[selectOp.getFalseValue()]);
-      env[selectOp.getTrueValue()] = selectResult;
-      env[selectOp.getFalseValue()] = selectResult;
     } else if (opName == "scf.if") {
       auto ifOp = dyn_cast<scf::IfOp>(op);
       assert(ifOp.getNumResults() == 1 &&
@@ -254,7 +223,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
         if (!env[freeOperand]) {
           env[freeOperand] = result;
         } else {
-          env[freeOperand] = rewriter.create<mlir::AddFOp>(
+          env[freeOperand] = rewriter.create<arith::AddFOp>(
               freeOperand.getLoc(), result, env[freeOperand]);
         }
       }
@@ -281,39 +250,39 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
           // llvm::outs() << "Initializing value (not yet initialized): "
           //              << result << "\n";
         }
-        if (opName == "std.mulf") {
-          vjp_value = rewriter.create<mlir::MulFOp>(
+        if (opName == "arith.mulf") {
+          vjp_value = rewriter.create<arith::MulFOp>(
               op->getLoc(), vjp_value, op->getOperand(1 - op_index));
-        } else if (opName == "std.addf") {
+        } else if (opName == "arith.addf") {
           // This has no effect on the VJP
-        } else if (opName == "std.subf") {
+        } else if (opName == "arith.subf") {
           if (op_index == 1) {
-            vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+            vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
           }
-        } else if (opName == "std.divf") {
+        } else if (opName == "arith.divf") {
           if (op_index == 0) {
-            vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
-                                                      op->getOperand(1));
+            vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
+                                                       op->getOperand(1));
           } else {
-            assert(op_index == 1 && "std.divf op had more than 2 args");
-            vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                      op->getOperand(0));
-            vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+            assert(op_index == 1 && "arith.divf op had more than 2 args");
+            vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                       op->getOperand(0));
+            vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
             Value denom =
-                rewriter.create<mlir::MulFOp>(op->getLoc(), operand, operand);
+                rewriter.create<arith::MulFOp>(op->getLoc(), operand, operand);
             vjp_value =
-                rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value, denom);
+                rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, denom);
           }
-        } else if (opName == "std.negf") {
-          vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+        } else if (opName == "arith.negf") {
+          vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
         } else if (opName == "math.exp") {
           assert(op->getNumResults() == 1 &&
                  "math.exp op did not have exactly 1 result");
-          vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                    op->getResult(0));
+          vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                     op->getResult(0));
         } else if (opName == "math.log") {
-          vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
-                                                    op->getOperand(0));
+          vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
+                                                     op->getOperand(0));
         } else if (opName == "linalg.generic") {
           auto genericOp = dyn_cast<linalg::GenericOp>(op);
           if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
@@ -338,7 +307,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
               if (!env[freeOperand]) {
                 env[freeOperand] = result;
               } else {
-                env[freeOperand] = rewriter.create<AddFOp>(
+                env[freeOperand] = rewriter.create<arith::AddFOp>(
                     freeOperand.getLoc(), result, env[freeOperand]);
               }
             }
@@ -366,8 +335,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
               /*doc=*/"Copy and scalar multiplication",
               /*library call=*/library_call,
               [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                Value mul_res = builder.create<mlir::MulFOp>(loc, regionArgs[0],
-                                                             regionArgs[1]);
+                Value mul_res = builder.create<arith::MulFOp>(
+                    loc, regionArgs[0], regionArgs[1]);
                 builder.create<linalg::YieldOp>(loc, mul_res);
               });
           vjp_value = adjoint.getResult(0);
@@ -393,7 +362,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                 /*doc=*/"Vector-vector outer product",
                 /*library call=*/"souter",
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                  Value mul_res = builder.create<mlir::MulFOp>(
+                  Value mul_res = builder.create<arith::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
                   builder.create<linalg::YieldOp>(loc, mul_res);
                 });
@@ -428,10 +397,10 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                 /*doc=*/"Vector-Matrix multiplication",
                 /*library call=*/"svecmat",
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                  auto mul_res = builder.create<mlir::MulFOp>(
+                  auto mul_res = builder.create<arith::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
-                  auto reduced =
-                      builder.create<mlir::AddFOp>(loc, mul_res, regionArgs[2]);
+                  auto reduced = builder.create<arith::AddFOp>(loc, mul_res,
+                                                               regionArgs[2]);
                   builder.create<linalg::YieldOp>(loc, reduced.getResult());
                 });
             vjp_value = matmulOp.getResult(0);
@@ -460,10 +429,10 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                 /*doc=*/"Matrix-vector multiplication",
                 /*library_call=*/"smatvec",
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                  auto mul_res = builder.create<mlir::MulFOp>(
+                  auto mul_res = builder.create<arith::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
-                  auto reduced =
-                      builder.create<mlir::AddFOp>(loc, mul_res, regionArgs[2]);
+                  auto reduced = builder.create<arith::AddFOp>(loc, mul_res,
+                                                               regionArgs[2]);
                   builder.create<linalg::YieldOp>(loc, reduced.getResult());
                 });
             vjp_value = matmulOp.getResult(0);
@@ -484,7 +453,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                 /*inputs=*/ValueRange({vjp_value, op->getOperand(0)}),
                 /*outputs=*/ValueRange({operand}), indexingMaps, iteratorTypes,
                 [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                  Value mul_res = builder.create<mlir::MulFOp>(
+                  Value mul_res = builder.create<arith::MulFOp>(
                       loc, regionArgs[0], regionArgs[1]);
                   builder.create<linalg::YieldOp>(loc, mul_res);
                 });
@@ -527,10 +496,10 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
               /*doc=*/"Transposed matrix multiplication",
               /*library call=*/library_call,
               [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-                Value mul_res = builder.create<mlir::MulFOp>(loc, regionArgs[0],
-                                                             regionArgs[1]);
+                Value mul_res = builder.create<arith::MulFOp>(
+                    loc, regionArgs[0], regionArgs[1]);
                 Value add_res =
-                    builder.create<mlir::AddFOp>(loc, regionArgs[2], mul_res);
+                    builder.create<arith::AddFOp>(loc, regionArgs[2], mul_res);
                 builder.create<linalg::YieldOp>(loc, add_res);
               });
           vjp_value = matmulOp.getResult(0);
@@ -551,8 +520,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
               extractSliceOp.strides(), extractSliceOp.static_offsets(),
               extractSliceOp.static_sizes(), extractSliceOp.static_strides());
         } else if (opName == "std.call") {
-          vjp_value = reverseCallOp(dyn_cast<mlir::CallOp>(op), vjp_value,
-                                    op_index, rewriter);
+          vjp_value = reverseCallOp(dyn_cast<mlir::CallOp>(op), moduleOp,
+                                    vjp_value, op_index, rewriter);
         } else {
           llvm::outs() << "Unrecognized op: " << opName << "\n";
         }
@@ -563,8 +532,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
         } else if (!env[operand]) {
           env[operand] = vjp_value;
         } else {
-          env[operand] = rewriter.create<mlir::AddFOp>(op->getLoc(),
-                                                       env[operand], vjp_value);
+          env[operand] = rewriter.create<arith::AddFOp>(
+              op->getLoc(), env[operand], vjp_value);
         }
         op_index++;
       }
@@ -599,18 +568,9 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
   return funcOp;
 }
 
-Value reverseCallOp(CallOp op, Value vjp_value, size_t op_index,
-                    ConversionPatternRewriter &rewriter) {
+Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
+                    size_t op_index, ConversionPatternRewriter &rewriter) {
   auto *context = op.getContext();
-  // TODO: There has to be a better way of getting the moduleOp in nested
-  // conditions.
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  if (!moduleOp) {
-    moduleOp = vjp_value.getDefiningOp()->getParentOfType<ModuleOp>();
-  }
-  if (!moduleOp) {
-    llvm_unreachable("(reverseCallOp) failed to find moduleOp");
-  }
   std::stringstream gradFuncStream;
   gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
@@ -650,7 +610,7 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
     auto denseFPAttr = operand.getType().getIntOrFloatBitWidth() == 32
                            ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
                            : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
-    output = rewriter.create<ConstantOp>(operand.getLoc(), denseFPAttr);
+    output = rewriter.create<arith::ConstantOp>(operand.getLoc(), denseFPAttr);
   } else {
     output = getZero(operand.getLoc(), operand, rewriter);
   }
@@ -704,10 +664,10 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
             bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
             rewriter.setInsertionPointAfter(rop);
             rewriter.eraseOp(rop);
-          } else if (rop->getName().getStringRef() == "std.cmpf") {
+          } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
           } else {
-            populateVJP(rop, bbEnv, rewriter);
+            populateVJP(rop, op->getParentOfType<ModuleOp>(), bbEnv, rewriter);
           }
         }
 
@@ -724,7 +684,7 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
           rewriter.create<linalg::YieldOp>(loc,
                                            getZero(loc, new_operand, rewriter));
         } else {
-          Value add_res = rewriter.create<mlir::AddFOp>(
+          Value add_res = rewriter.create<arith::AddFOp>(
               loc, bbEnv[new_operand], regionArgs[regionArgs.size() - 1]);
 
           rewriter.create<linalg::YieldOp>(loc, add_res);
@@ -752,7 +712,7 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
           rewriter.setInsertionPointAfter(op);
           rewriter.eraseOp(op);
         } else {
-          populateVJP(op, env, rewriter);
+          populateVJP(op, ifOp->getParentOfType<ModuleOp>(), env, rewriter);
         }
       }
       // The free operand might only appear in one block but not the other.
@@ -772,10 +732,11 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
   return adjointIf.getResult(0);
 }
 
-void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
+void populateVJP(Operation *op, ModuleOp moduleOp,
+                 llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
-  if (opName == "std.sitofp") {
+  if (opName == "arith.sitofp") {
     // The input is an integer so can't have a gradient signal.
     return;
   }
@@ -800,7 +761,7 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
       if (!env[freeOperand]) {
         env[freeOperand] = result;
       } else {
-        env[freeOperand] = rewriter.create<mlir::AddFOp>(
+        env[freeOperand] = rewriter.create<arith::AddFOp>(
             freeOperand.getLoc(), result, env[freeOperand]);
       }
     }
@@ -828,28 +789,27 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
                    << "\n";
     }
 
-    if (opName == "std.mulf") {
-      vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                op->getOperand(1 - op_index));
-    } else if (opName == "std.addf") {
+    if (opName == "arith.mulf") {
+      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                 op->getOperand(1 - op_index));
+    } else if (opName == "arith.addf") {
       // This has no effect on the VJP
-    } else if (opName == "std.subf") {
+    } else if (opName == "arith.subf") {
       if (op_index == 1) {
-        vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+        vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
       }
-    } else if (opName == "std.divf") {
+    } else if (opName == "arith.divf") {
       if (op_index == 0) {
-        vjp_value = rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value,
-                                                  op->getOperand(1));
+        vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
+                                                   op->getOperand(1));
       } else {
-        assert(op_index == 1 && "std.divf op had more than 2 args");
-        vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                  op->getOperand(0));
-        vjp_value = rewriter.create<mlir::NegFOp>(op->getLoc(), vjp_value);
+        vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                   op->getOperand(0));
+        vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
         Value denom =
-            rewriter.create<mlir::MulFOp>(op->getLoc(), operand, operand);
+            rewriter.create<arith::MulFOp>(op->getLoc(), operand, operand);
         vjp_value =
-            rewriter.create<mlir::DivFOp>(op->getLoc(), vjp_value, denom);
+            rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, denom);
       }
     } else if (opName == "std.select") {
       // auto selectOp = dyn_cast<mlir::SelectOp>(op);
@@ -857,24 +817,32 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
     } else if (opName == "math.exp") {
       assert(op->getNumResults() == 1 &&
              "math.exp op did not have exactly 1 result");
-      vjp_value = rewriter.create<mlir::MulFOp>(op->getLoc(), vjp_value,
-                                                op->getResult(0));
+      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                 op->getResult(0));
     } else if (opName == "math.sin") {
       auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
-      vjp_value = rewriter.create<MulFOp>(op->getLoc(), cos, vjp_value);
+      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), cos, vjp_value);
     } else if (opName == "math.cos") {
       auto sin = rewriter.create<math::SinOp>(op->getLoc(), vjp_value);
-      vjp_value = rewriter.create<MulFOp>(op->getLoc(), sin, vjp_value);
-      vjp_value = rewriter.create<NegFOp>(op->getLoc(), vjp_value);
+      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), sin, vjp_value);
+      vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
     } else if (opName == "math.sqrt") {
       auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
-      vjp_value = rewriter.create<MulFOp>(op->getLoc(), vjp_value, half);
+      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value, half);
       // This is a bit of a math trick. Note the result is sqrt(operand)
-      vjp_value =
-          rewriter.create<DivFOp>(op->getLoc(), vjp_value, op->getResult(0));
+      vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
+                                                 op->getResult(0));
     } else if (opName == "std.call") {
-      vjp_value =
-          reverseCallOp(dyn_cast<CallOp>(op), vjp_value, op_index, rewriter);
+      vjp_value = reverseCallOp(dyn_cast<CallOp>(op), moduleOp, vjp_value,
+                                op_index, rewriter);
+    } else if (opName == "tensor.extract") {
+      if (op_index > 0) {
+        continue;
+      }
+      auto extractOp = dyn_cast<tensor::ExtractOp>(op);
+      auto space = getZero(operand.getLoc(), extractOp.tensor(), rewriter);
+      vjp_value = rewriter.create<tensor::InsertOp>(
+          extractOp.getLoc(), vjp_value, space, extractOp.indices());
     } else if (opName == "linalg.generic") {
       auto genericOp = dyn_cast<linalg::GenericOp>(op);
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
@@ -899,13 +867,39 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
           if (!env[freeOperand]) {
             env[freeOperand] = result;
           } else {
-            env[freeOperand] = rewriter.create<AddFOp>(
+            env[freeOperand] = rewriter.create<arith::AddFOp>(
                 freeOperand.getLoc(), result, env[freeOperand]);
           }
         }
       }
       vjp_value =
           reverseGenericOp(genericOp, operand, vjp_value, op_index, rewriter);
+    } else if (opName == "linalg.dot") {
+      if (op_index > 1)
+        continue;
+
+      SmallVector<AffineMap, 6> indexing_maps(
+          op->getNumOperands(), rewriter.getMultiDimIdentityMap(1));
+      indexing_maps[0] = indexing_maps[0].getSubMap({});
+      indexing_maps[1] = indexing_maps[1].getSubMap({0});
+      indexing_maps[2] = indexing_maps[2].getSubMap({0});
+      auto library_call =
+          op_index == 0 ? "sdot_grad_first" : "sdot_grad_second";
+      auto adjoint = rewriter.create<linalg::GenericOp>(
+          operand.getLoc(), /*resultTensorTypes=*/operand.getType(),
+          /*inputs=*/
+          ValueRange({vjp_value, op->getOperand(1 - op_index)}),
+          /*outputs=*/ValueRange({operand}), indexing_maps,
+          /*iteratorTypes=*/
+          SmallVector<StringRef>({getParallelIteratorTypeName()}),
+          /*doc=*/"Copy and scalar multiplication",
+          /*library call=*/library_call,
+          [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+            Value mul_res = builder.create<arith::MulFOp>(loc, regionArgs[0],
+                                                          regionArgs[1]);
+            builder.create<linalg::YieldOp>(loc, mul_res);
+          });
+      vjp_value = adjoint.getResult(0);
     } else {
       llvm::outs() << "(populateVJP) unrecognized op: " << opName << "\n";
     }
@@ -915,7 +909,7 @@ void populateVJP(Operation *op, llvm::DenseMap<Value, Value> &env,
       env[operand] = vjp_value;
     } else {
       env[operand] =
-          rewriter.create<mlir::AddFOp>(op->getLoc(), env[operand], vjp_value);
+          rewriter.create<arith::AddFOp>(op->getLoc(), env[operand], vjp_value);
     }
     op_index++;
   }
@@ -940,6 +934,11 @@ public:
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
     rewriter.eraseOp(op);
     // llvm::outs() << "\n\nFuncOp:\n" << funcOp << "\n";
+    // op->getParentOfType<ModuleOp>().walk([&](CallOp op) {
+    //   if (op.use_empty()) {
+    //     rewriter.eraseOp(op);
+    //   }
+    // });
     return success();
   }
 
@@ -1071,6 +1070,7 @@ namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<mlir::arith::ArithmeticDialect>();
     addLegalDialect<mlir::math::MathDialect>();
     addLegalDialect<mlir::memref::MemRefDialect>();
     addLegalDialect<tensor::TensorDialect>();
