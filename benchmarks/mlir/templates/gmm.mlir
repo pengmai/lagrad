@@ -18,7 +18,7 @@ func @gmm_objective(
   %Qdiags = math.exp %Qs : tensor<{{k}}x{{d}}xf64>
 
   // Sum along the columns of the Q matrix
-  %sum_q_space = constant dense<0.0> : tensor<{{k}}xf64>
+  %sum_q_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
   %sum_qs = linalg.generic
     {
       indexing_maps = [#map0, #map1],
@@ -27,12 +27,12 @@ func @gmm_objective(
     ins(%Qs: tensor<{{k}}x{{d}}xf64>)
     outs(%sum_q_space: tensor<{{k}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = addf %arg0, %arg1 : f64
+    %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64
   } -> tensor<{{k}}xf64>
 
   // Each datapoint is broadcasted, then the means are elementwise subtracted
-  %xcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %xcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
   %xcentered = linalg.generic
     {
       indexing_maps = [
@@ -45,12 +45,12 @@ func @gmm_objective(
     ins(%x, %means : tensor<{{n}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>)
     outs(%xcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = subf %arg0, %arg1 : f64
+    %0 = arith.subf %arg0, %arg1 : f64
     linalg.yield %0 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
   // Compute Qtimesx.
-  %Lxcentered_intermediate_shape = constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %Lxcentered_intermediate_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
   %Lxcentered_intermediate = linalg.generic
     {
       indexing_maps = [
@@ -67,8 +67,8 @@ func @gmm_objective(
     )
     outs(%Lxcentered_intermediate_shape: tensor<{{n}}x{{k}}x{{d}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = mulf %arg0, %arg1 : f64
-    %1 = addf %0, %arg2 : f64
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
@@ -78,7 +78,7 @@ func @gmm_objective(
   // %U = tensor.cast %subview : tensor<1x1x{{d}}xf64> to tensor<*xf64>
   // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
 
-  %Lxcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
   %Lxcentered = linalg.generic
     {
       indexing_maps = [
@@ -97,13 +97,13 @@ func @gmm_objective(
     )
     outs(%Lxcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-    %0 = mulf %arg0, %arg1 : f64
-    %1 = addf %0, %arg2 : f64
-    %2 = mulf %1, %1 : f64
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    %2 = arith.mulf %1, %1 : f64
     linalg.yield %2 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
-  %sqsum_Lxcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
+  %sqsum_Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
   %sqsum_Lxcentered = linalg.generic
     {indexing_maps = [
       affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
@@ -113,14 +113,14 @@ func @gmm_objective(
     ins(%Lxcentered : tensor<{{n}}x{{k}}x{{d}}xf64>)
     outs(%sqsum_Lxcentered_shape : tensor<{{n}}x{{k}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = addf %arg0, %arg1 : f64
+    %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64
   } -> tensor<{{n}}x{{k}}xf64>
 
-  %alphasPlusSumQs = addf %alphas, %sum_qs : tensor<{{k}}xf64>
+  %alphasPlusSumQs = arith.addf %alphas, %sum_qs : tensor<{{k}}xf64>
 
-  %inner_term_shape = constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
-  %half = constant 0.5 : f64
+  %inner_term_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
+  %half = arith.constant 0.5 : f64
   %inner_term = linalg.generic
     {
       indexing_maps = [
@@ -133,26 +133,12 @@ func @gmm_objective(
     ins(%alphasPlusSumQs, %sqsum_Lxcentered : tensor<{{k}}xf64>, tensor<{{n}}x{{k}}xf64>)
     outs(%inner_term_shape : tensor<{{n}}x{{k}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = mulf %arg1, %half : f64
-    %1 = subf %arg0, %0 : f64
+    %0 = arith.mulf %arg1, %half : f64
+    %1 = arith.subf %arg0, %0 : f64
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}xf64>
 
-  // // %sum_inner_term_init = constant dense<0.0> : tensor<f64>
-  // // %sum_inner_term = linalg.generic
-  // //   {
-  // //     indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> ()>],
-  // //     iterator_types = ["reduction", "reduction"]
-  // //   }
-  // //   ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
-  // //   outs(%sum_inner_term_init : tensor<f64>) {
-  // // ^bb0(%arg0: f64, %arg1: f64):
-  // //   %0 = addf %arg0, %arg1 : f64
-  // //   linalg.yield %0 : f64
-  // // } -> tensor<f64>
-  // // return %sum_inner_term : tensor<f64>
-
-  %max_init = constant dense<0.0> : tensor<{{n}}xf64>
+  %max_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
   %max = linalg.generic
     {
       indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
@@ -161,7 +147,7 @@ func @gmm_objective(
     ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
     outs(%max_init : tensor<{{n}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = cmpf "ogt", %arg0, %arg1 : f64
+    %0 = arith.cmpf "ogt", %arg0, %arg1 : f64
     %1 = scf.if %0 -> f64 {
       scf.yield %arg0 : f64
     } else {
@@ -174,7 +160,7 @@ func @gmm_objective(
   // // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
   // // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
 
-  %lse_init = constant dense<0.0> : tensor<{{n}}xf64>
+  %lse_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
   %lse_intermediate = linalg.generic
     {
       indexing_maps = [
@@ -187,15 +173,15 @@ func @gmm_objective(
     ins(%inner_term, %max : tensor<{{n}}x{{k}}xf64>, tensor<{{n}}xf64>)
     outs(%lse_init : tensor<{{n}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = subf %arg0, %arg1 : f64
+    %0 = arith.subf %arg0, %arg1 : f64
     %1 = math.exp %0 : f64
-    %2 = addf %1, %arg2 : f64
+    %2 = arith.addf %1, %arg2 : f64
     linalg.yield %2 : f64
   } -> tensor<{{n}}xf64>
   %lse_before_add = math.log %lse_intermediate : tensor<{{n}}xf64>
-  %lse = addf %lse_before_add, %max : tensor<{{n}}xf64>
+  %lse = arith.addf %lse_before_add, %max : tensor<{{n}}xf64>
 
-  %slse_init = constant dense<0.0> : tensor<f64>
+  %slse_init = arith.constant dense<0.0> : tensor<f64>
   %slse = linalg.generic
     {
       indexing_maps = [
@@ -207,12 +193,12 @@ func @gmm_objective(
     ins(%lse : tensor<{{n}}xf64>)
     outs(%slse_init : tensor<f64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = addf %arg0, %arg1 : f64
+    %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64
   } -> tensor<f64>
 
   // log_wishart_prior
-  %Qdiags_summed_init = constant dense<0.0> : tensor<{{k}}xf64>
+  %Qdiags_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
   %Qdiags_summed = linalg.generic
     {
       indexing_maps = [
@@ -224,13 +210,13 @@ func @gmm_objective(
     ins(%Qdiags : tensor<{{k}}x{{d}}xf64>)
     outs(%Qdiags_summed_init : tensor<{{k}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = mulf %arg0, %arg0 : f64
-    %1 = addf %0, %arg1 : f64
+    %0 = arith.mulf %arg0, %arg0 : f64
+    %1 = arith.addf %0, %arg1 : f64
     linalg.yield %1 : f64
   } -> tensor<{{k}}xf64>
 
   // This will have a ton of redundant computation
-  %L_sq_summed_init = constant dense<0.0> : tensor<{{k}}xf64>
+  %L_sq_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
   %L_sq_summed = linalg.generic
     {
       indexing_maps = [
@@ -242,13 +228,13 @@ func @gmm_objective(
     ins(%Ls : tensor<{{k}}x{{d}}x{{d}}xf64>)
     outs(%L_sq_summed_init : tensor<{{k}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = mulf %arg0, %arg0 : f64
-    %1 = addf %0, %arg1 : f64
+    %0 = arith.mulf %arg0, %arg0 : f64
+    %1 = arith.addf %0, %arg1 : f64
     linalg.yield %1 : f64
   } -> tensor<{{k}}xf64>
-  %Qdiags_Lsq_summed = addf %Qdiags_summed, %L_sq_summed : tensor<{{k}}xf64>
+  %Qdiags_Lsq_summed = arith.addf %Qdiags_summed, %L_sq_summed : tensor<{{k}}xf64>
 
-  %wishart_out_init = constant dense<0.0> : tensor<f64>
+  %wishart_out_init = arith.constant dense<0.0> : tensor<f64>
   %wishart_out_1 = linalg.generic
     {
       indexing_maps = [
@@ -260,14 +246,14 @@ func @gmm_objective(
     ins(%Qdiags_Lsq_summed : tensor<{{k}}xf64>)
     outs(%wishart_out_init : tensor<f64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = mulf %half, %wishart_gamma : f64
-    %1 = mulf %0, %wishart_gamma : f64
-    %2 = mulf %1, %arg0 : f64
-    %3 = addf %2, %arg1 : f64
+    %0 = arith.mulf %half, %wishart_gamma : f64
+    %1 = arith.mulf %0, %wishart_gamma : f64
+    %2 = arith.mulf %1, %arg0 : f64
+    %3 = arith.addf %2, %arg1 : f64
     linalg.yield %3 : f64
   } -> tensor<f64>
 
-  %wishart_sum_qs_init = constant dense<0.0> : tensor<f64>
+  %wishart_sum_qs_init = arith.constant dense<0.0> : tensor<f64>
   %wishart_sum_qs = linalg.generic
     {
       indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
@@ -276,16 +262,16 @@ func @gmm_objective(
     ins(%sum_qs : tensor<{{k}}xf64>)
     outs(%wishart_sum_qs_init : tensor<f64>) {
   ^bb0(%arg0: f64, %arg1: f64):
-    %0 = sitofp %wishart_m : i64 to f64
-    %1 = mulf %0, %arg0 : f64
-    %2 = addf %1, %arg1 : f64
+    %0 = arith.sitofp %wishart_m : i64 to f64
+    %1 = arith.mulf %0, %arg0 : f64
+    %2 = arith.addf %1, %arg1 : f64
     linalg.yield %2 : f64
   } -> tensor<f64>
 
-  %wishart_out = subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
+  %wishart_out = arith.subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
 
   // logsumexp alphas
-  %sumexp_alphas_init = constant dense<0.0> : tensor<f64>
+  %sumexp_alphas_init = arith.constant dense<0.0> : tensor<f64>
   %sumexp_alphas = linalg.generic
     {
       indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
@@ -295,16 +281,16 @@ func @gmm_objective(
     outs(%sumexp_alphas_init : tensor<f64>) {
   ^bb0(%arg0: f64, %arg1: f64):
     %0 = math.exp %arg0 : f64
-    %1 = addf %0, %arg1 : f64
+    %1 = arith.addf %0, %arg1 : f64
     linalg.yield %1 : f64
   } -> tensor<f64>
   %logsumexp_alphas = math.log %sumexp_alphas : tensor<f64>
 
-  %n_tensor = constant dense<{{n}}.> : tensor<f64>
-  %n_logsumexp_alphas = mulf %n_tensor, %logsumexp_alphas : tensor<f64>
+  %n_tensor = arith.constant dense<{{n}}.> : tensor<f64>
+  %n_logsumexp_alphas = arith.mulf %n_tensor, %logsumexp_alphas : tensor<f64>
 
-  %final_0 = subf %slse, %n_logsumexp_alphas : tensor<f64>
-  %final_1 = addf %final_0, %wishart_out : tensor<f64>
+  %final_0 = arith.subf %slse, %n_logsumexp_alphas : tensor<f64>
+  %final_1 = arith.addf %final_0, %wishart_out : tensor<f64>
   return %final_1 : tensor<f64>
 }
 

@@ -43,11 +43,12 @@ TMP = osp.join(osp.dirname(__file__), "tmp")
 BUFFERIZE = [
     "-tensor-constant-bufferize",
     "-tensor-bufferize",
+    "-standalone-bufferize",
     "-linalg-bufferize",
     "-scf-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
-    # "-buffer-deallocation",
+    "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
     "-convert-linalg-to-affine-loops",
@@ -60,6 +61,7 @@ LOWER_TO_LLVM = [
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-std-to-llvm",
+    "-reconcile-unrealized-casts",
     "-llvm-legalize-for-export",
 ]
 
@@ -190,5 +192,9 @@ def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
         + ([OPENBLAS_OBJ] if link_openblas else [])
         + ([RUNNER_UTILS] if link_runner_utils else [])
     )
-    run_safe(["gcc"] + objects + ["-o", f"{TMP}/{binary}"])
+    run_safe(
+        ["gcc"]
+        + objects
+        + ["-o", f"{TMP}/{binary}", "-rpath", f"{osp.expanduser('~')}/.local/lib"]
+    )
     return run_safe([f"{TMP}/{binary}"])
