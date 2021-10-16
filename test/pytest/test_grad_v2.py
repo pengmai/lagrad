@@ -72,6 +72,10 @@ def test_nested_call():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/nestedcall.mlir")) == 2.4
 
 
+def test_if_function_call():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/if_function.mlir")) == 8.4
+
+
 def test_broadcast():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/generic/broadcast.mlir")) == 4
 
@@ -154,14 +158,22 @@ def test_relu():
     assert extract_1d(jit_file(f"{MLIR_FILES}/relu.mlir")) == [1, 0, 1, 0]
 
 
-def disabled_test_closure():
-    print(extract_scalar(jit_file(f"{MLIR_FILES}/generic/closure.mlir")))
+def test_closure():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/generic/closure.mlir")) == 40
 
 
 def test_if_else():
     output = jit_file(f"{MLIR_FILES}/ifelse.mlir").split("Unranked")[1:]
     parsed = [extract_scalar(line) for line in output]
     assert parsed == [9.0, 1.0, 0.0, 15.3, 353.736]
+
+
+def test_if_different_type():
+    """
+    This tests the case where the result of an scf.if op is a different type than
+    the variable being differentiated.
+    """
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/ifdifferenttype.mlir")) == 9.96035
 
 
 def disabled_test_if_else():

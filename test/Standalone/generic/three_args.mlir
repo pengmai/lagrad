@@ -4,9 +4,9 @@ func @generic_three_args(
   %Qdiags: tensor<{{k}}x{{d}}xf64>,
   %xcentered: tensor<{{n}}x{{k}}x{{d}}xf64>
 ) -> tensor<{{n}}x{{k}}x{{d}}xf64> {
-  %Lxcentered_shape = constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %cst = constant dense<2.3> : tensor<{{k}}x{{d}}x{{d}}xf64>
-  %Lxcentered_intermediate_init = constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %cst = arith.constant dense<2.3> : tensor<{{k}}x{{d}}x{{d}}xf64>
+  %Lxcentered_intermediate_init = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
   %Lxcentered_intermediate = linalg.generic
     {
       indexing_maps = [
@@ -19,8 +19,8 @@ func @generic_three_args(
     ins(%cst, %xcentered : tensor<{{k}}x{{d}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>)
     outs(%Lxcentered_intermediate_init : tensor<{{n}}x{{k}}x{{d}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = mulf %arg0, %arg1 : f64
-    %1 = addf %0, %arg2 : f64
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
@@ -42,16 +42,16 @@ func @generic_three_args(
     )
     outs(%Lxcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-    %0 = mulf %arg0, %arg1 : f64
-    %1 = addf %0, %arg2 : f64
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}x{{d}}xf64>
   return %Lxcentered : tensor<{{n}}x{{k}}x{{d}}xf64>
 }
 
 func @main() {
-  %Qdiags = constant dense<{{Qdiags}}> : tensor<{{k}}x{{d}}xf64>
-  %xcentered = constant dense<{{xcentered}}> : tensor<{{n}}x{{k}}x{{d}}xf64>
+  %Qdiags = arith.constant dense<{{Qdiags}}> : tensor<{{k}}x{{d}}xf64>
+  %xcentered = arith.constant dense<{{xcentered}}> : tensor<{{n}}x{{k}}x{{d}}xf64>
 
   %f = constant @generic_three_args : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
   %df = standalone.grad %f {of = [1]}: (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>, (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>

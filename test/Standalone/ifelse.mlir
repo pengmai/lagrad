@@ -1,9 +1,9 @@
 func @ifelse(%arg0: f64) -> f64 {
-  %cst = constant 0.0 : f64
-  %0 = cmpf "oge", %arg0, %cst : f64
+  %cst = arith.constant 0.0 : f64
+  %0 = arith.cmpf "oge", %arg0, %cst : f64
   %1 = scf.if %0 -> f64 {
-    %2 = mulf %arg0, %arg0 : f64
-    %3 = addf %2, %cst : f64
+    %2 = arith.mulf %arg0, %arg0 : f64
+    %3 = arith.addf %2, %cst : f64
     scf.yield %3 : f64
   } else {
     scf.yield %arg0 : f64
@@ -13,11 +13,11 @@ func @ifelse(%arg0: f64) -> f64 {
 
 // The unbound variable only occurs in the then block, not the else block.
 func @ifelse_only_then_block(%arg0: f64) -> f64 {
-  %cst = constant 0.0 : f64
-  %0 = cmpf "oge", %arg0, %cst : f64
+  %cst = arith.constant 0.0 : f64
+  %0 = arith.cmpf "oge", %arg0, %cst : f64
   %1 = scf.if %0 -> f64 {
-    %2 = mulf %arg0, %arg0 : f64
-    %3 = addf %2, %cst : f64
+    %2 = arith.mulf %arg0, %arg0 : f64
+    %3 = arith.addf %2, %cst : f64
     scf.yield %3 : f64
   } else {
     scf.yield %cst : f64
@@ -26,18 +26,18 @@ func @ifelse_only_then_block(%arg0: f64) -> f64 {
 }
 
 func @ifsecondarg(%arg0: f64, %arg1: f64) -> f64 {
-  %cst = constant 3.4 : f64
-  %0 = cmpf "oge", %arg0, %arg1 : f64
-  %1 = mulf %cst, %arg1 : f64
+  %cst = arith.constant 3.4 : f64
+  %0 = arith.cmpf "oge", %arg0, %arg1 : f64
+  %1 = arith.mulf %cst, %arg1 : f64
   %2 = scf.if %0 -> f64 {
-    %3 = mulf %arg0, %arg1: f64
+    %3 = arith.mulf %arg0, %arg1: f64
     scf.yield %3 : f64
   } else {
-    %3 = mulf %1, %arg1 : f64
-    %4 = mulf %cst, %3 : f64
+    %3 = arith.mulf %1, %arg1 : f64
+    %4 = arith.mulf %cst, %3 : f64
     scf.yield %4 : f64
   }
-  %5 = mulf %2, %cst : f64
+  %5 = arith.mulf %2, %cst : f64
   return %5 : f64
 }
 
@@ -52,8 +52,8 @@ func @print(%arg0: f64) {
 }
 
 func @main() {
-  %arg = constant 4.5 : f64
-  %arg1 = constant -1.0 : f64
+  %arg = arith.constant 4.5 : f64
+  %arg1 = arith.constant -1.0 : f64
 
   %f = constant @ifelse : (f64) -> f64
   %df = standalone.grad %f : (f64) -> f64, (f64) -> f64

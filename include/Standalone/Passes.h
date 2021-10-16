@@ -13,5 +13,7 @@ std::unique_ptr<mlir::Pass> createTensorConstantFoldPass();
 std::unique_ptr<mlir::Pass> createElementwiseToAffinePass();
 
 std::unique_ptr<mlir::Pass> createBufferizePass();
+
+std::unique_ptr<mlir::Pass> createTriangularLoopsPass();
 } // end namespace Standalone
 } // end namespace mlir

@@ -16,6 +16,7 @@ BUFFERIZE = [
     "-tensor-bufferize",
     "-standalone-bufferize",
     "-linalg-bufferize",
+    "-scf-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
 ]

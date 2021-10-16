@@ -51,6 +51,7 @@ def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
+    # mlir_template = mlir_env.get_template("gmm_loops.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
     config = {
         "k": 25,
