@@ -65,11 +65,11 @@ static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
 }
 
 // Modified from "mlir/Dialect/Linalg/Utils/Utils.cpp"
-static void inlineRegionAndEmitStore(OpBuilder &b, Location loc,
-                                     linalg::LinalgOp op,
-                                     ArrayRef<Value> indexedValues,
-                                     ArrayRef<SmallVector<Value>> indexing,
-                                     ArrayRef<Value> outputBuffers) {
+static SmallVector<Value>
+inlineRegionAndEmitStore(OpBuilder &b, Location loc, linalg::LinalgOp op,
+                         ArrayRef<Value> indexedValues,
+                         ArrayRef<SmallVector<Value>> indexing,
+                         ArrayRef<Value> outputTensors) {
   auto &block = op->getRegion(0).front();
   BlockAndValueMapping map;
   map.map(block.getArguments(), indexedValues);
@@ -79,17 +79,23 @@ static void inlineRegionAndEmitStore(OpBuilder &b, Location loc,
   }
 
   Operation *terminator = block.getTerminator();
+  SmallVector<Value> results;
   for (OpOperand &operand : terminator->getOpOperands()) {
     Value toStore = map.lookupOrDefault(operand.get());
-    b.create<memref::StoreOp>(loc, toStore,
-                              outputBuffers[operand.getOperandNumber()],
-                              indexing[operand.getOperandNumber()]);
+    results.push_back(b.create<tensor::InsertOp>(
+        loc, toStore, outputTensors[operand.getOperandNumber()],
+        indexing[operand.getOperandNumber()]));
   }
+  return results;
 }
 
-static void emitScalarImplementation(OpBuilder &b, Location loc,
-                                     ValueRange allIvs,
-                                     linalg::LinalgOp linalgOp, Value dest) {
+static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
+                                                   ValueRange allIvs,
+                                                   ValueRange iterArgs,
+                                                   linalg::LinalgOp linalgOp) {
+  assert(iterArgs.size() == linalgOp.getOutputTensorOperands().size() &&
+         "Expected # of iter args to be equal to # of output tensor operands.");
+
   SmallVector<Value> indexedValues;
   indexedValues.reserve(linalgOp.getNumInputsAndOutputs());
 
@@ -108,25 +114,26 @@ static void emitScalarImplementation(OpBuilder &b, Location loc,
   }
 
   // 1.b. Emit load from output views.
-  for (auto outputOperand : linalgOp.getOutputOperands()) {
+  for (auto pair : llvm::zip(linalgOp.getOutputOperands(), iterArgs)) {
+    auto outputOperand = std::get<0>(pair);
+    Value iterArg = std::get<1>(pair);
+
     auto indexing = makeCanonicalAffineApplies(
         b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims);
-    indexedValues.push_back(b.create<memref::LoadOp>(loc, dest, indexing));
-    // indexedValues.push_back(
-    //     b.create<tensor::ExtractOp>(loc, outputOperand->get(), indexing));
+    indexedValues.push_back(
+        b.create<tensor::ExtractOp>(loc, iterArg, indexing));
   }
 
   // 2. Inline region, currently only works for a single basic block.
   // 3. Emit store.
+  SmallVector<Value> outputTensors{iterArgs};
   SmallVector<SmallVector<Value>, 8> indexing;
-  SmallVector<Value> outputBuffers;
   for (auto outputOperand : linalgOp.getOutputTensorOperands()) {
     indexing.push_back(makeCanonicalAffineApplies(
         b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
-    outputBuffers.push_back(dest);
   }
-  inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
-                           outputBuffers);
+  return inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
+                                  outputTensors);
 }
 
 class ConvertGenericOp : public RewritePattern {
@@ -155,28 +162,19 @@ public:
     auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
     auto iteratorTypes =
         llvm::to_vector<4>(linalgOp.iterator_types().getValue());
-
-    auto output = genericOp.getOutputOperand(0)->get();
-    auto outputType = output.getType().dyn_cast<ShapedType>();
-    auto memrefType =
-        MemRefType::get(outputType.getShape(), outputType.getElementType());
-    Value dest =
-        rewriter.create<memref::AllocOp>(genericOp.getLoc(), memrefType);
-
-    // auto dest = rewriter.create<memref::BufferCastOp>(genericOp.getLoc(),
-    //                                                   memrefType, output);
     SmallVector<Value, 4> lbs, ubs, steps;
     unpackRanges(loopRanges, lbs, ubs, steps);
+    SmallVector<Value> iterArgInitValues = linalgOp.getOutputTensorOperands();
     auto loopNest = scf::buildLoopNest(
-        rewriter, linalgOp.getLoc(), lbs, ubs, steps,
-        [&](OpBuilder &b, Location loc, ValueRange ivs) {
-          emitScalarImplementation(b, loc, ivs, linalgOp, dest);
+        rewriter, linalgOp.getLoc(), lbs, ubs, steps, iterArgInitValues,
+        [&](OpBuilder &b, Location loc, ValueRange ivs,
+            ValueRange iterArgs) -> scf::ValueVector {
+          auto iterNext =
+              emitScalarImplementation(b, loc, ivs, iterArgs, linalgOp);
+          return scf::ValueVector{iterNext.begin(), iterNext.end()};
         });
-
-    auto result =
-        rewriter.create<memref::TensorLoadOp>(genericOp.getLoc(), dest)
-            .getResult();
-    op->replaceAllUsesWith(llvm::makeArrayRef(result));
+    op->replaceAllUsesWith(
+        llvm::makeArrayRef(linalgOp.getOutputOperand(0)->get()));
     rewriter.eraseOp(op);
 
     return success();
