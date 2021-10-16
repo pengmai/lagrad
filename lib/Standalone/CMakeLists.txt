@@ -7,6 +7,8 @@ add_mlir_dialect_library(MLIRStandalone
         Bufferize.cpp
         TensorConstantFolding.cpp
         ElementwiseToAffine.cpp
+        TriangularLoops.cpp
+        Utils.cpp
 
         ADDITIONAL_HEADER_DIRS
         ${PROJECT_SOURCE_DIR}/include/Standalone
