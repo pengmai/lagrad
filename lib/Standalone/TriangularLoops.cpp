@@ -20,17 +20,17 @@
 using namespace mlir;
 
 namespace {
-bool hasRecognizedEncoding(linalg::GenericOp op) {
-  for (auto operand : op.getOperands()) {
-    auto encoding =
-        operand.getType().dyn_cast<RankedTensorType>().getEncoding();
-    auto val = encoding.dyn_cast_or_null<StringAttr>();
-    if (val && val.getValue() == "ltri") {
-      return true;
-    }
-  }
-  return false;
-}
+// bool hasRecognizedEncoding(linalg::GenericOp op) {
+//   for (auto operand : op.getOperands()) {
+//     auto encoding =
+//         operand.getType().dyn_cast<RankedTensorType>().getEncoding();
+//     auto val = encoding.dyn_cast_or_null<StringAttr>();
+//     if (val && val.getValue() == "ltri") {
+//       return true;
+//     }
+//   }
+//   return false;
+// }
 
 /// Taken from mlir/Dialect/Linalg/Utils/Utils.cpp
 /// Given a list of subview ranges, extract individual values for lower, upper
@@ -65,13 +65,37 @@ static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
 }
 
 // Modified from "mlir/Dialect/Linalg/Utils/Utils.cpp"
+static void inlineRegionAndEmitStore(OpBuilder &b, Location loc,
+                                     linalg::LinalgOp op,
+                                     ArrayRef<Value> indexedValues,
+                                     ArrayRef<SmallVector<Value>> indexing,
+                                     ArrayRef<Value> outputBuffers) {
+  auto &block = op->getRegion(0).front();
+  BlockAndValueMapping map;
+  map.map(block.getArguments(), indexedValues);
+  for (auto &op : block.without_terminator()) {
+    auto *newOp = b.clone(op, map);
+    map.map(op.getResults(), newOp->getResults());
+  }
+
+  Operation *terminator = block.getTerminator();
+  for (OpOperand &operand : terminator->getOpOperands()) {
+    Value toStore = map.lookupOrDefault(operand.get());
+    b.create<memref::StoreOp>(loc, toStore,
+                              outputBuffers[operand.getOperandNumber()],
+                              indexing[operand.getOperandNumber()]);
+  }
+}
+
 static void emitScalarImplementation(OpBuilder &b, Location loc,
                                      ValueRange allIvs,
-                                     linalg::LinalgOp linalgOp) {
+                                     linalg::LinalgOp linalgOp, Value dest) {
   SmallVector<Value> indexedValues;
   indexedValues.reserve(linalgOp.getNumInputsAndOutputs());
 
   auto allIvsPlusDims = SmallVector<Value>(allIvs.begin(), allIvs.end());
+  // 1.a. Emit load from input operands or for scalars access the operand
+  // itself.
   for (auto inputOperand : linalgOp.getInputOperands()) {
     if (linalgOp.isScalar(inputOperand)) {
       indexedValues.push_back(inputOperand->get());
@@ -82,6 +106,27 @@ static void emitScalarImplementation(OpBuilder &b, Location loc,
     indexedValues.push_back(
         b.create<tensor::ExtractOp>(loc, inputOperand->get(), indexing));
   }
+
+  // 1.b. Emit load from output views.
+  for (auto outputOperand : linalgOp.getOutputOperands()) {
+    auto indexing = makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims);
+    indexedValues.push_back(b.create<memref::LoadOp>(loc, dest, indexing));
+    // indexedValues.push_back(
+    //     b.create<tensor::ExtractOp>(loc, outputOperand->get(), indexing));
+  }
+
+  // 2. Inline region, currently only works for a single basic block.
+  // 3. Emit store.
+  SmallVector<SmallVector<Value>, 8> indexing;
+  SmallVector<Value> outputBuffers;
+  for (auto outputOperand : linalgOp.getOutputTensorOperands()) {
+    indexing.push_back(makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
+    outputBuffers.push_back(dest);
+  }
+  inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
+                           outputBuffers);
 }
 
 class ConvertGenericOp : public RewritePattern {
@@ -111,23 +156,23 @@ public:
     auto iteratorTypes =
         llvm::to_vector<4>(linalgOp.iterator_types().getValue());
 
-    auto resultType = genericOp.getOutputOperand(0)
-                          ->get()
-                          .getType()
-                          .dyn_cast<RankedTensorType>();
-    auto dest = rewriter.create<memref::AllocOp>(
-        genericOp.getLoc(),
-        MemRefType::get(resultType.getShape(), resultType.getElementType()));
+    auto output = genericOp.getOutputOperand(0)->get();
+    auto outputType = output.getType().dyn_cast<ShapedType>();
+    auto memrefType =
+        MemRefType::get(outputType.getShape(), outputType.getElementType());
+    Value dest =
+        rewriter.create<memref::AllocOp>(genericOp.getLoc(), memrefType);
+
+    // auto dest = rewriter.create<memref::BufferCastOp>(genericOp.getLoc(),
+    //                                                   memrefType, output);
     SmallVector<Value, 4> lbs, ubs, steps;
     unpackRanges(loopRanges, lbs, ubs, steps);
-    auto loopNest =
-        scf::buildLoopNest(rewriter, linalgOp.getLoc(), lbs, ubs, steps,
-                           [&](OpBuilder &b, Location loc, ValueRange ivs) {
-                             emitScalarImplementation(b, loc, ivs, linalgOp);
-                           });
+    auto loopNest = scf::buildLoopNest(
+        rewriter, linalgOp.getLoc(), lbs, ubs, steps,
+        [&](OpBuilder &b, Location loc, ValueRange ivs) {
+          emitScalarImplementation(b, loc, ivs, linalgOp, dest);
+        });
 
-    loopNest.loops[0].print(llvm::outs());
-    llvm::outs() << "\n";
     auto result =
         rewriter.create<memref::TensorLoadOp>(genericOp.getLoc(), dest)
             .getResult();
