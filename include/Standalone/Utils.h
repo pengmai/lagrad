@@ -29,6 +29,9 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
                   DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter);
 
+Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
+                             Value vjp_value, OpBuilder &builder);
+
 Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter);
 

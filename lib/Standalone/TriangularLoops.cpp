@@ -158,6 +158,11 @@ public:
     // if (!hasRecognizedEncoding(genericOp)) {
     //   return failure();
     // }
+    // auto arg0 = linalgOp.getInputOperand(0)->get();
+    // llvm::outs()
+    //     << "arg0 encoding: "
+    //     << (arg0.getType().dyn_cast<RankedTensorType>().getEncoding() ==
+    //         nullptr);
 
     auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
     auto iteratorTypes =
@@ -173,8 +178,10 @@ public:
               emitScalarImplementation(b, loc, ivs, iterArgs, linalgOp);
           return scf::ValueVector{iterNext.begin(), iterNext.end()};
         });
-    op->replaceAllUsesWith(
-        llvm::makeArrayRef(linalgOp.getOutputOperand(0)->get()));
+    auto num_loops = loopNest.loops.size();
+    auto last = loopNest.loops[num_loops - 1];
+    last.setUpperBound(loopNest.loops[num_loops - 2].getInductionVar());
+    op->replaceAllUsesWith(loopNest.getResults());
     rewriter.eraseOp(op);
 
     return success();
@@ -203,7 +210,6 @@ struct TriangularLoopsPass
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
-    // target.addIllegalOp<linalg::GenericOp>();
 
     patterns.add<ConvertGenericOp>(patterns.getContext());
 

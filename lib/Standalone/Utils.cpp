@@ -414,10 +414,8 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
           if (op_index > 0) {
             continue;
           }
-          auto extractOp = dyn_cast<tensor::ExtractOp>(op);
-          auto space = getZero(operand.getLoc(), extractOp.tensor(), rewriter);
-          vjp_value = rewriter.create<tensor::InsertOp>(
-              extractOp.getLoc(), vjp_value, space, extractOp.indices());
+          vjp_value = reverseTensorExtractOp(dyn_cast<tensor::ExtractOp>(op),
+                                             operand, vjp_value, rewriter);
         } else if (opName == "tensor.extract_slice") {
           auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
           auto space = getZero(operand.getLoc(), operand, rewriter);
@@ -651,10 +649,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (op_index > 0) {
         continue;
       }
-      auto extractOp = dyn_cast<tensor::ExtractOp>(op);
-      auto space = getZero(operand.getLoc(), extractOp.tensor(), rewriter);
-      vjp_value = rewriter.create<tensor::InsertOp>(
-          extractOp.getLoc(), vjp_value, space, extractOp.indices());
+      vjp_value = reverseTensorExtractOp(dyn_cast<tensor::ExtractOp>(op),
+                                         operand, vjp_value, rewriter);
     } else if (opName == "linalg.generic") {
       auto genericOp = dyn_cast<linalg::GenericOp>(op);
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
@@ -864,6 +860,22 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
       /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
       /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
   return adjointIf.getResult(0);
+}
+
+Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
+                             Value vjp_value, OpBuilder &builder) {
+  // Using a constant tensor is causing issues here. We need to
+  // explicitly allocate a space using init_tensor.
+  auto tensorType = op.tensor().getType().dyn_cast<ShapedType>();
+  assert(tensorType.hasStaticShape() &&
+         "only static shapes are currently supported");
+  auto zero = getZero(operand.getLoc(), op.result(), builder);
+  auto space = builder.create<linalg::InitTensorOp>(
+      operand.getLoc(), ValueRange{}, tensorType.getShape(),
+      op.result().getType());
+  auto filled = builder.create<linalg::FillOp>(operand.getLoc(), zero, space);
+  return builder.create<tensor::InsertOp>(op.getLoc(), vjp_value,
+                                          filled.getResult(0), op.indices());
 }
 
 Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
