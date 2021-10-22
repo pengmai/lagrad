@@ -20,16 +20,142 @@
 using namespace mlir;
 
 namespace {
-// bool hasRecognizedEncoding(linalg::GenericOp op) {
-//   for (auto operand : op.getOperands()) {
-//     auto encoding =
-//         operand.getType().dyn_cast<RankedTensorType>().getEncoding();
-//     auto val = encoding.dyn_cast_or_null<StringAttr>();
-//     if (val && val.getValue() == "ltri") {
-//       return true;
+bool hasRecognizedEncoding(linalg::GenericOp op) {
+  bool found_encoding = false;
+  for (auto operand : op.getOperands()) {
+    auto opType = operand.getType().dyn_cast<RankedTensorType>();
+    auto encoding = opType.getEncoding();
+    auto val = encoding.dyn_cast_or_null<StringAttr>();
+    if (val && val.getValue() == "ltri") {
+      found_encoding = true;
+    }
+  }
+  return found_encoding;
+}
+
+void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
+  auto tensorType = operand.getType().dyn_cast_or_null<RankedTensorType>();
+  auto resultTensorType =
+      RankedTensorType::get(tensorType.getShape(), tensorType.getElementType());
+  if (tensorType) {
+    auto encoding = tensorType.getEncoding().dyn_cast_or_null<StringAttr>();
+    if (encoding && encoding.getValue() == "ltri") {
+      operand.setType(resultTensorType);
+      auto definingOp = operand.getDefiningOp();
+      if (definingOp && dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
+        auto constOp = dyn_cast<arith::ConstantOp>(definingOp);
+        auto attr = constOp.valueAttr();
+        if (attr.isa<DenseElementsAttr>()) {
+          auto dattr = attr.cast<DenseElementsAttr>();
+          assert(dattr.isSplat() && "triangular loops for non-splatted dense "
+                                    "tensors not yet supported");
+          if (dattr.isSplat()) {
+            rewriter.setInsertionPoint(constOp);
+            rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+                constOp, DenseElementsAttr::get(resultTensorType,
+                                                dattr.getSplatValue()));
+          }
+        }
+        return;
+      }
+
+      auto parent = operand.getParentRegion()->getParentOp();
+      if (parent && dyn_cast_or_null<FuncOp>(parent)) {
+        auto funcOp = dyn_cast<FuncOp>(parent);
+        SmallVector<Type> argumentTypes;
+        int arg_index = -1;
+        int index = 0;
+        for (auto arg : funcOp.getArguments()) {
+          if (arg == operand) {
+            argumentTypes.push_back(operand.getType());
+            arg_index = index;
+          } else {
+            argumentTypes.push_back(arg.getType());
+          }
+          index++;
+        }
+        funcOp.setType(FunctionType::get(funcOp.getContext(), argumentTypes,
+                                         funcOp.getType().getResults()));
+        auto uses = funcOp.getSymbolUses(funcOp->getParentOfType<ModuleOp>());
+        if (uses.hasValue()) {
+          for (auto use : uses.getValue()) {
+            eraseTriangularEncoding(use.getUser()->getOperand(arg_index),
+                                    rewriter);
+          }
+        }
+      }
+    }
+  }
+}
+
+FunctionType stripEncodingFromFunc(FunctionType funcTyp) {
+  SmallVector<Type> inputTypes;
+  for (auto typ : funcTyp.getInputs()) {
+    auto rtt = typ.dyn_cast_or_null<RankedTensorType>();
+    if (rtt) {
+      inputTypes.push_back(
+          RankedTensorType::get(rtt.getShape(), rtt.getElementType()));
+    } else {
+      inputTypes.push_back(typ);
+    }
+  }
+  SmallVector<Type> outputTypes;
+  for (auto typ : funcTyp.getResults()) {
+    auto rtt = typ.dyn_cast_or_null<RankedTensorType>();
+    if (rtt) {
+      outputTypes.push_back(
+          RankedTensorType::get(rtt.getShape(), rtt.getElementType()));
+    } else {
+      outputTypes.push_back(typ);
+    }
+  }
+  return FunctionType::get(funcTyp.getContext(), inputTypes, outputTypes);
+}
+
+// void eraseAllTensorEncodings(ModuleOp moduleOp, PatternRewriter &rewriter) {
+//   moduleOp.walk([&](Operation *op) {
+//     if (dyn_cast_or_null<linalg::GenericOp>(op)) {
+//       return;
 //     }
-//   }
-//   return false;
+//     for (auto operand : op->getOperands()) {
+//       eraseTriangularEncoding(operand);
+//     }
+//     if (dyn_cast_or_null<FuncOp>(op)) {
+//       auto funcOp = dyn_cast<FuncOp>(op);
+//       funcOp.setType(stripEncodingFromFunc(funcOp.getType()));
+//     }
+//     if (dyn_cast_or_null<arith::ConstantOp>(op)) {
+//       auto constOp = dyn_cast<arith::ConstantOp>(op);
+//       auto attr = constOp.valueAttr();
+//       auto rtt = attr.getType().dyn_cast_or_null<RankedTensorType>();
+//       if (rtt) {
+//         auto encoding = rtt.getEncoding().dyn_cast_or_null<StringAttr>();
+//         if (encoding && encoding.getValue() == "ltri") {
+//           auto resultTensorType =
+//               RankedTensorType::get(rtt.getShape(), rtt.getElementType());
+//           if (attr.isa<SparseElementsAttr>()) {
+//             auto sattr = attr.cast<SparseElementsAttr>();
+//             rewriter.setInsertionPoint(constOp);
+//             rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+//                 constOp,
+//                 SparseElementsAttr::get(resultTensorType, sattr.getIndices(),
+//                                         sattr.getValues()));
+//           } else if (attr.isa<DenseFPElementsAttr>()) {
+//             auto dattr = attr.cast<DenseFPElementsAttr>();
+//             assert(dattr.isSplat() && "triangular loops for non-splatted
+//             dense "
+//                                       "tensors not yet supported");
+//             if (dattr.isSplat()) {
+//               rewriter.setInsertionPoint(constOp);
+//               rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+//                   constOp, DenseElementsAttr::get(resultTensorType,
+//                                                   dattr.getSplatValue()));
+//             }
+//           }
+//         }
+//       }
+//     }
+//   });
 // }
 
 /// Taken from mlir/Dialect/Linalg/Utils/Utils.cpp
@@ -155,14 +281,10 @@ public:
     if (!genericOp) {
       return failure();
     }
-    // if (!hasRecognizedEncoding(genericOp)) {
-    //   return failure();
-    // }
-    // auto arg0 = linalgOp.getInputOperand(0)->get();
-    // llvm::outs()
-    //     << "arg0 encoding: "
-    //     << (arg0.getType().dyn_cast<RankedTensorType>().getEncoding() ==
-    //         nullptr);
+    if (!hasRecognizedEncoding(genericOp)) {
+      return failure();
+    }
+    // llvm::outs() << "visiting generic op\n";
 
     auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
     auto iteratorTypes =
@@ -183,6 +305,13 @@ public:
     last.setUpperBound(loopNest.loops[num_loops - 2].getInductionVar());
     op->replaceAllUsesWith(loopNest.getResults());
     rewriter.eraseOp(op);
+
+    // Erase the triangular encoding for this linalg.generic but leave the
+    // others intact.
+    for (auto operand : op->getOperands()) {
+      eraseTriangularEncoding(operand, rewriter);
+    }
+    // eraseAllTensorEncodings(op->getParentOfType<ModuleOp>(), rewriter);
 
     return success();
   }
