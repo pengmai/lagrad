@@ -33,61 +33,6 @@ bool hasRecognizedEncoding(linalg::GenericOp op) {
   return found_encoding;
 }
 
-void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
-  auto tensorType = operand.getType().dyn_cast_or_null<RankedTensorType>();
-  auto resultTensorType =
-      RankedTensorType::get(tensorType.getShape(), tensorType.getElementType());
-  if (tensorType) {
-    auto encoding = tensorType.getEncoding().dyn_cast_or_null<StringAttr>();
-    if (encoding && encoding.getValue() == "ltri") {
-      operand.setType(resultTensorType);
-      auto definingOp = operand.getDefiningOp();
-      if (definingOp && dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
-        auto constOp = dyn_cast<arith::ConstantOp>(definingOp);
-        auto attr = constOp.valueAttr();
-        if (attr.isa<DenseElementsAttr>()) {
-          auto dattr = attr.cast<DenseElementsAttr>();
-          assert(dattr.isSplat() && "triangular loops for non-splatted dense "
-                                    "tensors not yet supported");
-          if (dattr.isSplat()) {
-            rewriter.setInsertionPoint(constOp);
-            rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-                constOp, DenseElementsAttr::get(resultTensorType,
-                                                dattr.getSplatValue()));
-          }
-        }
-        return;
-      }
-
-      auto parent = operand.getParentRegion()->getParentOp();
-      if (parent && dyn_cast_or_null<FuncOp>(parent)) {
-        auto funcOp = dyn_cast<FuncOp>(parent);
-        SmallVector<Type> argumentTypes;
-        int arg_index = -1;
-        int index = 0;
-        for (auto arg : funcOp.getArguments()) {
-          if (arg == operand) {
-            argumentTypes.push_back(operand.getType());
-            arg_index = index;
-          } else {
-            argumentTypes.push_back(arg.getType());
-          }
-          index++;
-        }
-        funcOp.setType(FunctionType::get(funcOp.getContext(), argumentTypes,
-                                         funcOp.getType().getResults()));
-        auto uses = funcOp.getSymbolUses(funcOp->getParentOfType<ModuleOp>());
-        if (uses.hasValue()) {
-          for (auto use : uses.getValue()) {
-            eraseTriangularEncoding(use.getUser()->getOperand(arg_index),
-                                    rewriter);
-          }
-        }
-      }
-    }
-  }
-}
-
 FunctionType stripEncodingFromFunc(FunctionType funcTyp) {
   SmallVector<Type> inputTypes;
   for (auto typ : funcTyp.getInputs()) {
@@ -110,6 +55,71 @@ FunctionType stripEncodingFromFunc(FunctionType funcTyp) {
     }
   }
   return FunctionType::get(funcTyp.getContext(), inputTypes, outputTypes);
+}
+
+void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
+  PatternRewriter::InsertionGuard insertionGuard(rewriter);
+  auto tensorType = operand.getType().dyn_cast_or_null<RankedTensorType>();
+  if (tensorType) {
+    auto resultTensorType = RankedTensorType::get(tensorType.getShape(),
+                                                  tensorType.getElementType());
+    auto encoding = tensorType.getEncoding().dyn_cast_or_null<StringAttr>();
+    if (encoding && encoding.getValue() == "ltri") {
+      operand.setType(resultTensorType);
+      auto definingOp = operand.getDefiningOp();
+      if (definingOp && dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
+        auto constOp = dyn_cast<arith::ConstantOp>(definingOp);
+        auto attr = constOp.valueAttr();
+        if (attr.isa<DenseElementsAttr>()) {
+          auto dattr = attr.cast<DenseElementsAttr>();
+          assert(dattr.isSplat() && "triangular loops for non-splatted dense "
+                                    "tensors not yet supported");
+          if (dattr.isSplat()) {
+            rewriter.setInsertionPoint(constOp);
+            rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+                constOp, DenseElementsAttr::get(resultTensorType,
+                                                dattr.getSplatValue()));
+          }
+        }
+        return;
+      }
+
+      // for (auto &use : operand.getUses()) {
+      //   llvm::outs() << "operand use: " << use.get() << "\n";
+      // }
+
+      auto parent = operand.getParentRegion()->getParentOp();
+      if (parent && dyn_cast_or_null<FuncOp>(parent)) {
+        auto funcOp = dyn_cast<FuncOp>(parent);
+        SmallVector<Type> argumentTypes;
+        int arg_index = -1;
+        int index = 0;
+        for (auto arg : funcOp.getArguments()) {
+          if (arg == operand) {
+            argumentTypes.push_back(operand.getType());
+            arg_index = index;
+          } else {
+            argumentTypes.push_back(arg.getType());
+          }
+          index++;
+        }
+        // funcOp.setType(FunctionType::get(funcOp.getContext(), argumentTypes,
+        //                                  funcOp.getType().getResults()));
+        funcOp.setType(stripEncodingFromFunc(funcOp.getType()));
+        auto uses = funcOp.getSymbolUses(funcOp->getParentOfType<ModuleOp>());
+        if (uses.hasValue()) {
+          for (auto use : uses.getValue()) {
+            for (auto useOperand : use.getUser()->getOperands()) {
+              eraseTriangularEncoding(useOperand, rewriter);
+            }
+            for (auto result : use.getUser()->getResults()) {
+              eraseTriangularEncoding(result, rewriter);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // void eraseAllTensorEncodings(ModuleOp moduleOp, PatternRewriter &rewriter) {
@@ -284,7 +294,12 @@ public:
     if (!hasRecognizedEncoding(genericOp)) {
       return failure();
     }
-    // llvm::outs() << "visiting generic op\n";
+
+    for (auto operand : genericOp.getInputAndOutputOperands()) {
+      auto ip = rewriter.saveInsertionPoint();
+      eraseTriangularEncoding(operand->get(), rewriter);
+      rewriter.restoreInsertionPoint(ip);
+    }
 
     auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
     auto iteratorTypes =
@@ -305,13 +320,6 @@ public:
     last.setUpperBound(loopNest.loops[num_loops - 2].getInductionVar());
     op->replaceAllUsesWith(loopNest.getResults());
     rewriter.eraseOp(op);
-
-    // Erase the triangular encoding for this linalg.generic but leave the
-    // others intact.
-    for (auto operand : op->getOperands()) {
-      eraseTriangularEncoding(operand, rewriter);
-    }
-    // eraseAllTensorEncodings(op->getParentOfType<ModuleOp>(), rewriter);
 
     return success();
   }
