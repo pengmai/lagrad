@@ -1,6 +1,7 @@
 #include "mlir_c_abi.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 
 unsigned long timediff(struct timeval start, struct timeval stop) {
@@ -68,7 +69,7 @@ void print_f_arr(float *arr, size_t n) {
 void print_d_arr(double *arr, size_t n) {
   printf("[");
   for (size_t i = 0; i < n; i++) {
-    printf("%.3f", arr[i]);
+    printf("%.4f", arr[i]);
     if (i != n - 1) {
       printf(", ");
     }

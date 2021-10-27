@@ -92,9 +92,12 @@ def compile_mlir(contents, output, lower_type="loops"):
     #         [
     #             f"{BIN}/standalone-opt",
     #             "-take-grads",
+    #             "-linalg-generalize-named-ops",
     #             "-canonicalize",
     #             "-convert-elementwise-to-linalg",
-    #         ] + BUFFERIZE,
+    #             "-convert-linalg-triangular-to-loops",
+    #             "-canonicalize",
+    #         ] + BUFFERIZE + ["-canonicalize"],
     #         stdin=contents,
     #     ).decode("utf-8")
     # )
@@ -103,8 +106,10 @@ def compile_mlir(contents, output, lower_type="loops"):
         [
             f"{BIN}/standalone-opt",
             "-take-grads",
+            # "-linalg-generalize-named-ops",
             "-canonicalize",
             "-convert-elementwise-to-linalg",
+            "-convert-linalg-triangular-to-loops",
         ]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
