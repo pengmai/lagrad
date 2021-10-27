@@ -13,12 +13,11 @@ mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescap
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 
 
-def generate_trimatvec_data(args):
+def generate_trimatvec_data(args, config):
     driver_templ = driver_env.get_template("trimatvec_driver.c")
     enzyme_templ = driver_env.get_template("enzyme_kernels.c")
     helpers_templ = driver_env.get_template("mlir_c_abi.c")
     mlir_templ = mlir_env.get_template("trimatvec.mlir")
-    config = {"application": "trimatvec", "n": 1024}
 
     if args.print:
         print(mlir_templ.render(**config))
@@ -71,14 +70,20 @@ def generate_trimatvec_data(args):
 
 
 def trimatvec_main(args):
-    # generate_trimatvec_data(args)
+    config = {"application": "trimatvec", "n": 2048}
+    if args.print:
+        mlir_templ = mlir_env.get_template("trimatvec.mlir")
+        print(mlir_templ.render(**config))
+        return
+    # generate_trimatvec_data(args, config)
     results = pd.read_csv(osp.join(args.results_dir, "trimicrobench.csv"))
     primals = results[[col for col in results.columns if "primal" in col]]
     adjoints = results[[col for col in results.columns if "adjoint" in col]]
     print(primals[10:].mean())
     print(adjoints[10:].mean())
-    results_dict = results.to_dict()
-    print(results_dict)
+
+    # results_dict = results.to_dict()
+    # print(results_dict)
     # with open(osp.join(args.results_dir, "trimicrobench.json")) as f:
     #     pass
 

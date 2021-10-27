@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 20
+#define NUM_RUNS 100
 #define NUM_WARMUPS 0
-#define N 1024
+#define N {{n}}
 #define TRI_SIZE N *(N - 1) / 2
 
 double *deadbeef = (double *)0xdeadbeef;
@@ -132,14 +132,6 @@ void check_matvec_adjoint(double *M, double *dM, double *x, double *dx,
   if (err > 1e-6) {
     printf("(%s) adjoint second arg err: %f\n", application, err);
   }
-}
-
-double take_avg(unsigned long *arr, size_t n) {
-  double avg = 0;
-  for (size_t i = 0; i < n; i++) {
-    avg += arr[i];
-  }
-  return avg / n;
 }
 
 typedef unsigned long (*bodyFunc)(double *M, double *dM, double *icf,

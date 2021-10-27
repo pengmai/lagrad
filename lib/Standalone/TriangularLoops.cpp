@@ -253,11 +253,12 @@ public:
       }
     });
 
-    for (auto operand : genericOp.getInputAndOutputOperands()) {
-      auto ip = rewriter.saveInsertionPoint();
-      eraseTriangularEncoding(operand->get(), rewriter);
-      rewriter.restoreInsertionPoint(ip);
-    }
+    moduleOp.walk([&](Operation *op) {
+      PatternRewriter::InsertionGuard insertionGuard(rewriter);
+      for (auto operand : op->getOperands()) {
+        eraseTriangularEncoding(operand, rewriter);
+      }
+    });
 
     auto loopRanges = linalgOp.createLoopRanges(rewriter, linalgOp.getLoc());
     auto iteratorTypes =
