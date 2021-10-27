@@ -21,16 +21,15 @@ using namespace mlir;
 
 namespace {
 bool hasRecognizedEncoding(linalg::GenericOp op) {
-  bool found_encoding = false;
   for (auto operand : op.getOperands()) {
     auto opType = operand.getType().dyn_cast<RankedTensorType>();
     auto encoding = opType.getEncoding();
     auto val = encoding.dyn_cast_or_null<StringAttr>();
     if (val && val.getValue() == "ltri") {
-      found_encoding = true;
+      return true;
     }
   }
-  return found_encoding;
+  return false;
 }
 
 FunctionType stripEncodingFromFunc(FunctionType funcTyp) {
@@ -121,52 +120,6 @@ void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
     }
   }
 }
-
-// void eraseAllTensorEncodings(ModuleOp moduleOp, PatternRewriter &rewriter) {
-//   moduleOp.walk([&](Operation *op) {
-//     if (dyn_cast_or_null<linalg::GenericOp>(op)) {
-//       return;
-//     }
-//     for (auto operand : op->getOperands()) {
-//       eraseTriangularEncoding(operand);
-//     }
-//     if (dyn_cast_or_null<FuncOp>(op)) {
-//       auto funcOp = dyn_cast<FuncOp>(op);
-//       funcOp.setType(stripEncodingFromFunc(funcOp.getType()));
-//     }
-//     if (dyn_cast_or_null<arith::ConstantOp>(op)) {
-//       auto constOp = dyn_cast<arith::ConstantOp>(op);
-//       auto attr = constOp.valueAttr();
-//       auto rtt = attr.getType().dyn_cast_or_null<RankedTensorType>();
-//       if (rtt) {
-//         auto encoding = rtt.getEncoding().dyn_cast_or_null<StringAttr>();
-//         if (encoding && encoding.getValue() == "ltri") {
-//           auto resultTensorType =
-//               RankedTensorType::get(rtt.getShape(), rtt.getElementType());
-//           if (attr.isa<SparseElementsAttr>()) {
-//             auto sattr = attr.cast<SparseElementsAttr>();
-//             rewriter.setInsertionPoint(constOp);
-//             rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-//                 constOp,
-//                 SparseElementsAttr::get(resultTensorType, sattr.getIndices(),
-//                                         sattr.getValues()));
-//           } else if (attr.isa<DenseFPElementsAttr>()) {
-//             auto dattr = attr.cast<DenseFPElementsAttr>();
-//             assert(dattr.isSplat() && "triangular loops for non-splatted
-//             dense "
-//                                       "tensors not yet supported");
-//             if (dattr.isSplat()) {
-//               rewriter.setInsertionPoint(constOp);
-//               rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-//                   constOp, DenseElementsAttr::get(resultTensorType,
-//                                                   dattr.getSplatValue()));
-//             }
-//           }
-//         }
-//       }
-//     }
-//   });
-// }
 
 /// Taken from mlir/Dialect/Linalg/Utils/Utils.cpp
 /// Given a list of subview ranges, extract individual values for lower, upper
@@ -280,20 +233,25 @@ public:
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
     auto linalgOp = dyn_cast_or_null<linalg::LinalgOp>(op);
-    if (!linalgOp) {
-      return failure();
-    }
-    if (!linalgOp.hasTensorSemantics()) {
+    if (!linalgOp || !linalgOp.hasTensorSemantics()) {
       return failure();
     }
     auto genericOp =
         dyn_cast_or_null<linalg::GenericOp>(linalgOp.getOperation());
-    if (!genericOp) {
+    if (!genericOp ||
+        !(hasRecognizedEncoding(genericOp) || op->hasAttr("tri_rewrite"))) {
       return failure();
     }
-    if (!hasRecognizedEncoding(genericOp)) {
-      return failure();
-    }
+
+    // This is pretty ugly. The idea here is to mark all encoded generic ops the
+    // first time we visit, because the encodings will be erased by this
+    // transformation operating on other linalg.generic ops.
+    auto moduleOp = op->getParentOfType<ModuleOp>();
+    moduleOp.walk([](linalg::GenericOp op) {
+      if (hasRecognizedEncoding(op)) {
+        op->setAttr("tri_rewrite", BoolAttr::get(op->getContext(), true));
+      }
+    });
 
     for (auto operand : genericOp.getInputAndOutputOperands()) {
       auto ip = rewriter.saveInsertionPoint();
