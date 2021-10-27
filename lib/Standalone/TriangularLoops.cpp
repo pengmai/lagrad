@@ -306,7 +306,28 @@ public:
         llvm::to_vector<4>(linalgOp.iterator_types().getValue());
     SmallVector<Value, 4> lbs, ubs, steps;
     unpackRanges(loopRanges, lbs, ubs, steps);
-    SmallVector<Value> iterArgInitValues = linalgOp.getOutputTensorOperands();
+    assert(linalgOp.getOutputTensorOperands().size() > 0 &&
+           "Expected at least one tensor result");
+    SmallVector<Value> iterArgInitValues;
+    Value zero = rewriter.create<arith::ConstantOp>(
+        linalgOp.getLoc(),
+        FloatAttr::get(linalgOp.getOutputTensorTypes()[0].getElementType(),
+                       0.0));
+    for (auto outputTensor : linalgOp.getOutputTensorOperands()) {
+      auto outType =
+          outputTensor->get().getType().dyn_cast_or_null<ShapedType>();
+      assert(outType && "outType was null");
+      // Perhaps a premature optimization. Using an init tensor op results in an
+      // extra buffer allocation.
+      auto space = rewriter.create<memref::AllocOp>(
+          linalgOp.getLoc(),
+          MemRefType::get(outType.getShape(), outType.getElementType()));
+      rewriter.create<linalg::FillOp>(linalgOp.getLoc(), zero, space);
+      auto loaded =
+          rewriter.create<memref::TensorLoadOp>(linalgOp.getLoc(), space);
+
+      iterArgInitValues.push_back(loaded);
+    }
     auto loopNest = scf::buildLoopNest(
         rewriter, linalgOp.getLoc(), lbs, ubs, steps, iterArgInitValues,
         [&](OpBuilder &b, Location loc, ValueRange ivs,
@@ -347,6 +368,9 @@ struct TriangularLoopsPass
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
+    target.addLegalOp<linalg::InitTensorOp>();
+    target.addLegalOp<linalg::FillOp>();
+    target.addLegalOp<linalg::YieldOp>();
 
     patterns.add<ConvertGenericOp>(patterns.getContext());
 
