@@ -110,6 +110,7 @@ def compile_mlir(contents, output, lower_type="loops"):
             "-canonicalize",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
+            "-canonicalize",
         ]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)

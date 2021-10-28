@@ -34,6 +34,8 @@ def generate_gmm_results(config):
     try:
         lines = stdout.splitlines()
         keys = [
+            "enzyme_full_primal",
+            "enzyme_full_adjoint",
             "enzyme_comp_primal",
             "enzyme_comp_adjoint",
             "lagrad_full_primal",

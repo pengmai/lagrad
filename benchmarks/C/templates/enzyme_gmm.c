@@ -185,10 +185,7 @@ void QtimesXFullL(int d, double *Qdiag, double *L, double *x, double *out) {
   }
 
   for (i = 0; i < d; i++) {
-    for (j = 0; j < d; j++) {
-      if (j >= i && L[i * d + j] != 0.0) {
-        printf("L[%d] = %f\n", i * d + j, L[i * d + j]);
-      }
+    for (j = 0; j < i; j++) {
       out[i] += L[i * d + j] * x[j];
     }
   }
@@ -308,6 +305,14 @@ double enzyme_gmm_primal(GMMInput gmm) {
   double err = 0.0;
   enzyme_gmm_objective(gmm.d, gmm.k, gmm.n, gmm.alphas, gmm.means, gmm.icf,
                        gmm.x, gmm.wishart_gamma, gmm.wishart_m, &err);
+  return err;
+}
+
+double enzyme_gmm_primal_full(GMMInput gmm) {
+  double err = 0.0;
+  enzyme_gmm_objective_full_L(gmm.d, gmm.k, gmm.n, gmm.alphas, gmm.means,
+                              gmm.Qs, gmm.Ls, gmm.x, gmm.wishart_gamma,
+                              gmm.wishart_m, &err);
   return err;
 }
 

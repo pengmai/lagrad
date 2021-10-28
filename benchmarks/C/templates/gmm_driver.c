@@ -52,8 +52,8 @@ extern void dgmm_objective_full_L(GMMInput *gmm, double *alphasb,
                                   double *meansb, double *Qsb, double *Lsb,
                                   double *err, double *errb);
 
-// Running the forward pass to see if that segfaults
 extern double enzyme_gmm_primal(GMMInput gmm);
+extern double enzyme_gmm_primal_full(GMMInput gmm);
 
 extern void enzyme_gmm_objective_full_L(int d, int k, int n, double *alphas,
                                         double *means, double *Qs, double *Ls,
@@ -73,13 +73,54 @@ typedef unsigned long (*bodyFunc)(GMMInput gmm_input, double *ref_alphas,
                                   double *ref_means, double *ref_icf,
                                   double *temp_icf);
 
+unsigned long enzyme_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
+                                     double *ref_means, double *ref_icf,
+                                     double *temp_icf) {
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  enzyme_gmm_primal_full(gmm_input);
+  gettimeofday(&stop, NULL);
+  return timediff(start, stop);
+}
+
+unsigned long enzyme_gmm_full_adjoint(GMMInput gmm_input, double *ref_alphas,
+                                      double *ref_means, double *ref_icf,
+                                      double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  double *alphasb = (double *)malloc(k * sizeof(double));
+  double *meansb = (double *)malloc(k * d * sizeof(double));
+  double *Qsb = (double *)malloc(k * d * sizeof(double));
+  double *Lsb = (double *)malloc(k * d * d * sizeof(double));
+  double err = 0.0, errb = 1.0;
+  for (size_t i = 0; i < k; i++) {
+    alphasb[i] = 0;
+  }
+  for (size_t i = 0; i < d * k; i++) {
+    meansb[i] = 0;
+    Qsb[i] = 0;
+  }
+  for (size_t i = 0; i < k * d * d; i++) {
+    Lsb[i] = 0;
+  }
+
+  dgmm_objective_full_L(&gmm_input, alphasb, meansb, Qsb, Lsb, &err, &errb);
+  gettimeofday(&stop, NULL);
+  convert_ql_to_icf(d, k, n, Qsb, Lsb, temp_icf);
+  check_gmm_err(d, k, n, alphasb, ref_alphas, meansb, ref_means, temp_icf,
+                ref_icf, "Enzyme Full");
+  return timediff(start, stop);
+}
+
 unsigned long enzyme_gmm_compressed_primal(GMMInput gmm_input,
                                            double *ref_alphas,
                                            double *ref_means, double *ref_icf,
                                            double *temp_icf) {
   struct timeval start, stop;
   gettimeofday(&start, NULL);
-  double result = enzyme_gmm_primal(gmm_input);
+  enzyme_gmm_primal(gmm_input);
   gettimeofday(&stop, NULL);
   return timediff(start, stop);
 }
@@ -88,10 +129,10 @@ unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
                                             double *ref_alphas,
                                             double *ref_means, double *ref_icf,
                                             double *temp_icf) {
-  int d = gmm_input.d, k = gmm_input.k;
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
   int icf_size = d * (d + 1) / 2;
-
   struct timeval start, stop;
+
   gettimeofday(&start, NULL);
   double *alphasb = (double *)malloc(k * sizeof(double));
   double *meansb = (double *)malloc(d * k * sizeof(double));
@@ -108,6 +149,12 @@ unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
   }
   dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
   gettimeofday(&stop, NULL);
+
+  check_gmm_err(d, k, n, alphasb, ref_alphas, meansb, ref_means, icfb, ref_icf,
+                "Enzyme Compressed");
+  free(alphasb);
+  free(meansb);
+  free(icfb);
   return timediff(start, stop);
 }
 
@@ -117,7 +164,7 @@ unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
   struct timeval start, stop;
   gettimeofday(&start, NULL);
-  UnrankedMemref res = lagrad_gmm_objective_full(
+  lagrad_gmm_objective_full(
       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
       1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
@@ -185,10 +232,12 @@ int main() {
   int n = gmm_input.n;
   int icf_size = d * (d + 1) / 2;
 
-  const int num_apps = 5;
+  const int num_apps = 7;
   bodyFunc funcs[num_apps] = {
+      enzyme_gmm_full_primal,       enzyme_gmm_full_adjoint,
       enzyme_gmm_compressed_primal, enzyme_gmm_compressed_adjoint,
-      lagrad_gmm_full_primal, lagrad_gmm_full_adjoint, lagrad_gmm_tri_adjoint};
+      lagrad_gmm_full_primal,       lagrad_gmm_full_adjoint,
+      lagrad_gmm_tri_adjoint};
 
   unsigned long *results_df =
       (unsigned long *)malloc(num_apps * NUM_RUNS * sizeof(unsigned long));
