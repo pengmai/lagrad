@@ -8,15 +8,15 @@
 #include <string.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 20
-#define NUM_WARMUPS 20
+#define NUM_RUNS 100
 
 typedef struct {
   double *data;
   double *aligned;
 } UnrankedMemref;
+double *deadbeef = (double *)0xdeadbeef;
 
-extern UnrankedMemref gmm_objective(
+extern UnrankedMemref lagrad_gmm_objective_full(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
     /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -26,7 +26,7 @@ extern UnrankedMemref gmm_objective(
     /*wishart_gamma=*/double,
     /*wishart_m=*/int64_t);
 
-extern GMMGrad lagrad_gmm(
+extern GMMGrad lagrad_gmm_full(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
     /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -35,6 +35,17 @@ extern GMMGrad lagrad_gmm(
     /*x=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*wishart_gamma=*/double,
     /*wishart_m=*/int64_t);
+
+extern GMMGrad lagrad_gmm_tri(
+    /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
+    /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*Ls*/ double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*x=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*wishart_gamma=*/double,
+    /*wishart_m=*/int64_t);
+
 extern void dgmm_objective(GMMInput *gmm, double *alphasb, double *meansb,
                            double *icfb, double *err, double *errb);
 extern void dgmm_objective_full_L(GMMInput *gmm, double *alphasb,
@@ -57,17 +68,130 @@ void free_gmm_input(GMMInput gmm_input) {
   free(gmm_input.x);
 }
 
+/* Implementations */
+typedef unsigned long (*bodyFunc)(GMMInput gmm_input, double *ref_alphas,
+                                  double *ref_means, double *ref_icf,
+                                  double *temp_icf);
+
+unsigned long enzyme_gmm_compressed_primal(GMMInput gmm_input,
+                                           double *ref_alphas,
+                                           double *ref_means, double *ref_icf,
+                                           double *temp_icf) {
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  double result = enzyme_gmm_primal(gmm_input);
+  gettimeofday(&stop, NULL);
+  return timediff(start, stop);
+}
+
+unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
+                                            double *ref_alphas,
+                                            double *ref_means, double *ref_icf,
+                                            double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k;
+  int icf_size = d * (d + 1) / 2;
+
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  double *alphasb = (double *)malloc(k * sizeof(double));
+  double *meansb = (double *)malloc(d * k * sizeof(double));
+  double *icfb = (double *)malloc(icf_size * k * sizeof(double));
+  double err = 0.0, errb = 1.0;
+  for (size_t i = 0; i < k; i++) {
+    alphasb[i] = 0;
+  }
+  for (size_t i = 0; i < d * k; i++) {
+    meansb[i] = 0;
+  }
+  for (size_t i = 0; i < icf_size * k; i++) {
+    icfb[i] = 0;
+  }
+  dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
+  gettimeofday(&stop, NULL);
+  return timediff(start, stop);
+}
+
+unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
+                                     double *ref_means, double *ref_icf,
+                                     double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  UnrankedMemref res = lagrad_gmm_objective_full(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
+  return timediff(start, stop);
+}
+
+unsigned long lagrad_gmm_full_adjoint(GMMInput gmm_input, double *ref_alphas,
+                                      double *ref_means, double *ref_icf,
+                                      double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  GMMGrad ans = lagrad_gmm_full(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
+
+  convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
+  check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
+                ref_means, temp_icf, ref_icf, "LAGrad Full");
+  free(ans.dalphas.aligned);
+  free(ans.dmeans.aligned);
+  free(ans.dqs.aligned);
+  free(ans.dls.aligned);
+  return timediff(start, stop);
+}
+
+unsigned long lagrad_gmm_tri_adjoint(GMMInput gmm_input, double *ref_alphas,
+                                     double *ref_means, double *ref_icf,
+                                     double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  GMMGrad ans = lagrad_gmm_tri(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
+
+  convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
+  check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
+                ref_means, temp_icf, ref_icf, "LAGrad Full");
+  free(ans.dalphas.aligned);
+  free(ans.dmeans.aligned);
+  free(ans.dqs.aligned);
+  free(ans.dls.aligned);
+  return timediff(start, stop);
+}
+
 int main() {
   GMMInput gmm_input = read_gmm_data();
   int d = gmm_input.d;
   int k = gmm_input.k;
   int n = gmm_input.n;
   int icf_size = d * (d + 1) / 2;
-  double *deadbeef = (double *)0xdeadbeef;
 
-  unsigned long grad_results[NUM_RUNS + NUM_WARMUPS];
-  unsigned long enzyme_results[NUM_RUNS + NUM_WARMUPS];
-  unsigned long enzyme_notri_results[NUM_RUNS + NUM_WARMUPS];
+  const int num_apps = 5;
+  bodyFunc funcs[num_apps] = {
+      enzyme_gmm_compressed_primal, enzyme_gmm_compressed_adjoint,
+      lagrad_gmm_full_primal, lagrad_gmm_full_adjoint, lagrad_gmm_tri_adjoint};
+
+  unsigned long *results_df =
+      (unsigned long *)malloc(num_apps * NUM_RUNS * sizeof(unsigned long));
 
   double *ref_alphas = (double *)malloc(k * sizeof(double));
   double *ref_means = (double *)malloc(d * k * sizeof(double));
@@ -79,112 +203,15 @@ int main() {
       DELETEME_Ls[i * k + j] = gmm_input.icf[i * icf_size + d + j];
     }
   }
-
   read_gmm_grads(d, k, n, ref_alphas, ref_means, ref_icf);
 
-  for (size_t run = 0; run < NUM_RUNS + NUM_WARMUPS; run++) {
-    struct timeval start, stop;
-
-    gettimeofday(&start, NULL);
-    double *alphasb = (double *)malloc(k * sizeof(double));
-    double *meansb = (double *)malloc(d * k * sizeof(double));
-    double *icfb = (double *)malloc(icf_size * k * sizeof(double));
-    double err = 0.0, errb = 1.0;
-    for (size_t i = 0; i < k; i++) {
-      alphasb[i] = 0;
+  for (size_t app = 0; app < num_apps; app++) {
+    for (size_t run = 0; run < NUM_RUNS; run++) {
+      results_df[app * NUM_RUNS + run] =
+          (*funcs[app])(gmm_input, ref_alphas, ref_means, ref_icf, temp_icf);
     }
-    for (size_t i = 0; i < d * k; i++) {
-      meansb[i] = 0;
-    }
-    for (size_t i = 0; i < icf_size * k; i++) {
-      icfb[i] = 0;
-    }
-    dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
-    gettimeofday(&stop, NULL);
-
-    enzyme_results[run] = timediff(start, stop);
-    check_gmm_err(d, k, n, alphasb, ref_alphas, meansb, ref_means, icfb,
-                  ref_icf, "Enzyme");
-
-    free(alphasb);
-    free(meansb);
-    free(icfb);
+    print_ul_arr(results_df + app * NUM_RUNS, NUM_RUNS);
   }
-
-  for (size_t run = 0; run < NUM_RUNS + NUM_WARMUPS; run++) {
-    struct timeval start, stop;
-
-    gettimeofday(&start, NULL);
-    GMMGrad lagrad_result = lagrad_gmm(
-        /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-        gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-        d, 1, /*Ls=*/deadbeef, DELETEME_Ls, 0, k, d * (d - 1) / 2,
-        d * (d - 1) / 2, 1,
-        /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-        /*wishart_gamma=*/gmm_input.wishart_gamma,
-        /*wishart_m=*/gmm_input.wishart_m);
-    gettimeofday(&stop, NULL);
-
-    grad_results[run] = timediff(start, stop);
-    // convert_ql_to_icf(d, k, n, lagrad_result.dqs.aligned,
-    //                   lagrad_result.dls.aligned, temp_icf);
-    // check_gmm_err(d, k, n, lagrad_result.dalphas.aligned, ref_alphas,
-    //               lagrad_result.dmeans.aligned, ref_means, temp_icf, ref_icf,
-    //               "LAGrad");
-    // serialize_gmm_grads(d, k, n, lagrad_result.dalphas.aligned,
-    //                     lagrad_result.dmeans.aligned, icfb);
-
-    free(lagrad_result.dalphas.aligned);
-    free(lagrad_result.dmeans.aligned);
-    free(lagrad_result.dqs.aligned);
-    free(lagrad_result.dls.aligned);
-  }
-
-  for (size_t run = 0; run < NUM_RUNS + NUM_WARMUPS; run++) {
-    struct timeval start, stop;
-    gettimeofday(&start, NULL);
-    double *alphasb = (double *)malloc(k * sizeof(double));
-    double *meansb = (double *)malloc(d * k * sizeof(double));
-    double *Qsb = (double *)malloc(d * k * sizeof(double));
-    double *Lsb = (double *)malloc(k * d * d * sizeof(double));
-    double err = 0.0, errb = 1.0;
-    for (size_t i = 0; i < k; i++) {
-      alphasb[i] = 0;
-    }
-    for (size_t i = 0; i < d * k; i++) {
-      meansb[i] = 0;
-      Qsb[i] = 0;
-    }
-    for (size_t i = 0; i < k * d * d; i++) {
-      Lsb[i] = 0;
-    }
-
-    dgmm_objective_full_L(&gmm_input, alphasb, meansb, Qsb, Lsb, &err, &errb);
-
-    gettimeofday(&stop, NULL);
-    enzyme_notri_results[run] = timediff(start, stop);
-
-    // convert_ql_to_icf(d, k, n, Qsb, Lsb, temp_icf);
-    // check_gmm_err(d, k, n, alphasb, ref_alphas, meansb, ref_means, temp_icf,
-    //               ref_icf, "Enzyme full");
-    free(alphasb);
-    free(meansb);
-    free(Qsb);
-    free(Lsb);
-  }
-
-  double lagrad_avg = 0.0;
-  double enzyme_avg = 0.0;
-  double enzyme_notri_avg = 0.0;
-  for (size_t run = NUM_WARMUPS; run < NUM_WARMUPS + NUM_RUNS; run++) {
-    lagrad_avg += grad_results[run];
-    enzyme_notri_avg += enzyme_notri_results[run];
-    enzyme_avg += enzyme_results[run];
-  }
-  printf("LAGrad avg: %f\n", lagrad_avg / NUM_RUNS);
-  printf("Enzyme avg: %f\n", enzyme_avg / NUM_RUNS);
-  printf("Enzyme avg (notri): %f\n", enzyme_notri_avg / NUM_RUNS);
-  printf("Slowdown: %f\n", lagrad_avg / enzyme_avg);
 
   free_gmm_input(gmm_input);
   free(ref_alphas);

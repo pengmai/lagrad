@@ -158,14 +158,37 @@ void Qtimesx(int d, double const *Qdiag,
   }
 }
 
+void __print_d_arr(double *arr, size_t n) {
+  printf("[");
+  for (size_t i = 0; i < n; i++) {
+    printf("%.4f", arr[i]);
+    if (i != n - 1) {
+      printf(", ");
+    }
+  }
+  printf("]\n");
+}
+
+void __print_d_arr_2d(double *arr, size_t m, size_t n) {
+  printf("[\n");
+  for (size_t i = 0; i < m; i++) {
+    printf("  ");
+    __print_d_arr(arr + i * n, n);
+  }
+  printf("]\n");
+}
+
 void QtimesXFullL(int d, double *Qdiag, double *L, double *x, double *out) {
   int i, j;
   for (i = 0; i < d; i++) {
     out[i] = Qdiag[i] * x[i];
   }
 
-  for (i = 1; i < d; i++) {
-    for (j = 0; j < i; j++) {
+  for (i = 0; i < d; i++) {
+    for (j = 0; j < d; j++) {
+      if (j >= i && L[i * d + j] != 0.0) {
+        printf("L[%d] = %f\n", i * d + j, L[i * d + j]);
+      }
       out[i] += L[i * d + j] * x[j];
     }
   }
@@ -195,6 +218,9 @@ void enzyme_gmm_objective_full_L(int d, int k, int n, double *alphas,
       subtract(d, &x[ix * d], &means[ik * d], &xcentered[0]);
       QtimesXFullL(d, &Qdiags[ik * d], &Ls[ik * d * d], &xcentered[0],
                    &Qxcentered[0]);
+      // if (ix == n - 1 && ik == 0) {
+      //   __print_d_arr(&Qxcentered[0], d);
+      // }
       // two caches for qxcentered at idx 0 and at arbitrary index
       main_term[ik] = alphas[ik] + sum_qs[ik] - 0.5 * sqnorm(d, &Qxcentered[0]);
     }
@@ -244,6 +270,9 @@ void enzyme_gmm_objective(int d, int k, int n, double const *__restrict alphas,
       subtract(d, &x[ix * d], &means[ik * d], &xcentered[0]);
       Qtimesx(d, &Qdiags[ik * d], &icf[ik * icf_sz + d], &xcentered[0],
               &Qxcentered[0]);
+      // if (ix == n - 1 && ik == 0) {
+      //   __print_d_arr(&Qxcentered[0], d);
+      // }
       // two caches for qxcentered at idx 0 and at arbitrary index
       main_term[ik] = alphas[ik] + sum_qs[ik] - 0.5 * sqnorm(d, &Qxcentered[0]);
     }

@@ -1,33 +1,19 @@
 import argparse
 from compile import (
-    jit_mlir,
     compile_c,
     compile_enzyme,
     compile_mlir,
     link_and_run,
-    run_grad,
 )
 from jinja2 import Environment, PackageLoader, select_autoescape
-import numpy as np
-
-np.random.seed(0)
-ROUND_TO = 2
+import json
+import pandas as pd
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 
 
-def sparse_identity(k) -> str:
-    """
-    Return a string representation of an identity matrix that can be template-inserted
-    into an MLIR sparse<> attribute.
-    """
-    eye_indices = "[" + ", ".join([f"[{i}, {i}]" for i in range(k)]) + "]"
-    eye_values = f"[{', '.join('1.0' for i in range(k))}]"
-    return f"{eye_indices}, {eye_values}"
-
-
-def compile_and_run_gmm(config):
+def generate_gmm_results(config):
     compile_c(
         config["driver"].render().encode("utf-8"),
         "gmm_driver.o",
@@ -43,15 +29,34 @@ def compile_and_run_gmm(config):
         ["gmm_driver.o", "helpers.o", "gmm_enzyme.o", "gmm_kernel.o"],
         "gmm_driver.out",
         link_runner_utils=True,
-    )
-    print(stdout.decode("utf-8"))
+    ).decode("utf-8")
+
+    try:
+        lines = stdout.splitlines()
+        keys = [
+            "enzyme_comp_primal",
+            "enzyme_comp_adjoint",
+            "lagrad_full_primal",
+            "lagrad_full_adjoint",
+            "lagrad_tri_adjoint",
+        ]
+        assert len(keys) == len(
+            lines
+        ), f"expected # of apps to match {len(keys)} vs {len(lines)}"
+        results = pd.DataFrame.from_dict(
+            {key: json.loads(line) for key, line in zip(keys, lines)}
+        )
+        return results
+    except json.JSONDecodeError:
+        print("Failed to parse output")
+        print(stdout)
 
 
 def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
-    # mlir_template = mlir_env.get_template("gmm_loops.mlir")
+    # mlir_template = mlir_env.get_template("gmm_loops_compressed.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
     config = {
         "k": 25,
@@ -66,7 +71,9 @@ def main(args):
     if args.print:
         print(mlir_template.render(**config))
     else:
-        compile_and_run_gmm(config)
+        results = generate_gmm_results(config)
+        if results is not None:
+            print(results[10:].mean())
 
     # compile_mlir(mlir_template.render(**config).encode("utf-8"), "gmm_kernel.o")
     # rendered = gmm_template.render(
