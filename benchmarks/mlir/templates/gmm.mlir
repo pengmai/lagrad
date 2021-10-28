@@ -294,7 +294,7 @@ func @gmm_objective(
   return %final_1 : tensor<f64>
 }
 
-func @lagrad_gmm( 
+func @lagrad_gmm(
   %alphas: tensor<{{k}}xf64>,
   %means: tensor<{{k}}x{{d}}xf64>,
   %Qs: tensor<{{k}}x{{d}}xf64>,

@@ -295,9 +295,13 @@ public:
               emitScalarImplementation(b, loc, ivs, iterArgs, linalgOp);
           return scf::ValueVector{iterNext.begin(), iterNext.end()};
         });
+
+    // This is the part that modifies the loop bounds. It currently only works
+    // for lower triangular loops.
     auto num_loops = loopNest.loops.size();
     auto last = loopNest.loops[num_loops - 1];
     last.setUpperBound(loopNest.loops[num_loops - 2].getInductionVar());
+
     op->replaceAllUsesWith(loopNest.getResults());
     rewriter.eraseOp(op);
 
