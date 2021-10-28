@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define FILENAME "benchmarks/data/gmm_d10_K25.txt"
-#define GRAD_FILENAME "benchmarks/data/gmm_results.txt"
+#define FILENAME "benchmarks/data/gmm_d128_K200.txt"
+#define GRAD_FILENAME "benchmarks/data/gmm_d128_K200_results.txt"
 
 GMMInput read_gmm_data() {
   FILE *fp;
