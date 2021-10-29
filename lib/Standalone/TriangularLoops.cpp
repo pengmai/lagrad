@@ -158,7 +158,7 @@ static SmallVector<Value>
 inlineRegionAndEmitStore(OpBuilder &b, Location loc, linalg::LinalgOp op,
                          ArrayRef<Value> indexedValues,
                          ArrayRef<SmallVector<Value>> indexing,
-                         ArrayRef<Value> outputTensors) {
+                         ArrayRef<Value> outputTensors, Value triIV) {
   auto &block = op->getRegion(0).front();
   BlockAndValueMapping map;
   map.map(block.getArguments(), indexedValues);
@@ -175,6 +175,8 @@ inlineRegionAndEmitStore(OpBuilder &b, Location loc, linalg::LinalgOp op,
         loc, toStore, outputTensors[operand.getOperandNumber()],
         indexing[operand.getOperandNumber()]));
   }
+  Value one = b.create<arith::ConstantIndexOp>(loc, 1);
+  results.push_back(b.create<arith::AddIOp>(loc, triIV, one));
   return results;
 }
 
@@ -182,7 +184,7 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
                                                    ValueRange allIvs,
                                                    ValueRange iterArgs,
                                                    linalg::LinalgOp linalgOp) {
-  assert(iterArgs.size() == linalgOp.getOutputTensorOperands().size() &&
+  assert(iterArgs.size() == linalgOp.getOutputTensorOperands().size() + 1 &&
          "Expected # of iter args to be equal to # of output tensor operands.");
 
   SmallVector<Value> indexedValues;
@@ -216,13 +218,14 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   // 2. Inline region, currently only works for a single basic block.
   // 3. Emit store.
   SmallVector<Value> outputTensors{iterArgs};
+  auto triIV = outputTensors.pop_back_val();
   SmallVector<SmallVector<Value>, 8> indexing;
   for (auto outputOperand : linalgOp.getOutputTensorOperands()) {
     indexing.push_back(makeCanonicalAffineApplies(
         b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
   }
   return inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
-                                  outputTensors);
+                                  outputTensors, triIV);
 }
 
 class ConvertGenericOp : public RewritePattern {
@@ -287,6 +290,8 @@ public:
 
       iterArgInitValues.push_back(loaded);
     }
+    // Fast way to get an index value of 0
+    iterArgInitValues.push_back(lbs[0]);
     auto loopNest = scf::buildLoopNest(
         rewriter, linalgOp.getLoc(), lbs, ubs, steps, iterArgInitValues,
         [&](OpBuilder &b, Location loc, ValueRange ivs,
@@ -302,7 +307,8 @@ public:
     auto last = loopNest.loops[num_loops - 1];
     last.setUpperBound(loopNest.loops[num_loops - 2].getInductionVar());
 
-    op->replaceAllUsesWith(loopNest.getResults());
+    op->replaceAllUsesWith(
+        loopNest.getResults().take_front(loopNest.getResults().size() - 1));
     rewriter.eraseOp(op);
 
     return success();
