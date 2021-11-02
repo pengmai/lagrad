@@ -2,10 +2,10 @@
 func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
 func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
-  %res = constant dense<0.0> : tensor<3xf32>
+  %res = arith.constant dense<0.0> : tensor<3xf32>
   %val = linalg.matvec ins(%arg0, %arg1 : tensor<3x4xf32>, tensor<4xf32>) outs(%res : tensor<3xf32>) -> tensor<3xf32>
-  %c = constant dense<[1.1, -1.2, 1.0]> : tensor<3xf32>
-  %final = mulf %val, %c : tensor<3xf32>
+  %c = arith.constant dense<[1.1, -1.2, 1.0]> : tensor<3xf32>
+  %final = arith.mulf %val, %c : tensor<3xf32>
   return %final : tensor<3xf32>
 }
 
@@ -27,12 +27,12 @@ func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
 // }
 
 func @main() {
-  %M = constant dense<[
+  %M = arith.constant dense<[
     [0.8,  0.9,  1.2, -4.3],
     [2.3, -1.1, -7.5, -3.2],
     [1.2,  1.1,  1.0,  0.0]
   ]> : tensor<3x4xf32>
-  %x = constant dense<[-1.2, -1.3, 1.5, 2.2]> : tensor<4xf32>
+  %x = arith.constant dense<[-1.2, -1.3, 1.5, 2.2]> : tensor<4xf32>
 
   %f = constant @matvec : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3xf32>
   %df = standalone.grad %f {of=[0]} : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3xf32>, (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>

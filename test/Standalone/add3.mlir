@@ -3,13 +3,13 @@
 func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
 func @add3(%arg : f32) -> f32 {
-  %partial = addf %arg, %arg : f32
-  %res = addf %arg, %partial : f32
+  %partial = arith.addf %arg, %arg : f32
+  %res = arith.addf %arg, %partial : f32
   return %res : f32
 }
 
 func @main() {
-  %cst = constant 2.1 : f32
+  %cst = arith.constant 2.1 : f32
 
   %f = constant @add3 : (f32) -> f32
   %df = standalone.grad %f : (f32) -> f32, (f32) -> f32
