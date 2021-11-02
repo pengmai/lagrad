@@ -2,12 +2,9 @@
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
 
-#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
-#include "mlir/Conversion/LinalgToLLVM/LinalgToLLVM.h"
-#include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
@@ -23,6 +20,21 @@
 using namespace mlir;
 
 namespace {
+FloatType getScalarFloatType(Type operandType) {
+  if (operandType.isa<FloatType>()) {
+    return operandType.dyn_cast<FloatType>();
+  } else if (operandType.isa<ShapedType>()) {
+    auto elementType = operandType.dyn_cast<ShapedType>().getElementType();
+    assert(elementType.isa<FloatType>() &&
+           "Expected scalar element type to be a floating point type");
+    return elementType.dyn_cast<FloatType>();
+  }
+  llvm::outs() << "getScalarFloatType for type " << operandType
+               << " not implemented.\n";
+  llvm_unreachable("");
+  return nullptr;
+}
+
 class DiffOpLowering : public ConversionPattern {
 public:
   explicit DiffOpLowering(MLIRContext *context)
@@ -33,7 +45,13 @@ public:
                   ConversionPatternRewriter &rewriter) const override {
     // Obtain a SymbolRefAttr to the Enzyme autodiff function.
     // TODO: Only works for one unique differentiated function type at a time.
-    auto sym = getOrInsertAutodiffDecl(rewriter, op);
+    auto primalType = op->getOperand(0).getType().dyn_cast<FunctionType>();
+    auto floatType = getScalarFloatType(primalType.getInput(0));
+    auto llvmFloatPtr = LLVM::LLVMPointerType::get(floatType);
+    assert(primalType.getNumResults() < 2 &&
+           "Expected 0 or 1 results from the primal");
+
+    auto sym = getOrInsertAutodiffDecl(rewriter, op, floatType);
     auto const_global = getOrInsertEnzymeConstDecl(rewriter, op);
     auto llvmI32PtrTy =
         LLVM::LLVMPointerType::get(IntegerType::get(op->getContext(), 32));
@@ -52,11 +70,9 @@ public:
       // TODO: We currently assume that user is a call_indirect op.
       auto user = it.getUser();
       // Copy over the arguments for the op
-      auto arguments = std::vector<mlir::Value>();
+      auto arguments = SmallVector<Value>();
       arguments.push_back(operands[0]);
-      // TODO: Need to actually check the types here
-      auto llvmF32Ptr =
-          LLVM::LLVMPointerType::get(FloatType::getF32(user->getContext()));
+
       auto opIt = user->getOperands().drop_front(1);
       for (auto it = opIt.begin(); it != opIt.end(); it++) {
         // auto m = *arg;
@@ -73,12 +89,12 @@ public:
                             .getResult(0);
           arguments.push_back(rewriter
                                   .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmF32Ptr, casted,
+                                      user->getLoc(), llvmFloatPtr, casted,
                                       rewriter.getI64ArrayAttr(0))
                                   .getResult());
           arguments.push_back(rewriter
                                   .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmF32Ptr, casted,
+                                      user->getLoc(), llvmFloatPtr, casted,
                                       rewriter.getI64ArrayAttr(1))
                                   .getResult());
 
@@ -93,7 +109,7 @@ public:
                       typeConverter.convertType(shadow.getType()), shadow)
                   .getResult(0);
           auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
-              shadow.getLoc(), llvmF32Ptr, shadowCasted,
+              shadow.getLoc(), llvmFloatPtr, shadowCasted,
               rewriter.getI64ArrayAttr(1));
           arguments.push_back(extractShadowOp.getResult());
 
@@ -122,8 +138,8 @@ public:
         }
       }
 
-      rewriter.replaceOpWithNewOp<CallOp>(user, sym, rewriter.getF32Type(),
-                                          ArrayRef<Value>(arguments));
+      rewriter.replaceOpWithNewOp<CallOp>(user, sym, primalType.getResults(),
+                                          arguments);
     }
 
     return success();
@@ -134,9 +150,9 @@ private:
                                                       Operation *op) {
     ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
     auto *context = moduleOp.getContext();
-    // if (moduleOp.lookupSymbol<LLVM::GlobalOp>("enzyme_const")) {
-    //   return SymbolRefAttr::get("enzyme_const", context);
-    // }
+    if (moduleOp.lookupSymbol<LLVM::GlobalOp>("enzyme_const")) {
+      return SymbolRefAttr::get(context, "enzyme_const");
+    }
 
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(moduleOp.getBody());
@@ -149,7 +165,8 @@ private:
   }
 
   static FlatSymbolRefAttr getOrInsertAutodiffDecl(PatternRewriter &rewriter,
-                                                   Operation *op) {
+                                                   Operation *op,
+                                                   FloatType returnType) {
     ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
     auto *context = moduleOp.getContext();
     if (moduleOp.lookupSymbol<LLVM::LLVMFuncOp>("__enzyme_autodiff")) {
@@ -157,14 +174,12 @@ private:
     }
 
     // Create the function declaration for __enzyme_autodiff
-    auto llvmF32Ty = FloatType::getF32(context);
-
     LLVMTypeConverter typeConverter(context);
     auto llvmOriginalFuncType =
         typeConverter.packFunctionResults(op->getOperand(0).getType());
 
     auto llvmFnType = LLVM::LLVMFunctionType::get(
-        llvmF32Ty, llvmOriginalFuncType, /*isVarArg=*/true);
+        returnType, llvmOriginalFuncType, /*isVarArg=*/true);
 
     // Insert the autodiff function into the body of the parent module.
     PatternRewriter::InsertionGuard insertGuard(rewriter);
@@ -196,21 +211,16 @@ struct StandaloneToLLVMLoweringPass
 void StandaloneToLLVMLoweringPass::runOnOperation() {
   LLVMConversionTarget target(getContext());
   target.addLegalOp<ModuleOp>();
-  // target.addLegalOp<FuncOp>();
-  // target.addLegalOp<ConstantOp>();
+  target.addIllegalOp<standalone::DiffOp>();
 
   LLVMTypeConverter typeConverter(&getContext());
 
   OwningRewritePatternList patterns(&getContext());
-  // populateAffineToStdConversionPatterns(patterns);
   populateLoopToStdConversionPatterns(patterns);
-  // populateMathToLLVMConversionPatterns(typeConverter, patterns);
   populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
   arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
-  // populateLinalgToLLVMConversionPatterns(typeConverter, patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
   patterns.insert<DiffOpLowering>(&getContext());
-  // populateStdToLLVMFuncOpConversionPattern(typeConverter, patterns);
 
   auto mod = getOperation();
   if (failed(applyPartialConversion(mod, target, std::move(patterns))))
