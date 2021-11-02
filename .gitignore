@@ -1,6 +1,8 @@
 .vscode/
+.env
 build/
 test/pytest/tmp
 .DS_Store
 benchmarks/tmp
+benchmarks/results/*.json
 
