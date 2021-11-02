@@ -60,7 +60,7 @@ func @scalvec2(%arg0: f64, %arg1: tensor<2xf64>) -> tensor<2xf64> {
 
 func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
+func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tensor<3xf64> {linalg.inplaceable = true}) -> f64 {
   %zero = arith.constant 0.0 : f64
   %one = arith.constant 1.0 : f64
   %w_space = arith.constant dense<0.0> : tensor<3xf64>
@@ -134,7 +134,8 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3
     // scf.yield %X_plus_rot_cross_X : tensor<3xf64>
     scf.yield %rot : tensor<3xf64>
   }
-  return %result : tensor<3xf64>
+  // return %result : tensor<3xf64>
+  return %zero : f64
 }
 
 // func @radial_distort(%rad_params: tensor<2xf64>, %proj: tensor<2xf64>) -> tensor<2xf64> {
@@ -214,11 +215,19 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3
 //   // return %res : tensor<2xf64>
 // }
 
-func @grad_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
-  %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-  %df = standalone.grad %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-  %res = call_indirect %df(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-  return %res : tensor<3xf64>
+// func @grad_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
+//   %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+//   %df = standalone.grad %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+//   %res = call_indirect %df(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+//   return %res : tensor<3xf64>
+// }
+
+func @diff_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
+  %drot = linalg.init_tensor [3] : tensor<3xf64>
+  %dX = linalg.init_tensor [3] : tensor<3xf64>
+  %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64
+  return %rot : tensor<3xf64>
+  // %df = standalone.diff %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
 }
 
 // func @grad_project(%cam: tensor<{{nCamParams}}xf64>, %X: tensor<3xf64>) -> tensor<{{nCamParams}}xf64> {
