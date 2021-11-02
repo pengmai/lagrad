@@ -801,23 +801,23 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
           }
         }
 
-        // if (!bbEnv[regionArgs[op_index]]) {
-        //   bbEnv[regionArgs[op_index]] =
-        //       onesLike(loc, regionArgs[op_index], builder);
-        // }
         // This add operation is required in the case of undoing
         // reductions. It might be possible to omit this, if the
         // output argument is never used in the primal, or perhaps if
         // the primal iterator types do not include reductions.
+        // I'm not entirely sure how best to check if we can omit this.
         auto new_operand = op_index == -1 ? operand : regionArgs[op_index];
         if (!bbEnv[new_operand]) {
           rewriter.create<linalg::YieldOp>(loc,
                                            getZero(loc, new_operand, rewriter));
-        } else {
+        } else if (outputShape.getRank() !=
+                   static_cast<int64_t>(numIterators)) {
           Value add_res = rewriter.create<arith::AddFOp>(
               loc, bbEnv[new_operand], regionArgs[regionArgs.size() - 1]);
 
           rewriter.create<linalg::YieldOp>(loc, add_res);
+        } else {
+          rewriter.create<linalg::YieldOp>(loc, bbEnv[new_operand]);
         }
       });
   return adjoint.getResult(0);

@@ -3,6 +3,7 @@
 #include "Standalone/StandaloneOps.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/ArithmeticToLLVM/ArithmeticToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/LinalgToLLVM/LinalgToLLVM.h"
@@ -121,8 +122,8 @@ public:
         }
       }
 
-      rewriter.replaceOpWithNewOp<mlir::CallOp>(
-          user, sym, rewriter.getF32Type(), ArrayRef<Value>(arguments));
+      rewriter.replaceOpWithNewOp<CallOp>(user, sym, rewriter.getF32Type(),
+                                          ArrayRef<Value>(arguments));
     }
 
     return success();
@@ -203,8 +204,9 @@ void StandaloneToLLVMLoweringPass::runOnOperation() {
   OwningRewritePatternList patterns(&getContext());
   // populateAffineToStdConversionPatterns(patterns);
   populateLoopToStdConversionPatterns(patterns);
-  populateMathToLLVMConversionPatterns(typeConverter, patterns);
+  // populateMathToLLVMConversionPatterns(typeConverter, patterns);
   populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
+  arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
   // populateLinalgToLLVMConversionPatterns(typeConverter, patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);
   patterns.insert<DiffOpLowering>(&getContext());

@@ -284,7 +284,9 @@ public:
       auto space = rewriter.create<memref::AllocOp>(
           linalgOp.getLoc(),
           MemRefType::get(outType.getShape(), outType.getElementType()));
-      rewriter.create<linalg::FillOp>(linalgOp.getLoc(), zero, space);
+      if (linalgOp.payloadUsesValueFromOperand(outputTensor)) {
+        rewriter.create<linalg::FillOp>(linalgOp.getLoc(), zero, space);
+      }
       auto loaded =
           rewriter.create<memref::TensorLoadOp>(linalgOp.getLoc(), space);
 

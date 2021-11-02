@@ -8,12 +8,12 @@ func @print_0d(%arg : memref<f32>) {
 }
 
 func @square(%arg : f32) -> f32 {
-  %res = mulf %arg, %arg : f32
+  %res = arith.mulf %arg, %arg : f32
   return %res : f32
 }
 
-func @main() {
-  %cst = constant 3.0 : f32
+func @main() -> i64 {
+  %cst = arith.constant 3.0 : f32
 
   %fa = constant @square : (f32) -> f32
   %df = standalone.diff %fa : (f32) -> f32, (f32) -> f32
@@ -23,5 +23,6 @@ func @main() {
   memref.store %res, %loc[] : memref<f32>
   call @print_0d(%loc) : (memref<f32>) -> ()
 
-  return
+  %exit = arith.constant 0 : i64
+  return %exit : i64
 }

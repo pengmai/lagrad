@@ -39,6 +39,7 @@ LOWERING_ENZYME = [
     "-convert-standalone-to-llvm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
+    "-reconcile-unrealized-casts",
     "-llvm-legalize-for-export",
 ]
 ENZYME_DYLIB = osp.join(
@@ -144,6 +145,18 @@ def compile_benchmark(name: str, high_level_ir: bytes):
     # TODO: Do this
 
 
+def jit_llvm(llvm_ir: bytes):
+    try:
+        jit = subprocess.run(
+            ["lli", "-load", LIBS], input=llvm_ir, check=True, capture_output=True
+        )
+        return jit.stdout
+    except subprocess.CalledProcessError as e:
+        print(e.stdout.decode("utf-8"))
+        print(e.stderr.decode("utf-8"))
+        raise Exception(e.stdout.decode("utf-8") + e.stderr.decode("utf-8"))
+
+
 def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     if mode not in ["enzyme", "grad"]:
         raise ValueError("'mode' must be one of 'enzyme', 'grad'")
@@ -155,6 +168,7 @@ def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     llvm_ir = lower_to_llvm(dialect_ir)
     if mode == "enzyme":
         llvm_ir = run_enzyme(llvm_ir, optimize=True)
+        return jit_llvm(llvm_ir)
 
     object_file = osp.join(TMP_DIR, "app.o")
     with open(object_file, "wb") as ofile:

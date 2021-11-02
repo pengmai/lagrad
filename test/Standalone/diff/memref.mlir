@@ -15,8 +15,8 @@ func @loadstore(%arg0: memref<f32>) -> f32 {
 func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
 func @main() {
-  %source_A = constant dense<3.2> : tensor<f32>
-  %zero = constant 0.0 : f32
+  %source_A = arith.constant dense<3.2> : tensor<f32>
+  %zero = arith.constant 0.0 : f32
 
   %A = memref.buffer_cast %source_A : memref<f32>
   %dA = memref.alloca() : memref<f32>
