@@ -40,6 +40,7 @@ LOWERING_ENZYME = [
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
     "-reconcile-unrealized-casts",
+    "-convert-static-allocs",
     "-llvm-legalize-for-export",
 ]
 ENZYME_DYLIB = osp.join(

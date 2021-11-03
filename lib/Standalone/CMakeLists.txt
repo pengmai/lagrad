@@ -8,6 +8,7 @@ add_mlir_dialect_library(MLIRStandalone
         TensorConstantFolding.cpp
         ElementwiseToAffine.cpp
         TriangularLoops.cpp
+        StaticAllocs.cpp
         Utils.cpp
 
         ADDITIONAL_HEADER_DIRS

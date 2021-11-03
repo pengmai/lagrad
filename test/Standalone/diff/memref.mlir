@@ -3,18 +3,20 @@
 
 // TRY THIS WITH O2, the Enzyme method
 func @loadstore(%arg0: memref<f32>) -> f32 {
-  // %c0 = constant 0 : index
-  // %c1 = constant 1 : index
-  %loc = memref.alloca() : memref<f32>
+  %loc = memref.alloc() : memref<f32>
   %arg0_val = memref.load %arg0[] : memref<f32>
   memref.store %arg0_val, %loc[] : memref<f32>
-  %1 = memref.load %loc[] : memref<f32>
-  return %1 : f32
+
+  %loc_val = memref.load %loc[] : memref<f32>
+  %cst = arith.constant 2.3 : f32
+  %final = arith.mulf %loc_val, %cst : f32
+  memref.dealloc %loc : memref<f32>
+  return %final : f32
 }
 
 func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func @main() -> i64 {
   %source_A = arith.constant dense<3.2> : tensor<f32>
   %zero = arith.constant 0.0 : f32
 
@@ -28,5 +30,6 @@ func @main() {
 
   %U = memref.cast %dA : memref<f32> to memref<*xf32>
   call @print_memref_f32(%U) : (memref<*xf32>) -> ()
-  return
+  %ret = arith.constant 0 : i64
+  return %ret : i64
 }

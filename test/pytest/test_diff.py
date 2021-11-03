@@ -32,9 +32,9 @@ def test_2d_sum():
     assert extract_2d(output.decode("utf-8")) == [[1.0] * 4] * 4
 
 
-def disabled_test_memref():
+def test_memref():
     output = compile_pipeline(f"{MLIR_FILES}/diff/memref.mlir")
-    print(output.decode("utf-8"))
+    assert extract_scalar(output.decode("utf-8")) == 2.3
 
 
 def test_linalg_dot():
@@ -44,4 +44,15 @@ def test_linalg_dot():
 
 def test_generic():
     output = compile_pipeline(f"{MLIR_FILES}/diff/generic.mlir")
-    extract_2d(output.decode("utf-8")) == np.broadcast_to([10, 4, 20, 58], (4, 4))
+    assert (
+        extract_2d(output.decode("utf-8"))
+        == np.broadcast_to([10, 4, 20, 58], (4, 4)).tolist()
+    )
+
+
+def test_matvec():
+    output = compile_pipeline(f"{MLIR_FILES}/diff/matvec_buffer.mlir")
+    assert (
+        extract_2d(output.decode("utf-8"))
+        == np.broadcast_to([-1.2, -1.3, 1.5, 2.2], (3, 4)).tolist()
+    )
