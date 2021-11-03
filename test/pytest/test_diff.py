@@ -56,3 +56,8 @@ def test_matvec():
         extract_2d(output.decode("utf-8"))
         == np.broadcast_to([-1.2, -1.3, 1.5, 2.2], (3, 4)).tolist()
     )
+
+
+def test_const_memref():
+    output = compile_pipeline(f"{MLIR_FILES}/diff/const_memref.mlir")
+    assert extract_1d(output.decode("utf-8")) == [4.3, 4.3]

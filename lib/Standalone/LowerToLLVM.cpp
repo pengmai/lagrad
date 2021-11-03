@@ -43,6 +43,15 @@ public:
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
+    auto diffOp = dyn_cast<standalone::DiffOp>(op);
+    auto constArgs = diffOp->getAttr("const").dyn_cast_or_null<ArrayAttr>();
+    llvm::SmallDenseSet<int64_t> constSet;
+    if (constArgs) {
+      for (auto attr : constArgs.getAsValueRange<IntegerAttr>()) {
+        constSet.insert(attr.getSExtValue());
+      }
+    }
+
     // Obtain a SymbolRefAttr to the Enzyme autodiff function.
     // TODO: Only works for one unique differentiated function type at a time.
     auto primalType = op->getOperand(0).getType().dyn_cast<FunctionType>();
@@ -67,17 +76,21 @@ public:
     LLVMTypeConverter typeConverter(op->getContext());
 
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
-      // TODO: We currently assume that user is a call_indirect op.
-      auto user = it.getUser();
+      auto user = dyn_cast_or_null<CallIndirectOp>(it.getUser());
+      assert(user && "Expected user to be a CallIndirectOp");
       // Copy over the arguments for the op
       auto arguments = SmallVector<Value>();
       arguments.push_back(operands[0]);
 
       auto opIt = user->getOperands().drop_front(1);
+      size_t arg_index = 0;
       for (auto it = opIt.begin(); it != opIt.end(); it++) {
         // auto m = *arg;
         auto arg = *it;
         auto memrefType = arg.getType().dyn_cast_or_null<MemRefType>();
+        if (constSet.contains(arg_index)) {
+          assert(memrefType && "Operator marked const was not a MemRef");
+        }
         if (memrefType) {
           auto rank = memrefType.getRank();
           // Ignore the first pointer
@@ -92,26 +105,33 @@ public:
                                       user->getLoc(), llvmFloatPtr, casted,
                                       rewriter.getI64ArrayAttr(0))
                                   .getResult());
+
+          if (constSet.contains(arg_index)) {
+            // The aligned pointer must be marked const
+            arguments.push_back(enzyme_const_addr.getResult());
+          }
           arguments.push_back(rewriter
                                   .create<LLVM::ExtractValueOp>(
                                       user->getLoc(), llvmFloatPtr, casted,
                                       rewriter.getI64ArrayAttr(1))
                                   .getResult());
 
-          // Shadow pointer has to follow the aligned pointer
-          auto shadow = *(++it);
-          assert(shadow && shadow.getType().isa<MemRefType>() &&
-                 "Shadow argument must be a Memref");
-          auto shadowCasted =
-              rewriter
-                  .create<UnrealizedConversionCastOp>(
-                      shadow.getLoc(),
-                      typeConverter.convertType(shadow.getType()), shadow)
-                  .getResult(0);
-          auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
-              shadow.getLoc(), llvmFloatPtr, shadowCasted,
-              rewriter.getI64ArrayAttr(1));
-          arguments.push_back(extractShadowOp.getResult());
+          if (!constSet.contains(arg_index)) {
+            // Shadow pointer has to follow the aligned pointer
+            auto shadow = *(++it);
+            assert(shadow && shadow.getType().isa<MemRefType>() &&
+                   "Shadow argument must be a Memref");
+            auto shadowCasted =
+                rewriter
+                    .create<UnrealizedConversionCastOp>(
+                        shadow.getLoc(),
+                        typeConverter.convertType(shadow.getType()), shadow)
+                    .getResult(0);
+            auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
+                shadow.getLoc(), llvmFloatPtr, shadowCasted,
+                rewriter.getI64ArrayAttr(1));
+            arguments.push_back(extractShadowOp.getResult());
+          }
 
           auto llvmI64Ty = IntegerType::get(user->getContext(), 64);
           arguments.push_back(rewriter
@@ -136,6 +156,7 @@ public:
         } else {
           arguments.push_back(arg);
         }
+        arg_index++;
       }
 
       rewriter.replaceOpWithNewOp<CallOp>(user, sym, primalType.getResults(),
