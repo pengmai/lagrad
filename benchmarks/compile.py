@@ -51,8 +51,9 @@ BUFFERIZE = [
     "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
-    "-convert-linalg-to-affine-loops",
-    "-affine-loop-unroll",
+    # "-convert-linalg-to-affine-loops",
+    "-convert-linalg-to-loops",
+    # "-affine-loop-unroll",
     "-lower-affine",
 ]
 LOWER_TO_LIBRARY = ["-convert-linalg-to-std"]
@@ -65,6 +66,17 @@ LOWER_TO_LLVM = [
     "-llvm-legalize-for-export",
 ]
 
+LOWER_TO_LLVM_WITH_ENZYME = [
+    "-convert-scf-to-std",
+    "-convert-memref-to-llvm",
+    "-convert-math-to-llvm",
+    "-convert-standalone-to-llvm",
+    "-convert-std-to-llvm",
+    "-convert-static-allocs",
+    "-reconcile-unrealized-casts",
+    "-llvm-legalize-for-export",
+]
+
 
 def run_safe(args, stdin: bytes = None, suppress_stderr=False):
     try:
@@ -72,6 +84,7 @@ def run_safe(args, stdin: bytes = None, suppress_stderr=False):
         if p.stderr and not suppress_stderr:
             print(p.stderr.decode("utf-8"))
     except subprocess.CalledProcessError as e:
+        print(e.stdout.decode("utf-8"))
         raise Exception(e.stderr.decode("utf-8"))
     return p.stdout
 
@@ -155,7 +168,59 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
     return output.decode("utf-8")
 
 
-def compile_enzyme(contents, output):
+def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
+    assert emit in ["llvm", "jit", "obj"], "Invalid emit type"
+    llvm_dialect = run_safe(
+        [
+            f"{BIN}/standalone-opt",
+            # "-linalg-generalize-named-ops",
+            "-canonicalize",
+            "-convert-elementwise-to-linalg",
+            "-convert-linalg-triangular-to-loops",
+            "-canonicalize",
+        ]
+        + BUFFERIZE
+        + LOWER_TO_LOOPS
+        + LOWER_TO_LLVM_WITH_ENZYME,
+        stdin=contents,
+    )
+    llvm_ir = run_safe(["mlir-translate", "-mlir-to-llvmir"], stdin=llvm_dialect)
+    temp_ll_file = osp.join(TMP, "preenzyme.ll")
+    with open(temp_ll_file, "w") as f:
+        f.write(llvm_ir.decode("utf-8"))
+    llvm_ir = run_safe(
+        [
+            CLANG_12,
+            "-S",
+            "-emit-llvm",
+            temp_ll_file,
+            "-o",
+            "/dev/stdout",
+            "-O2",
+            "-fno-vectorize",
+            "-fno-slp-vectorize",
+            "-fno-unroll-loops",
+        ],
+        stdin=llvm_ir,
+        suppress_stderr=True,
+    )
+    postenzyme = run_safe(
+        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=llvm_ir
+    )
+
+    if emit == "llvm":
+        return postenzyme.decode("utf-8")
+    elif emit == "jit":
+        return run_safe(["lli", "-load", RUNNER_UTILS], stdin=postenzyme).decode(
+            "utf-8"
+        )
+    elif emit == "obj":
+        assert output != "", "Output cannot be empty with emit='obj'"
+        run_safe([LLC_12, "-filetype=obj", "-o", f"{TMP}/{output}"], stdin=postenzyme)
+
+
+def compile_enzyme(contents, output, emit="object"):
+    assert emit in ["object", "llvm"], "emit must be one of 'object' and 'llvm'"
     includes = [f"-I{DRIVER_INCLUDES}", f"-I{SYSTEM_INCLUDES}"]
     preenzyme = run_safe(
         [CLANG_12]
@@ -178,7 +243,10 @@ def compile_enzyme(contents, output):
     postenzyme = run_safe(
         [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
     )
-    run_safe([LLC_12, "-filetype=obj", "-o", f"{TMP}/{output}"], stdin=postenzyme)
+    if emit == "object":
+        run_safe([LLC_12, "-filetype=obj", "-o", f"{TMP}/{output}"], stdin=postenzyme)
+    elif emit == "llvm":
+        return postenzyme.decode("utf-8")
 
 
 def compile_c(contents, output):

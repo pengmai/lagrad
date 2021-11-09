@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define FILENAME "benchmarks/data/gmm_d128_K200.txt"
-#define GRAD_FILENAME "benchmarks/data/gmm_d128_K200_results.txt"
+#define FILENAME "benchmarks/data/gmm_d10_K25.txt"
+#define GRAD_FILENAME "benchmarks/data/gmm_results.txt"
+// #define FILENAME "benchmarks/data/gmm_d128_K200.txt"
+// #define GRAD_FILENAME "benchmarks/data/gmm_d128_K200_results.txt"
 
 GMMInput read_gmm_data() {
   FILE *fp;
@@ -150,8 +152,13 @@ void check_gmm_err(size_t d, size_t k, size_t n, double *dalphas,
                    double *ref_alphas, double *dmeans, double *ref_means,
                    double *dicf, double *ref_icf, const char *app) {
   double alphas_err = 0.0;
+  int hasNaN = 0;
   for (size_t i = 0; i < k; i++) {
+    hasNaN |= isnan(dalphas[i]);
     alphas_err += fabs(ref_alphas[i] - dalphas[i]);
+  }
+  if (hasNaN) {
+    printf("(%s) alphas has NaN values\n", app);
   }
   // Tolerance here is relatively high because of precision lost when
   // serializing the floats.
@@ -159,20 +166,32 @@ void check_gmm_err(size_t d, size_t k, size_t n, double *dalphas,
     printf("(%s) alphas err: %f\n", app, alphas_err);
   }
 
-  double means_err = 0.0;
+  double max_means_err = -1;
+  hasNaN = 0;
   for (size_t i = 0; i < k * d; i++) {
-    means_err += fabs(ref_means[i] - dmeans[i]);
+    hasNaN |= isnan(dmeans[i]);
+    if (fabs(ref_means[i] - dmeans[i]) > max_means_err) {
+      max_means_err = fabs(ref_means[i] - dmeans[i]);
+    }
   }
-  if (means_err > 1e-4) {
-    printf("(%s) means err: %f\n", app, means_err);
+  if (hasNaN) {
+    printf("(%s) means has NaN values\n", app);
+  }
+  if (max_means_err > 1e-6) {
+    printf("(%s) max means err: %f\n", app, max_means_err);
   }
 
   int icf_sz = d * (d + 1) / 2;
   double max_icf_err = -1;
+  hasNaN = 0;
   for (size_t i = 0; i < k * icf_sz; i++) {
+    hasNaN |= isnan(dicf[i]);
     if (fabs(ref_icf[i] - dicf[i]) > max_icf_err) {
-      max_icf_err = ref_icf[i] - dicf[i];
+      max_icf_err = fabs(ref_icf[i] - dicf[i]);
     }
+  }
+  if (hasNaN) {
+    printf("(%s) icf has NaN values\n", app);
   }
   if (max_icf_err > 1e-5) {
     printf("(%s) max icf err: %f\n", app, max_icf_err);
@@ -211,4 +230,26 @@ void convert_ql_to_icf(size_t d, size_t k, size_t n, double *Qs, double *Ls,
     }
     collapse_ltri(d, &Ls[d0 * d * d], &icf[d0 * icf_sz + d]);
   }
+}
+
+void convert_ql_compressed_to_icf(size_t d, size_t k, size_t n, double *Qs,
+                                  double *Ls_compressed, double *icf) {
+  int icf_sz = d * (d + 1) / 2;
+  double *temp_L = (double *)malloc(k * d * d * sizeof(double));
+  for (size_t d0 = 0; d0 < k; d0++) {
+    for (size_t d1 = 0; d1 < d; d1++) {
+      icf[d0 * icf_sz + d1] = Qs[d0 * d + d1];
+    }
+
+    size_t idx = 0;
+    for (size_t d1 = 0; d1 < d; d1++) {
+      for (size_t d2 = 0; d2 < d1; d2++) {
+        temp_L[d0 * d * d + d1 * d + d2] = Ls_compressed[idx];
+        idx++;
+      }
+    }
+
+    collapse_ltri(d, &temp_L[d0 * d * d], &icf[d0 * icf_sz + d]);
+  }
+  free(temp_L);
 }

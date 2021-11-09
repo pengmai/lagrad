@@ -23,3 +23,8 @@ typedef struct _GMMGrad {
   F64Descriptor2D dmeans, dqs;
   F64Descriptor3D dls;
 } GMMGrad;
+
+typedef struct _GMMCompressedGrad {
+  F64Descriptor1D dalphas;
+  F64Descriptor2D dmeans, dqs, dls;
+} GMMCompressedGrad;

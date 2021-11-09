@@ -84,7 +84,7 @@ void print_ul_arr(unsigned long *arr, size_t n);
 
 void print_f_arr(float *arr, size_t n);
 
-void print_d_arr(double *arr, size_t n);
+void print_d_arr(const double *arr, size_t n);
 
 void print_f_arr_2d(float *arr, size_t m, size_t n);
 
