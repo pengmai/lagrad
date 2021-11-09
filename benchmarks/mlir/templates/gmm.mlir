@@ -1,7 +1,7 @@
 //
 // Based on the implementation from https://github.com/microsoft/ADBench/blob/994fbde50a3ee3c1edc7e7bcdb105470e63d7362/src/python/modules/PyTorch/gmm_objective.py
 //
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+// func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
 #map0 = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0)>
@@ -138,7 +138,8 @@ func @lagrad_gmm_objective_full(
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}xf64>
 
-  %max_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
+  // Bit of a bandaid.
+  %max_init = arith.constant dense<-1000000000.0> : tensor<{{n}}xf64>
   %max = linalg.generic
     {
       indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
@@ -421,7 +422,7 @@ func @lagrad_gmm_objective_tri(
     linalg.yield %1 : f64
   } -> tensor<{{n}}x{{k}}xf64>
 
-  %max_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
+  %max_init = arith.constant dense<-1000000000.0> : tensor<{{n}}xf64>
   %max = linalg.generic
     {
       indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
