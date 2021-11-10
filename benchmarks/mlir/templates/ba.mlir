@@ -1,7 +1,7 @@
 #map_1d_id = affine_map<(d0) -> (d0)>
 
 func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
-  %cross_space = arith.constant dense<0.0> : tensor<3xf64>
+  %out = arith.constant dense<0.0> : tensor<3xf64>
   %res = linalg.generic
     {
       indexing_maps = [
@@ -14,7 +14,7 @@ func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
       iterator_types = ["parallel"]
     }
     ins(%arg0, %arg1, %arg0, %arg1 : tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>)
-    outs(%cross_space : tensor<3xf64>) {
+    outs(%out : tensor<3xf64>) {
   ^bb0(%arg2: f64, %arg3: f64, %arg4: f64, %arg5: f64, %arg6: f64):
     %0 = arith.mulf %arg2, %arg3 : f64
     %1 = arith.mulf %arg4, %arg5 : f64
@@ -24,43 +24,42 @@ func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
   return %res : tensor<3xf64>
 }
 
-func @scalvec(%arg0: f64, %arg1: tensor<3xf64>) -> tensor<3xf64> {
-  %out_init = arith.constant dense<0.0> : tensor<3xf64>
-  %out = linalg.generic
+func @scalvec(%arg0: f64, %arg1: tensor<3xf64>, %out: tensor<3xf64> {linalg.inplaceable = true}) -> tensor<3xf64> {
+  %res = linalg.generic
     {
       indexing_maps = [#map_1d_id, #map_1d_id],
       iterator_types = ["parallel"]
     }
     ins(%arg1 : tensor<3xf64>)
-    outs(%out_init : tensor<3xf64>) {
+    outs(%out : tensor<3xf64>) {
   ^bb0(%arg2: f64, %arg3: f64):
     %0 = arith.mulf %arg2, %arg0 : f64
     linalg.yield %0 : f64
   } -> tensor<3xf64>
-  return %out : tensor<3xf64>
+  return %res : tensor<3xf64>
 }
 
 // There should be a way to make this dynamically shaped, but I'd need to know
 // how to safely generate the initial value.
-func @scalvec2(%arg0: f64, %arg1: tensor<2xf64>) -> tensor<2xf64> {
-  %out_init = arith.constant dense<0.0> : tensor<2xf64>
-  %out = linalg.generic
-    {
-      indexing_maps = [#map_1d_id, #map_1d_id],
-      iterator_types = ["parallel"]
-    }
-    ins(%arg1 : tensor<2xf64>)
-    outs(%out_init : tensor<2xf64>) {
-  ^bb0(%arg2: f64, %arg3: f64):
-    %0 = arith.mulf %arg2, %arg0 : f64
-    linalg.yield %0 : f64
-  } -> tensor<2xf64>
-  return %out : tensor<2xf64>
-}
+// func @scalvec2(%arg0: f64, %arg1: tensor<2xf64>) -> tensor<2xf64> {
+//   %out_init = arith.constant dense<0.0> : tensor<2xf64>
+//   %out = linalg.generic
+//     {
+//       indexing_maps = [#map_1d_id, #map_1d_id],
+//       iterator_types = ["parallel"]
+//     }
+//     ins(%arg1 : tensor<2xf64>)
+//     outs(%out_init : tensor<2xf64>) {
+//   ^bb0(%arg2: f64, %arg3: f64):
+//     %0 = arith.mulf %arg2, %arg0 : f64
+//     linalg.yield %0 : f64
+//   } -> tensor<2xf64>
+//   return %out : tensor<2xf64>
+// }
 
 func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tensor<3xf64> {linalg.inplaceable = true}) -> f64 {
+func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
   %zero = arith.constant 0.0 : f64
   %one = arith.constant 1.0 : f64
   %w_space = arith.constant dense<0.0> : tensor<3xf64>
@@ -68,7 +67,6 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tenso
   // Square rot, then sum
   %sqtheta_init = arith.constant dense<0.0> : tensor<f64>
   %X_costheta_space = linalg.init_tensor [3] : tensor<3xf64>
-
   %sqtheta_tensor = linalg.generic
     {
       indexing_maps = [#map_1d_id, affine_map<(d0) -> ()>],
@@ -81,34 +79,34 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tenso
     %1 = arith.addf %0, %arg1 : f64
     linalg.yield %1 : f64
   } -> tensor<f64>
+
   %sqtheta = tensor.extract %sqtheta_tensor[] : tensor<f64>
 
   %cond = arith.cmpf "one", %sqtheta, %zero : f64
   %result = scf.if %cond -> tensor<3xf64> {
     %theta = math.sqrt %sqtheta : f64
     %costheta = math.cos %theta : f64
-    // %sintheta = math.sin %theta : f64
-    // %theta_inv = arith.divf %one, %theta : f64
+    %sintheta = math.sin %theta : f64
+    %theta_inv = arith.divf %one, %theta : f64
 
-    // %w = linalg.generic
-    //   {
-    //     indexing_maps = [#map_1d_id, #map_1d_id],
-    //     iterator_types = ["parallel"]
-    //   }
-    //   ins(%rot : tensor<3xf64>)
-    //   outs(%w_space : tensor<3xf64>) {
-    // ^bb0(%arg2: f64, %arg3: f64):
-    //   %0 = arith.mulf %arg2, %theta_inv : f64
-    //   linalg.yield %0 : f64
-    // } -> tensor<3xf64>
-    // %w_cross_X = call @cross(%w, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+    %w = linalg.generic
+      {
+        indexing_maps = [#map_1d_id, #map_1d_id],
+        iterator_types = ["parallel"]
+      }
+      ins(%rot : tensor<3xf64>)
+      outs(%w_space : tensor<3xf64>) {
+    ^bb0(%arg2: f64, %arg3: f64):
+      %0 = arith.mulf %arg2, %theta_inv : f64
+      linalg.yield %0 : f64
+    } -> tensor<3xf64>
+    %w_cross_X = call @cross(%w, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
 
-    // %tmp_1 = linalg.dot ins(%w, %X : tensor<3xf64>, tensor<3xf64>) outs(%tmp_0 : tensor<f64>) -> tensor<f64>
-    // %tmp_2 = tensor.extract %tmp_1[] : tensor<f64>
-    // %tmp_3 = arith.subf %one, %costheta : f64
-    // %tmp = arith.mulf %tmp_2, %tmp_3 : f64
+    %tmp_1 = linalg.dot ins(%w, %X : tensor<3xf64>, tensor<3xf64>) outs(%tmp_0 : tensor<f64>) -> tensor<f64>
+    %tmp_2 = tensor.extract %tmp_1[] : tensor<f64>
+    %tmp_3 = arith.subf %one, %costheta : f64
+    %tmp = arith.mulf %tmp_2, %tmp_3 : f64
 
-    // %X_costheta = call @scalvec(%costheta, %X) : (f64, tensor<3xf64>) -> tensor<3xf64>
     %X_costheta = linalg.generic
       {
         indexing_maps = [#map_1d_id, #map_1d_id],
@@ -120,22 +118,41 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tenso
       %0 = arith.mulf %arg2, %costheta : f64
       linalg.yield %0 : f64
     } -> tensor<3xf64>
-    scf.yield %X_costheta : tensor<3xf64>
-    // %w_cross_X_sintheta = call @scalvec(%sintheta, %w_cross_X) : (f64, tensor<3xf64>) -> tensor<3xf64>
-    // %w_times_tmp = call @scalvec(%tmp, %w) : (f64, tensor<3xf64>) -> tensor<3xf64>
 
-    // %out_0 = arith.addf %X_costheta, %w_cross_X_sintheta : tensor<3xf64>
-    // %out_1 = arith.addf %out_0, %w_times_tmp : tensor<3xf64>
+    %w_cross_X_sintheta = linalg.generic
+      {
+        indexing_maps = [#map_1d_id, #map_1d_id],
+        iterator_types = ["parallel"]
+      }
+      ins(%w_cross_X : tensor<3xf64>)
+      outs(%X_costheta_space : tensor<3xf64>) {
+    ^bb0(%arg2: f64, %arg3: f64):
+      %0 = arith.mulf %arg2, %sintheta : f64
+      linalg.yield %0 : f64
+    } -> tensor<3xf64>
 
-    // scf.yield %out_1 : tensor<3xf64>
+    %w_times_tmp = linalg.generic
+      {
+        indexing_maps = [#map_1d_id, #map_1d_id],
+        iterator_types = ["parallel"]
+      }
+      ins(%w : tensor<3xf64>)
+      outs(%X_costheta_space : tensor<3xf64>) {
+    ^bb0(%arg2: f64, %arg3: f64):
+      %0 = arith.mulf %arg2, %tmp : f64
+      linalg.yield %0 : f64
+    } -> tensor<3xf64>
+
+    %out_0 = arith.addf %X_costheta, %w_cross_X_sintheta : tensor<3xf64>
+    %out_1 = arith.addf %out_0, %w_times_tmp : tensor<3xf64>
+    scf.yield %out_1 : tensor<3xf64>
   } else {
-    // %rot_cross_X = call @cross(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-    // %X_plus_rot_cross_X = arith.addf %X, %rot_cross_X : tensor<3xf64>
-    // scf.yield %X_plus_rot_cross_X : tensor<3xf64>
-    scf.yield %rot : tensor<3xf64>
+    %rot_cross_X = call @cross(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+    %X_plus_rot_cross_X = arith.addf %X, %rot_cross_X : tensor<3xf64>
+    scf.yield %X_plus_rot_cross_X : tensor<3xf64>
   }
-  // return %result : tensor<3xf64>
-  return %zero : f64
+
+  return %result : tensor<3xf64>
 }
 
 // func @radial_distort(%rad_params: tensor<2xf64>, %proj: tensor<2xf64>) -> tensor<2xf64> {
@@ -215,20 +232,26 @@ func @rodrigues_rotate_point(%rot: tensor<3xf64>, %X: tensor<3xf64>, %out: tenso
 //   // return %res : tensor<2xf64>
 // }
 
-// func @grad_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
-//   %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-//   %df = standalone.grad %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-//   %res = call_indirect %df(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
-//   return %res : tensor<3xf64>
-// }
-
-func @diff_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
-  %drot = linalg.init_tensor [3] : tensor<3xf64>
-  %dX = linalg.init_tensor [3] : tensor<3xf64>
-  %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64
-  return %rot : tensor<3xf64>
-  // %df = standalone.diff %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+func @grad_rrp(%rot: tensor<3xf64>, %X: tensor<3xf64>) -> tensor<3xf64> {
+  %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+  %df = standalone.grad %f {of = [0]}: (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+  %res = call_indirect %df(%rot, %X) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+  return %res : tensor<3xf64>
 }
+
+// This won't work because of the relationship between bufferizing and standalone.diff
+// func @diff_rrp(%rot: memref<3xf64>, %X: memref<3xf64>) -> memref<3xf64> {
+//   %drot = memref.alloc() : memref<3xf64>
+//   %dX = memref.alloc() : memref<3xf64>
+//   %out = memref.alloc() : memref<3xf64>
+//   %one = arith.constant 1.0 : f64
+//   linalg.fill(%one, %out) : f64, memref<3xf64>
+//   %f = constant @rodrigues_rotate_point : (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64
+//   %df = standalone.diff %f : (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64, (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64
+//   call_indirect %df(%rot, %drot, %X, %dX, %out, %out) : (tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>) -> f64
+//   return %rot : tensor<3xf64>
+//   // %df = standalone.diff %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
+// }
 
 // func @grad_project(%cam: tensor<{{nCamParams}}xf64>, %X: tensor<3xf64>) -> tensor<{{nCamParams}}xf64> {
 //   %f = constant @project : (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<2xf64>
