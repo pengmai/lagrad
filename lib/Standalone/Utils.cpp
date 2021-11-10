@@ -190,6 +190,13 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
         } else if (opName == "math.log") {
           vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                      op->getOperand(0));
+        } else if (opName == "math.sqrt") {
+          auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
+          vjp_value =
+              rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value, half);
+          // This is a bit of a math trick. Note the result is sqrt(operand)
+          vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
+                                                     op->getResult(0));
         } else if (opName == "linalg.generic") {
           auto genericOp = dyn_cast<linalg::GenericOp>(op);
           if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
@@ -633,7 +640,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), cos, vjp_value);
     } else if (opName == "math.cos") {
-      auto sin = rewriter.create<math::SinOp>(op->getLoc(), vjp_value);
+      auto sin = rewriter.create<math::SinOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), sin, vjp_value);
       vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
     } else if (opName == "math.sqrt") {
