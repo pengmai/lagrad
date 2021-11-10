@@ -4,9 +4,6 @@
 // The original Enzyme GMM implementation uses 2856x less memory than the naive MLIR
 // implementation!
 
-#dslice = affine_map<(d0)[s0] -> (s0 + d0)>
-#dslice2d = affine_map<(d0, d1)[s0] -> (d0 * {{d}} + s0 + d1)>
-
 #map0 = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0)>
 #map2 = affine_map<(d0, d1, d2) -> (d0, d2)>
@@ -23,39 +20,37 @@
 #map13 = affine_map<() -> ()>
 #map14 = affine_map<(d0, d1) -> ()>
 module  {
-  // Elementwise subtraction
-  func @msubtract(%arg0: memref<{{d}}xf64, #dslice>, %arg1: memref<{{d}}xf64, #dslice>, %arg2: memref<{{d}}xf64>) {
-    linalg.generic {indexing_maps = [#map9, #map9, #map9], iterator_types = ["parallel"]} ins(%arg0, %arg1 : memref<{{d}}xf64, #dslice>, memref<{{d}}xf64, #dslice>) outs(%arg2 : memref<{{d}}xf64>) {
-    ^bb0(%arg3: f64, %arg4: f64, %arg5: f64):
-      %0 = arith.subf %arg3, %arg4 : f64
-      linalg.yield %0 : f64
-    }
-    return
-  }
-
-  func @mQtimesx(%Qdiag: memref<{{d}}xf64, #dslice>, %ltri: memref<{{d}}x{{d}}xf64, #dslice2d>, %x: memref<{{d}}xf64>, %out: memref<{{d}}xf64>) {
+  func @mQtimesx(%ik: index, %Qdiag: memref<{{k}}x{{d}}xf64>, %ltri: memref<{{k}}x{{d}}x{{d}}xf64>, %x: memref<{{d}}xf64>, %out: memref<{{d}}xf64>) {
     // Elementwise multiplication
-    linalg.generic {indexing_maps = [#map9, #map9, #map9], iterator_types = ["parallel"]} ins(%Qdiag, %x : memref<{{d}}xf64, #dslice>, memref<{{d}}xf64>) outs(%out : memref<{{d}}xf64>) {
-    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-      %0 = arith.mulf %arg0, %arg1 : f64
-      linalg.yield %0 : f64
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %cd = arith.constant {{d}} : index
+    scf.for %iv = %c0 to %cd step %c1 {
+      %0 = memref.load %Qdiag[%ik, %iv] : memref<{{k}}x{{d}}xf64>
+      %1 = memref.load %x[%iv] : memref<{{d}}xf64>
+      %2 = arith.mulf %0, %1 : f64
+      memref.store %2, %out[%iv] : memref<{{d}}xf64>
     }
 
     // The triangular matrix-vector multiplication
-    linalg.generic {indexing_maps = [#map0, #map10, #map1], iterator_types = ["parallel", "reduction"]} ins(%ltri, %x : memref<{{d}}x{{d}}xf64, #dslice2d>, memref<{{d}}xf64>) outs(%out : memref<{{d}}xf64>) {
-    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-      %0 = arith.mulf %arg0, %arg1 : f64
-      %1 = arith.addf %0, %arg2 : f64
-      linalg.yield %1 : f64
+    scf.for %iv = %c0 to %cd step %c1 {
+      scf.for %jv = %c0 to %iv step %c1 {
+        %0 = memref.load %ltri[%ik, %iv, %jv] : memref<{{k}}x{{d}}x{{d}}xf64>
+        %1 = memref.load %x[%jv] : memref<{{d}}xf64>
+        %2 = memref.load %out[%iv] : memref<{{d}}xf64>
+        %3 = arith.mulf %0, %1 : f64
+        %4 = arith.addf %3, %2 : f64
+        memref.store %4, %out[%iv] : memref<{{d}}xf64>
+      }
     }
     return
   }
 
-  func @msqnorm(%x : memref<?xf64, #dslice>) -> f64 {
+  func @msqnorm(%x : memref<{{d}}xf64>) -> f64 {
     %zero = arith.constant 0.0 : f64
     %out = memref.alloc() : memref<f64>
     memref.store %zero, %out[] : memref<f64>
-    linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%x : memref<?xf64, #dslice>) outs(%out : memref<f64>) {
+    linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%x : memref<{{d}}xf64>) outs(%out : memref<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %0 = arith.mulf %arg0, %arg0 : f64
       %1 = arith.addf %0, %arg1 : f64
@@ -66,16 +61,42 @@ module  {
     return %val : f64
   }
 
-  func @msqnorm_2d(%x : memref<?x?xf64, #dslice2d>) -> f64 {
+  func @msqnormk(%ik: index, %x: memref<{{k}}x{{d}}xf64>) -> f64 {
     %zero = arith.constant 0.0 : f64
     %out = memref.alloc() : memref<f64>
     memref.store %zero, %out[] : memref<f64>
-    linalg.generic {indexing_maps = [#map0, #map14], iterator_types = ["reduction", "reduction"]} ins(%x : memref<?x?xf64, #dslice2d>) outs(%out : memref<f64>) {
-    ^bb0(%arg0: f64, %arg1: f64):
-      %0 = arith.mulf %arg0, %arg0 : f64
-      %1 = arith.addf %0, %arg1 : f64
-      linalg.yield %1 : f64
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %cd = arith.constant {{d}} : index
+    scf.for %iv = %c0 to %cd step %c1 {
+      %0 = memref.load %x[%ik, %iv] : memref<{{k}}x{{d}}xf64>
+      %1 = memref.load %out[] : memref<f64>
+      %2 = arith.mulf %0, %0 : f64
+      %3 = arith.addf %2, %1 : f64
+      memref.store %3, %out[] : memref<f64>
     }
+    %val = memref.load %out[] : memref<f64>
+    memref.dealloc %out : memref<f64>
+    return %val : f64
+  }
+
+  func @msqnorm_2d(%ik: index, %x: memref<{{k}}x{{d}}x{{d}}xf64>) -> f64 {
+    %zero = arith.constant 0.0 : f64
+    %out = memref.alloc() : memref<f64>
+    memref.store %zero, %out[] : memref<f64>
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %cd = arith.constant {{d}} : index
+    scf.for %iv = %c0 to %cd step %c1 {
+      scf.for %jv = %c0 to %cd step %c1 {
+        %0 = memref.load %x[%ik, %iv, %jv] : memref<{{k}}x{{d}}x{{d}}xf64>
+        %1 = memref.load %out[] : memref<f64>
+        %2 = arith.mulf %0, %0 : f64
+        %3 = arith.addf %1, %2 : f64
+        memref.store %3, %out[] : memref<f64>
+      }
+    }
+
     %val = memref.load %out[] : memref<f64>
     memref.dealloc %out : memref<f64>
     return %val : f64
@@ -124,12 +145,8 @@ module  {
     %zero = arith.constant 0.0 : f64
 
     %val = scf.for %ik = %c0 to %ck step %step iter_args(%out_iter = %zero) -> (f64) {
-      %Qdiags_slice = memref.subview %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : memref<{{k}}x{{d}}xf64> to memref<{{d}}xf64, #dslice>
-      %Qslice_casted = memref.cast %Qdiags_slice : memref<{{d}}xf64, #dslice> to memref<?xf64, #dslice>
-      %frobenius_0 = call @msqnorm(%Qslice_casted) : (memref<?xf64, #dslice>) -> f64
-      %Ltri_slice = memref.subview %Ltri[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : memref<{{k}}x{{d}}x{{d}}xf64> to memref<{{d}}x{{d}}xf64, #dslice2d>
-      %Lslice_casted = memref.cast %Ltri_slice : memref<{{d}}x{{d}}xf64, #dslice2d> to memref<?x?xf64, #dslice2d>
-      %frobenius_1 = call @msqnorm_2d(%Lslice_casted) : (memref<?x?xf64, #dslice2d>) -> f64
+      %frobenius_0 = call @msqnormk(%ik, %Qdiags) : (index, memref<{{k}}x{{d}}xf64>) -> f64
+      %frobenius_1 = call @msqnorm_2d(%ik, %Ltri) : (index, memref<{{k}}x{{d}}x{{d}}xf64>) -> f64
       %frobenius = arith.addf %frobenius_0, %frobenius_1 : f64
 
       %out_0 = arith.mulf %wishart_gamma, %wishart_gamma : f64
@@ -183,24 +200,21 @@ module  {
     %c2 = arith.constant 2 : index
     %cn = arith.constant {{n}} : index
     %ck = arith.constant {{k}} : index
+    %cd = arith.constant {{d}} : index
     %slse = scf.for %ix = %c0 to %cn step %c1 iter_args(%slse_iv = %zero) -> f64 {
       scf.for %ik = %c0 to %ck step %c1 {
-        %p0 = arith.cmpi "eq", %ix, %c0 : index
-        %p1 = arith.cmpi "eq", %ik, %c1 : index
-        %p = arith.andi %p0, %p1 : i1
+        // %p0 = arith.cmpi "eq", %ix, %c0 : index
+        // %p1 = arith.cmpi "eq", %ik, %c1 : index
+        // %p = arith.andi %p0, %p1 : i1
+        scf.for %iv = %c0 to %cd step %c1 {
+          %0 = memref.load %x[%ix, %iv] : memref<{{n}}x{{d}}xf64>
+          %1 = memref.load %means[%ik, %iv] : memref<{{k}}x{{d}}xf64>
+          %2 = arith.subf %0, %1 : f64
+          memref.store %2, %xcentered[%iv] : memref<{{d}}xf64>
+        }
+        call @mQtimesx(%ik, %Qdiags, %Ls, %xcentered, %Qxcentered) : (index, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}x{{d}}xf64>, memref<{{d}}xf64>, memref<{{d}}xf64>) -> ()
 
-        %x_slice = memref.subview %x[%ix, 0] [1, {{d}}] [1, 1] : memref<{{n}}x{{d}}xf64> to memref<{{d}}xf64, #dslice>
-
-        %means_slice = memref.subview %means[%ik, 0] [1, {{d}}] [1, 1] : memref<{{k}}x{{d}}xf64> to memref<{{d}}xf64, #dslice>
-        call @msubtract(%x_slice, %means_slice, %xcentered) : (memref<{{d}}xf64, #dslice>, memref<{{d}}xf64, #dslice>, memref<{{d}}xf64>) -> ()
-
-        %Qdiags_slice = memref.subview %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : memref<{{k}}x{{d}}xf64> to memref<{{d}}xf64, #dslice>
-        %Ltri_slice = memref.subview %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : memref<{{k}}x{{d}}x{{d}}xf64> to memref<{{d}}x{{d}}xf64, #dslice2d>
-        call @mQtimesx(%Qdiags_slice, %Ltri_slice, %xcentered, %Qxcentered) : (memref<{{d}}xf64, #dslice>, memref<{{d}}x{{d}}xf64, #dslice2d>, memref<{{d}}xf64>, memref<{{d}}xf64>) -> ()
-
-        %Qxslice = memref.subview %Qxcentered [0] [{{d}}] [1] : memref<{{d}}xf64> to memref<{{d}}xf64, #dslice>
-        %Qxunknown = memref.cast %Qxslice : memref<{{d}}xf64, #dslice> to memref<?xf64, #dslice>
-        %msqnorm = call @msqnorm(%Qxunknown) : (memref<?xf64, #dslice>) -> f64
+        %msqnorm = call @msqnorm(%Qxcentered) : (memref<{{d}}xf64>) -> f64
         %hmsqnorm = arith.mulf %msqnorm, %half : f64
         %a_ik = memref.load %alphas[%ik] : memref<{{k}}xf64>
         %q_ik = memref.load %sum_qs[%ik] : memref<{{k}}xf64>
