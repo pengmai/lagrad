@@ -101,14 +101,19 @@ private:
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
     auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
     auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
+    auto gradSignalAttr =
+        gradOp->getAttr("grad_signal").dyn_cast_or_null<BoolAttr>();
+    auto customGradSignal = gradSignalAttr && gradSignalAttr.getValue();
 
     std::string adjointFuncName("__grad_");
     adjointFuncName += originalFuncOp.getName();
 
+    // If we received request for a custom gradient signal, this is equivalent
+    // to taking in the gradient signal as a parameter.
     FuncOp funcOp =
         copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
     return differentiateFunction(funcOp, gradientsOf, rewriter,
-                                 /*topLevel=*/true);
+                                 /*topLevel=*/!customGradSignal);
   }
 };
 } // end anonymous namespace
