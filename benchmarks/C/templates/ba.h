@@ -1,5 +1,6 @@
 #pragma once
 #include "mlir_c_abi.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -218,14 +219,66 @@ BAInput read_ba_data() {
   return ba_input;
 }
 
-void read_ba_results(int *rows, int *cols, double *vals) {
+void read_ba_results(BASparseMat *mat) {
+  int p = mat->p;
+  int nrows = 2 * p + p;
+  int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
+  int row_size = nrows + 1;
+
   FILE *fp = fopen(RESULTS_FILE, "r");
   if (fp == NULL) {
     fprintf(stderr, "Failed to open file \"%s\"\n", RESULTS_FILE);
     exit(EXIT_FAILURE);
   }
 
+  for (size_t i = 0; i < row_size; i++) {
+    fscanf(fp, "%d", &mat->rows[i]);
+  }
+  mat->row_end = row_size;
+
+  for (size_t i = 0; i < nnonzero; i++) {
+    fscanf(fp, "%d", &mat->cols[i]);
+  }
+  mat->col_end = nnonzero;
+
+  for (size_t i = 0; i < nnonzero; i++) {
+    fscanf(fp, "%lf", &mat->vals[i]);
+  }
+  mat->val_end = nnonzero;
+
   fclose(fp);
+}
+
+void verify_ba_results(BASparseMat *ref, BASparseMat *actual, const char *app) {
+  int p = actual->p;
+  int nrows = 2 * p + p;
+  int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
+  int row_size = nrows + 1;
+
+  for (size_t i = 0; i < row_size; i++) {
+    if (ref->rows[i] != actual->rows[i]) {
+      printf("(%s) Incorrect row val at index %lu: %d\n", app, i,
+             actual->rows[i]);
+    }
+  }
+
+  for (size_t i = 0; i < nnonzero; i++) {
+    if (ref->cols[i] != actual->cols[i]) {
+      printf("(%s) Incorrect col val at index %lu: %d\n", app, i,
+             actual->cols[i]);
+    }
+  }
+
+  double max_err = 0.0;
+  for (size_t i = 0; i < nnonzero; i++) {
+    double err = fabs(ref->vals[i] - actual->vals[i]);
+    if (err > max_err) {
+      max_err = err;
+    }
+  }
+  if (max_err > 1e-6) {
+    printf("(%s) Vals max err: %f\n", app, max_err);
+  }
 }
 
 void serialize_sparse_mat(const char *ffile, BASparseMat *mat) {

@@ -29,7 +29,9 @@ def main(args):
         "x0_idx": 7,
         "rad_idx": 9,
     }
+    # mlir_template = mlir_env.get_template("ba_rrp_differentiated.mlir")
     mlir_template = mlir_env.get_template("ba.mlir")
+    enzyme_template = c_env.get_template("enzyme_ba.c")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
     if args.print:
@@ -37,10 +39,11 @@ def main(args):
         return
 
     compile_mlir(mlir_template.render(**config).encode("utf-8"), "ba_mlir.o")
+    compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "enzyme_ba.o")
     compile_c(driver_template.render(**config).encode("utf-8"), "ba_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
     output = link_and_run(
-        ["ba_mlir.o", "ba_driver.o", "mlir_c_abi.o"],
+        ["ba_mlir.o", "enzyme_ba.o", "ba_driver.o", "mlir_c_abi.o"],
         "ba_driver.out",
         link_runner_utils=True,
     )

@@ -1,7 +1,7 @@
 #include "ba.h"
 #include "mlir_c_abi.h"
 
-#define NUM_RUNS 15
+#define NUM_RUNS 10
 
 double *deadbeef = (double *)0xdeadbeef;
 
@@ -164,43 +164,53 @@ void lagrad_calculate_w_jacobian(BAInput input, BASparseMat *J) {
   }
 }
 
-void enzyme_compute_jacobian(BAInput input) {
-  BASparseMat mat = initBASparseMat(input.n, input.m, input.p);
-  enzyme_calculate_reproj_jacobian(input, &mat);
-  enzyme_calculate_w_jacobian(input, &mat);
-  // serialize_sparse_mat("benchmarks/basparsemat_enzyme.txt", &mat);
-  freeBASparseMat(&mat);
+typedef unsigned long (*bodyFunc)(BAInput input, BASparseMat *mat,
+                                  BASparseMat *ref);
+
+unsigned long enzyme_compute_jacobian(BAInput input, BASparseMat *mat,
+                                      BASparseMat *ref) {
+  struct timeval start, stop;
+  clearBASparseMat(mat);
+  gettimeofday(&start, NULL);
+  enzyme_calculate_reproj_jacobian(input, mat);
+  enzyme_calculate_w_jacobian(input, mat);
+  gettimeofday(&stop, NULL);
+  verify_ba_results(ref, mat, "Enzyme C");
+  return timediff(start, stop);
 }
 
-void lagrad_compute_jacobian(BAInput input) {
-  BASparseMat mat = initBASparseMat(input.n, input.m, input.p);
-  lagrad_calculate_reproj_jacobian(input, &mat);
-  lagrad_calculate_w_jacobian(input, &mat);
-  // serialize_sparse_mat("benchmarks/basparsemat_lagrad.txt", &mat);
-  freeBASparseMat(&mat);
+unsigned long lagrad_compute_jacobian(BAInput input, BASparseMat *mat,
+                                      BASparseMat *ref) {
+  struct timeval start, stop;
+  clearBASparseMat(mat);
+  gettimeofday(&start, NULL);
+  lagrad_calculate_reproj_jacobian(input, mat);
+  lagrad_calculate_w_jacobian(input, mat);
+  gettimeofday(&stop, NULL);
+  verify_ba_results(ref, mat, "LAGrad");
+  return timediff(start, stop);
 }
 
 int main() {
   BAInput ba_input = read_ba_data();
-  // int n = ba_input.n, m = ba_input.m, p = ba_input.p;
-  printf("Enzyme: ");
-  for (size_t run = 0; run < NUM_RUNS; run++) {
-    struct timeval start, stop;
-    gettimeofday(&start, NULL);
-    enzyme_compute_jacobian(ba_input);
-    gettimeofday(&stop, NULL);
-    printf("%lu ", timediff(start, stop));
-  }
-  printf("\nLAGrad: ");
-  for (size_t run = 0; run < NUM_RUNS; run++) {
-    struct timeval start, stop;
-    gettimeofday(&start, NULL);
-    lagrad_compute_jacobian(ba_input);
-    gettimeofday(&stop, NULL);
-    printf("%lu ", timediff(start, stop));
-  }
-  printf("\n");
+  int n = ba_input.n, m = ba_input.m, p = ba_input.p;
+  BASparseMat mat = initBASparseMat(n, m, p);
+  BASparseMat ref = initBASparseMat(n, m, p);
+  read_ba_results(&ref);
 
-  // enzyme_compute_jacobian(ba_input);
-  // lagrad_compute_jacobian(ba_input);
+  bodyFunc funcs[] = {enzyme_compute_jacobian, lagrad_compute_jacobian};
+  size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
+  unsigned long *results_df =
+      (unsigned long *)malloc(num_apps * NUM_RUNS * sizeof(unsigned long));
+
+  for (size_t app = 0; app < num_apps; app++) {
+    for (size_t run = 0; run < NUM_RUNS; run++) {
+      results_df[app * NUM_RUNS + run] = (*funcs[app])(ba_input, &mat, &ref);
+    }
+    print_ul_arr(results_df + app * NUM_RUNS, NUM_RUNS);
+  }
+  free_ba_data(ba_input);
+  freeBASparseMat(&mat);
+  freeBASparseMat(&ref);
+  free(results_df);
 }
