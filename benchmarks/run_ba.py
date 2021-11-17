@@ -1,4 +1,6 @@
 import argparse
+import pandas as pd
+import json
 from compile import (
     jit_mlir,
     compile_c,
@@ -29,8 +31,8 @@ def main(args):
         "x0_idx": 7,
         "rad_idx": 9,
     }
-    # mlir_template = mlir_env.get_template("ba_rrp_differentiated.mlir")
     mlir_template = mlir_env.get_template("ba.mlir")
+    # mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
     enzyme_template = c_env.get_template("enzyme_ba.c")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
@@ -42,12 +44,37 @@ def main(args):
     compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "enzyme_ba.o")
     compile_c(driver_template.render(**config).encode("utf-8"), "ba_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
-    output = link_and_run(
+    stdout = link_and_run(
         ["ba_mlir.o", "enzyme_ba.o", "ba_driver.o", "mlir_c_abi.o"],
         "ba_driver.out",
         link_runner_utils=True,
-    )
-    print(output.decode("utf-8"))
+    ).decode("utf-8")
+    # print(stdout)
+    outfile = None
+    try:
+        lines = stdout.splitlines()
+        keys = [
+            "lagrad_jacobian",
+            "enzyme_jacobian",
+        ]
+        assert len(keys) == len(
+            lines
+        ), f"expected # of apps to match {len(keys)} vs {len(lines)}"
+        results = pd.DataFrame.from_dict(
+            {key: json.loads(line) for key, line in zip(keys, lines)}
+        )
+        print(results[3:].mean())
+
+        # TODO: Meant to serialize the output results to a file.
+        # if outfile:
+        #     serialized_config = config.copy()
+        #     # results_dict = {"config": serialized_config, "results": results.to_dict()}
+        #     # with open(outfile, "w") as f:
+        #     #     json.dump(results_dict, f)
+        return results
+    except (json.JSONDecodeError, Exception):
+        print("Failed to parse output")
+        print(stdout)
 
 
 if __name__ == "__main__":

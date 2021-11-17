@@ -1,7 +1,7 @@
 #include "ba.h"
 #include "mlir_c_abi.h"
 
-#define NUM_RUNS 10
+#define NUM_RUNS 50
 
 double *deadbeef = (double *)0xdeadbeef;
 
@@ -198,16 +198,16 @@ int main() {
   BASparseMat ref = initBASparseMat(n, m, p);
   read_ba_results(&ref);
 
-  bodyFunc funcs[] = {enzyme_compute_jacobian, lagrad_compute_jacobian};
+  bodyFunc funcs[] = {lagrad_compute_jacobian, enzyme_compute_jacobian};
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
   unsigned long *results_df =
-      (unsigned long *)malloc(num_apps * NUM_RUNS * sizeof(unsigned long));
+      (unsigned long *)malloc(NUM_RUNS * sizeof(unsigned long));
 
   for (size_t app = 0; app < num_apps; app++) {
     for (size_t run = 0; run < NUM_RUNS; run++) {
-      results_df[app * NUM_RUNS + run] = (*funcs[app])(ba_input, &mat, &ref);
+      results_df[run] = (*funcs[app])(ba_input, &mat, &ref);
     }
-    print_ul_arr(results_df + app * NUM_RUNS, NUM_RUNS);
+    print_ul_arr(results_df, NUM_RUNS);
   }
   free_ba_data(ba_input);
   freeBASparseMat(&mat);

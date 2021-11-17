@@ -48,6 +48,9 @@ BUFFERIZE = [
     "-scf-bufferize",
     "-func-bufferize",
     "-finalizing-bufferize",
+    "-buffer-hoisting",
+    "-buffer-loop-hoisting",
+    "-promote-buffers-to-stack",
     "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
@@ -205,7 +208,15 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
         suppress_stderr=True,
     )
     postenzyme = run_safe(
-        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=llvm_ir
+        [
+            OPT_12,
+            "-S",
+            "-load",
+            ENZYME_DYLIB,
+            "-enzyme",
+            "-O3",
+        ],
+        stdin=llvm_ir,
     )
 
     if emit == "llvm":
@@ -243,6 +254,8 @@ def compile_enzyme(contents, output, emit="object"):
     postenzyme = run_safe(
         [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
     )
+    with open("DELETEME_ba_postenzyme.ll", "w") as f:
+        f.write(postenzyme.decode("utf-8"))
     if emit == "object":
         run_safe([LLC_12, "-filetype=obj", "-o", f"{TMP}/{output}"], stdin=postenzyme)
     elif emit == "llvm":

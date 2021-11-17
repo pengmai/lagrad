@@ -12,13 +12,15 @@ double sqsum(int n, double const *x) {
   return res;
 }
 
-double ecross(double *a, double *b, double *out) {
+double ecross(double const *a, double const *b, double *out) {
   out[0] = a[1] * b[2] - a[2] * b[1];
   out[1] = a[2] * b[0] - a[0] * b[2];
   out[2] = a[0] * b[1] - a[1] * b[0];
 }
 
-void erodrigues_rotate_point(double *rot, double *pt, double *rotatedPt) {
+void erodrigues_rotate_point(double const *__restrict rot,
+                             double const *__restrict pt,
+                             double *__restrict rotatedPt) {
   int i;
   double sqtheta = sqsum(3, rot);
   if (sqtheta != 0) {
@@ -59,7 +61,8 @@ void eradial_distort(double const *rad_params, double *proj) {
   proj[1] = proj[1] * L;
 }
 
-void eproject(double *cam, double *X, double *proj) {
+void eproject(double const *__restrict cam, double const *__restrict X,
+              double *__restrict proj) {
   double const *C = &cam[3];
   double Xo[3], Xcam[3];
 
@@ -84,8 +87,11 @@ extern int enzyme_dupnoneed;
 extern int enzyme_out;
 extern void __enzyme_autodiff(void *, ...);
 
-void ecompute_reproj_error(double *cam, double *X, double *w, double *feat,
-                           double *err) {
+void ecompute_reproj_error(double const *__restrict cam,
+                           double const *__restrict X,
+                           double const *__restrict w,
+                           double const *__restrict feat,
+                           double *__restrict err) {
   double proj[2];
   eproject(cam, X, proj);
 
@@ -97,15 +103,17 @@ void ecompute_zach_weight_error(double const *w, double *err) {
   *err = 1 - (*w) * (*w);
 }
 
-void enzyme_compute_reproj_error(double *cam, double *dcam, double *X,
-                                 double *dX, double *w, double *wb,
-                                 double *feat, double *err, double *derr) {
+void enzyme_compute_reproj_error(double const *cam, double *dcam,
+                                 double const *X, double *dX, double const *w,
+                                 double *wb, double const *feat, double *err,
+                                 double *derr) {
   __enzyme_autodiff(ecompute_reproj_error, enzyme_dup, cam, dcam, enzyme_dup, X,
                     dX, enzyme_dup, w, wb, enzyme_const, feat, enzyme_dupnoneed,
                     err, derr);
 }
 
-void enzyme_compute_w_error(double *w, double *wb, double *err, double *derr) {
+void enzyme_compute_w_error(double const *w, double *wb, double *err,
+                            double *derr) {
   __enzyme_autodiff(ecompute_zach_weight_error, enzyme_dup, w, wb,
                     enzyme_dupnoneed, err, derr);
 }
