@@ -1,7 +1,7 @@
 #map_1d_id = affine_map<(d0) -> (d0)>
 
 func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
-  %out = arith.constant dense<0.0> : tensor<3xf64>
+  %out = linalg.init_tensor [3] : tensor<3xf64>
   %res = linalg.generic
     {
       indexing_maps = [
@@ -204,19 +204,50 @@ func @project(%cam: tensor<{{nCamParams}}xf64>, %X: tensor<3xf64>) -> tensor<2xf
   return %res : tensor<2xf64>
 }
 
-func @grad_project(%cam: tensor<{{nCamParams}}xf64>, %X: tensor<3xf64>) -> tensor<{{nCamParams}}xf64> {
-  %f = constant @project : (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<2xf64>
-  %df = standalone.grad %f : (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<2xf64>, (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<{{nCamParams}}xf64>
-  %res = call_indirect %df(%cam, %X) : (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<{{nCamParams}}xf64>
-  return %res : tensor<{{nCamParams}}xf64>
+func @mlir_compute_reproj_error(
+  %cam: tensor<{{nCamParams}}xf64>,
+  %X: tensor<3xf64>,
+  %w: f64,
+  %feat: tensor<2xf64>
+) -> tensor<2xf64> {
+  %cst = arith.constant dense<0.0> : tensor<2xf64>
+  %proj = call @project(%cam, %X) : (tensor<{{nCamParams}}xf64>, tensor<3xf64>) -> tensor<2xf64>
+
+  %err = linalg.generic
+    {indexing_maps = [#map_1d_id, #map_1d_id, #map_1d_id], iterator_types = ["parallel"]}
+    ins(%proj, %feat : tensor<2xf64>, tensor<2xf64>)
+    outs(%cst : tensor<2xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.subf %arg0, %arg1 : f64
+    %1 = arith.mulf %w, %0 : f64
+    linalg.yield %1 : f64
+  } -> tensor<2xf64>
+  return %err : tensor<2xf64>
 }
 
-// func @mlir_compute_reproj_error(
-//   %cam: tensor<{{n}}x{{nCamParams}}xf64>,
-//   %X: tensor<{{m}}x3xf64>,
-//   %w: tensor<{{p}}xf64>,
-//   %feat: tensor<{{p}}x2xf64>
-// ) -> tensor<2xf64> {
-//   %cst = arith.constant dense<2.1> : tensor<2xf64>
-//   return %cst : tensor<2xf64>
-// }
+func @mlir_compute_zach_weight_error(%w: f64) -> f64 {
+  %one = arith.constant 1.0 : f64
+  %0 = arith.mulf %w, %w : f64
+  %1 = arith.subf %one, %0 : f64
+  return %1 : f64
+}
+
+func @lagrad_compute_reproj_error(
+  %cam: tensor<{{nCamParams}}xf64>,
+  %X: tensor<3xf64>,
+  %w: f64,
+  %feat: tensor<2xf64>,
+  %g: tensor<2xf64>
+) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64) {
+  %f = constant @mlir_compute_reproj_error : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>
+  %df = standalone.grad %f {of = [0, 1, 2], grad_signal = true} : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>, (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64)
+  %res:3 = call_indirect %df(%cam, %X, %w, %feat, %g) : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64)
+  return %res#0, %res#1, %res#2 : tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64
+}
+
+func @lagrad_compute_w_error(%w: f64) -> f64 {
+  %f = constant @mlir_compute_zach_weight_error : (f64) -> f64
+  %df = standalone.grad %f {of = [0]} : (f64) -> f64, (f64) -> f64
+  %res = call_indirect %df(%w) : (f64) -> f64
+  return %res : f64
+}

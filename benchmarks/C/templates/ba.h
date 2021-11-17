@@ -1,15 +1,160 @@
 #pragma once
+#include "mlir_c_abi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define BA_DATA_FILE "benchmarks/data/ba1_n49_m7776_p31843.txt"
+#define RESULTS_FILE "benchmarks/results/basparsemat.txt"
+#define BA_NCAMPARAMS 11
 
 typedef struct _BAInput {
   int n, m, p;
   double *cams, *X, *w, *feats;
   int *obs;
 } BAInput;
+
+typedef struct _BAGrad {
+  F64Descriptor1D dcam;
+  F64Descriptor1D dX;
+  double dw;
+} BAGrad;
+
+typedef struct _BASparseMat {
+  int n, m, p;
+  int nrows, ncols;
+  int row_end, col_end, val_end;
+  int *rows;
+  int *cols;
+  double *vals;
+} BASparseMat;
+
+void insert_reproj_err_block(BASparseMat *mat, int obsIdx, int camIdx,
+                             int ptIdx, const double *J) {
+  int n_new_cols = BA_NCAMPARAMS + 3 + 1;
+  mat->rows[mat->row_end] = mat->rows[mat->row_end - 1] + n_new_cols;
+  mat->row_end++;
+  mat->rows[mat->row_end] = mat->rows[mat->row_end - 1] + n_new_cols;
+  mat->row_end++;
+
+  for (int i_row = 0; i_row < 2; i_row++) {
+    for (int i = 0; i < BA_NCAMPARAMS; i++) {
+      mat->cols[mat->col_end] = BA_NCAMPARAMS * camIdx + i;
+      mat->col_end++;
+      mat->vals[mat->val_end] = J[2 * i + i_row];
+      mat->val_end++;
+    }
+    int col_offset = BA_NCAMPARAMS * mat->n;
+    int val_offset = BA_NCAMPARAMS * 2;
+    for (int i = 0; i < 3; i++) {
+      mat->cols[mat->col_end] = col_offset + 3 * ptIdx + i;
+      mat->col_end++;
+      mat->vals[mat->val_end] = J[val_offset + 2 * i + i_row];
+      mat->val_end++;
+    }
+    col_offset += 3 * mat->m;
+    val_offset += 3 * 2;
+    mat->cols[mat->col_end] = col_offset + obsIdx;
+    mat->col_end++;
+    mat->vals[mat->val_end] = J[val_offset + i_row];
+    mat->val_end++;
+  }
+}
+
+void insert_w_err_block(BASparseMat *mat, int wIdx, double w_d) {
+  mat->rows[mat->row_end] = mat->rows[mat->row_end - 1] + 1;
+  mat->row_end++;
+  mat->cols[mat->col_end] = BA_NCAMPARAMS * mat->n + 3 * mat->m + wIdx;
+  mat->col_end++;
+  mat->vals[mat->val_end] = w_d;
+  mat->val_end++;
+}
+
+BASparseMat initBASparseMat(int n, int m, int p) {
+  int nrows = 2 * p + p;
+  int ncols = BA_NCAMPARAMS * n + 3 * m + p;
+  int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
+  int *rows = (int *)malloc((nrows + 1) * sizeof(int));
+  rows[0] = 0;
+  int *cols = (int *)malloc(nnonzero * sizeof(int));
+  double *vals = (double *)malloc(nnonzero * sizeof(double));
+  BASparseMat mat = {.n = n,
+                     .m = m,
+                     .p = p,
+                     .nrows = nrows,
+                     .ncols = ncols,
+                     .row_end = 1,
+                     .col_end = 0,
+                     .val_end = 0,
+                     .rows = rows,
+                     .cols = cols,
+                     .vals = vals};
+  return mat;
+}
+
+void freeBASparseMat(BASparseMat *mat) {
+  free(mat->rows);
+  free(mat->cols);
+  free(mat->vals);
+}
+
+void clearBASparseMat(BASparseMat *mat) {
+  mat->rows[0] = 0;
+  mat->row_end = 1;
+  mat->col_end = 0;
+  mat->val_end = 0;
+}
+
+// BASparseMat::BASparseMat(int n_, int m_, int p_) : n(n_), m(m_), p(p_) {
+//   nrows = 2 * p + p;
+//   ncols = BA_NCAMPARAMS * n + 3 * m + p;
+//   rows.reserve(nrows + 1);
+//   int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
+//   cols.reserve(nnonzero);
+//   vals.reserve(nnonzero);
+//   rows.push_back(0);
+// }
+
+// void BASparseMat::insert_reproj_err_block(int obsIdx, int camIdx, int ptIdx,
+//                                           const double *const J) {
+//   int n_new_cols = BA_NCAMPARAMS + 3 + 1;
+//   rows.push_back(rows.back() + n_new_cols);
+//   rows.push_back(rows.back() + n_new_cols);
+
+//   for (int i_row = 0; i_row < 2; i_row++) {
+//     for (int i = 0; i < BA_NCAMPARAMS; i++) {
+//       cols.push_back(BA_NCAMPARAMS * camIdx + i);
+//       vals.push_back(J[2 * i + i_row]);
+//     }
+//     int col_offset = BA_NCAMPARAMS * n;
+//     int val_offset = BA_NCAMPARAMS * 2;
+//     for (int i = 0; i < 3; i++) {
+//       cols.push_back(col_offset + 3 * ptIdx + i);
+//       vals.push_back(J[val_offset + 2 * i + i_row]);
+//     }
+//     col_offset += 3 * m;
+//     val_offset += 3 * 2;
+//     cols.push_back(col_offset + obsIdx);
+//     vals.push_back(J[val_offset + i_row]);
+//   }
+// }
+
+// void BASparseMat::insert_w_err_block(int wIdx, double w_d) {
+//   rows.push_back(rows.back() + 1);
+//   cols.push_back(BA_NCAMPARAMS * n + 3 * m + wIdx);
+//   vals.push_back(w_d);
+// }
+
+// void BASparseMat::clear() {
+//   rows.clear();
+//   cols.clear();
+//   vals.clear();
+//   rows.reserve(nrows + 1);
+//   int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
+//   cols.reserve(nnonzero);
+//   vals.reserve(nnonzero);
+//   rows.push_back(0);
+// }
 
 BAInput read_ba_data() {
   FILE *fp = fopen(BA_DATA_FILE, "r");
@@ -71,6 +216,51 @@ BAInput read_ba_data() {
                       .obs = obs};
   fclose(fp);
   return ba_input;
+}
+
+void read_ba_results(int *rows, int *cols, double *vals) {
+  FILE *fp = fopen(RESULTS_FILE, "r");
+  if (fp == NULL) {
+    fprintf(stderr, "Failed to open file \"%s\"\n", RESULTS_FILE);
+    exit(EXIT_FAILURE);
+  }
+
+  fclose(fp);
+}
+
+void serialize_sparse_mat(const char *ffile, BASparseMat *mat) {
+  FILE *fp;
+  fp = fopen(ffile, "w");
+  if (fp == NULL) {
+    fprintf(stderr, "Failed to open file \"%s\"\n", ffile);
+    exit(EXIT_FAILURE);
+  }
+
+  for (size_t i = 0; i < mat->row_end; i++) {
+    fprintf(fp, "%d", mat->rows[i]);
+    if (i != mat->row_end - 1) {
+      fprintf(fp, " ");
+    }
+  }
+  fprintf(fp, "\n");
+
+  for (size_t i = 0; i < mat->col_end; i++) {
+    fprintf(fp, "%d", mat->cols[i]);
+    if (i != mat->col_end - 1) {
+      fprintf(fp, " ");
+    }
+  }
+  fprintf(fp, "\n");
+
+  for (size_t i = 0; i < mat->val_end; i++) {
+    fprintf(fp, "%lf", mat->vals[i]);
+    if (i != mat->val_end - 1) {
+      fprintf(fp, " ");
+    }
+  }
+  fprintf(fp, "\n");
+
+  fclose(fp);
 }
 
 void free_ba_data(BAInput ba_input) {
