@@ -38,9 +38,25 @@ public:
 } // namespace
 
 namespace {
+class BufferizeExtractSliceOp
+    : public OpConversionPattern<tensor::ExtractSliceOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(tensor::ExtractSliceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    llvm::outs() << "Running transformation\n";
+    return failure();
+  }
+};
+} // namespace
+
+namespace {
 struct StandaloneBufferizePass
     : public PassWrapper<StandaloneBufferizePass, OperationPass<ModuleOp>> {
-  void getDependentDialects(DialectRegistry &registry) const override {}
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<memref::MemRefDialect>();
+  }
   StringRef getArgument() const override { return "standalone-bufferize"; }
   StringRef getDescription() const override {
     return "Bufferize tensor ops required by the standalone dialect that "
@@ -52,7 +68,6 @@ struct StandaloneBufferizePass
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
 
-    patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
     target.addLegalDialect<memref::MemRefDialect>();
     target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
                                       StandardOpsDialect>(
@@ -61,6 +76,10 @@ struct StandaloneBufferizePass
     target.addLegalOp<ReturnOp>();
     target.addIllegalOp<tensor::InsertOp>();
     target.addLegalDialect<scf::SCFDialect>();
+    populateBufferizeMaterializationLegality(target);
+
+    patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
+    patterns.add<BufferizeExtractSliceOp>(typeConverter, patterns.getContext());
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns)))) {
 
