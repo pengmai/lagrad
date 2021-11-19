@@ -91,6 +91,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
 
   // env maps values to their gradient signals. x -> x_bar
   llvm::DenseMap<Value, Value> env;
+  llvm::SmallDenseSet<Value> active;
 
   PatternRewriter::InsertionGuard insertGuard(rewriter);
   for (auto it = ops.rbegin(); it != ops.rend(); it++) {
@@ -98,7 +99,10 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
     auto opName = op->getName().getStringRef();
     if (opName == "std.return") {
       // This is the exit point
+      runActivityAnalysis(op, funcOp.getArguments(), active);
       rewriter.setInsertionPoint(op);
+      assert(op->getNumOperands() == 1 &&
+             "Expected function to return 1 value");
       Value operand = op->getOperand(0);
       // Initialize the gradient signal to 1.0
       if (topLevel) {
@@ -140,6 +144,10 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
     } else {
       size_t op_index = 0;
       if (op->getNumResults() == 0) {
+        continue;
+      }
+
+      if (!active.contains(op->getResult(0))) {
         continue;
       }
 
@@ -186,6 +194,22 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
           assert(op->getNumResults() == 1 &&
                  "math.exp op did not have exactly 1 result");
           vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
+                                                     op->getResult(0));
+        } else if (opName == "math.sin") {
+          auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
+          vjp_value =
+              rewriter.create<arith::MulFOp>(op->getLoc(), cos, vjp_value);
+        } else if (opName == "math.cos") {
+          auto sin = rewriter.create<math::SinOp>(op->getLoc(), operand);
+          vjp_value =
+              rewriter.create<arith::MulFOp>(op->getLoc(), sin, vjp_value);
+          vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
+        } else if (opName == "math.sqrt") {
+          auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
+          vjp_value =
+              rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value, half);
+          // This is a bit of a math trick. Note the result is sqrt(operand)
+          vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                      op->getResult(0));
         } else if (opName == "math.log") {
           vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
@@ -545,6 +569,19 @@ void collectFreeVars(Block *parentBlock, Region &region,
           (std::find(out.begin(), out.end(), operand) == out.end())) {
         out.push_back(operand);
       }
+    }
+  });
+}
+
+// This is definitely a bandaid behind an explosion of complexity in the
+// autodiff method.
+void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter) {
+  moduleOp.walk([&](CallOp callOp) {
+    if (callOp.calleeAttr().getValue().startswith("__grad") &&
+        callOp.use_empty()) {
+      // rewriter.eraseOp(callOp);
+      // llvm::outs() << "saw callOp " << callOp.calleeAttr().getValue()
+      //              << " with " << callOp.use_empty() << " uses\n";
     }
   });
 }

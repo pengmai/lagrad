@@ -5,12 +5,19 @@
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
+void runActivityAnalysis(Operation *op, ValueRange args,
+                         llvm::SmallDenseSet<Value> &liveset);
+
 Value onesLike(Location loc, Value operand, OpBuilder &builder);
+
+Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 
 Value getZero(Location loc, Value operand, OpBuilder &rewriter);
 
 void collectFreeVars(Block *parentBlock, Region &region,
                      SmallVector<Value> &out);
+
+void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter);
 
 void populateVJP(Operation *op, ModuleOp moduleOp, DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter);

@@ -9,6 +9,7 @@ add_mlir_dialect_library(MLIRStandalone
         ElementwiseToAffine.cpp
         TriangularLoops.cpp
         StaticAllocs.cpp
+        ActivityAnalysis.cpp
         Utils.cpp
 
         ADDITIONAL_HEADER_DIRS

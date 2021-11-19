@@ -22,17 +22,17 @@ c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 def main(args):
     config = {
         "nCamParams": 11,
-        "n": 49,
-        "m": 7776,
-        "p": 31843,
+        "n": 1197,
+        "m": 126327,
+        "p": 563734,
         "rot_idx": 0,
         "c_idx": 3,
         "f_idx": 6,
         "x0_idx": 7,
         "rad_idx": 9,
     }
-    mlir_template = mlir_env.get_template("ba.mlir")
-    # mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
+    # mlir_template = mlir_env.get_template("ba.mlir")
+    mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
     enzyme_template = c_env.get_template("enzyme_ba.c")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
@@ -63,7 +63,7 @@ def main(args):
         results = pd.DataFrame.from_dict(
             {key: json.loads(line) for key, line in zip(keys, lines)}
         )
-        print(results[3:].mean())
+        print(results.mean())
 
         # TODO: Meant to serialize the output results to a file.
         # if outfile:

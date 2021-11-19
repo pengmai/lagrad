@@ -1,7 +1,7 @@
 #include "ba.h"
 #include "mlir_c_abi.h"
 
-#define NUM_RUNS 50
+#define NUM_RUNS 5
 
 double *deadbeef = (double *)0xdeadbeef;
 
