@@ -5,6 +5,7 @@ module  {
   memref.global "private" constant @__constant_1000x200x128xf64 : memref<1000x200x128xf64> = dense<0.000000e+00>
   memref.global "private" constant @__constant_1000x200xf64 : memref<1000x200xf64> = dense<0.000000e+00>
   memref.global "private" constant @__constant_1000xf64 : memref<1000xf64> = dense<0.000000e+00>
+  memref.global "private" constant @__constant_max_init : memref<1000xf64> = dense<-1.000000e+09>
   memref.global "private" constant @__constant_200xf64 : memref<200xf64> = dense<0.000000e+00>
   memref.global "private" constant @__constant_xf64_0 : memref<f64> = dense<0.000000e+00>
   memref.global "private" constant @__constant_xf64 : memref<f64> = dense<1.000000e+03>
@@ -12,8 +13,8 @@ module  {
   func @__grad_gmm_objective(%arg0: memref<200xf64>, %arg1: memref<200x128xf64>, %arg2: memref<200x128xf64>, %arg3: memref<200x8128xf64>, %arg4: memref<1000x128xf64>, %arg5: f64, %arg6: i64) -> (memref<200xf64>, memref<200x128xf64>, memref<200x128xf64>, memref<200x8128xf64>) {
     %cst = arith.constant 0.000000e+00 : f64
     %cst_0 = arith.constant 5.000000e-01 : f64
-    %c25 = arith.constant 25 : index
-    %c10 = arith.constant 10 : index
+    %c25 = arith.constant 200 : index
+    %c10 = arith.constant 128 : index
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c1000 = arith.constant 1000 : index
@@ -23,6 +24,7 @@ module  {
     %3 = memref.get_global @__constant_1000x200xf64 : memref<1000x200xf64>
     %4 = memref.get_global @__constant_200xf64 : memref<200xf64>
     %5 = memref.get_global @__constant_1000xf64 : memref<1000xf64>
+    %max_init = memref.get_global @__constant_max_init : memref<1000xf64>
     %6 = memref.get_global @__constant_xf64_0 : memref<f64>
     %7 = memref.get_global @__constant_xf64_1 : memref<f64>
     %8 = memref.get_global @__constant_xf64 : memref<f64>
@@ -135,7 +137,7 @@ module  {
     }
     %17 = memref.alloc() : memref<1000xf64>
     scf.for %arg7 = %c0 to %c1000 step %c1 {
-      %69 = memref.load %5[%arg7] : memref<1000xf64>
+      %69 = memref.load %max_init[%arg7] : memref<1000xf64>
       memref.store %69, %17[%arg7] : memref<1000xf64>
     }
     scf.for %arg7 = %c0 to %c1000 step %c1 {
