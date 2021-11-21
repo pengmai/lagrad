@@ -192,10 +192,9 @@ def jit_file(filename: str, debug=False) -> str:
     return jit(contents, debug=debug)
 
 
-def jit(contents: bytes, args=None, debug=False) -> str:
+def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str:
     """
-    Execute the given MLIR file through MLIR's JIT, first generalizing any named
-    linalg ops to linalg.generic.
+    Execute the given MLIR file through MLIR's JIT.
     """
     if debug:
         print(
@@ -208,8 +207,8 @@ def jit(contents: bytes, args=None, debug=False) -> str:
     dialect_ir = run_opt(
         contents,
         args
-        or [
-            "-linalg-generalize-named-ops",
+        or (["-linalg-generalize-named-ops"] if linalg_generalize else [])
+        + [
             "-take-grads",
             "-canonicalize",
             "-convert-elementwise-to-linalg",

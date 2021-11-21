@@ -10,6 +10,10 @@ def test_add3():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/add3.mlir")) == 3.0
 
 
+def test_negf():
+    assert extract_scalar(jit_file(f"{MLIR_FILES}/arith/negf.mlir")) == -1.0
+
+
 def test_quadratic():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/quadratic.mlir")) == 3.4
 
