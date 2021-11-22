@@ -180,5 +180,12 @@ def test_if_different_type():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/ifdifferenttype.mlir")) == 9.96035
 
 
+def test_tensor_scf_for():
+    assert (
+        extract_2d(jit_file(f"{MLIR_FILES}/scf/fortensor.mlir"))
+        == (np.ones((4, 4)) * 4).tolist()
+    )
+
+
 def disabled_test_if_else():
     print("if-else", jit_file(f"{MLIR_FILES}/select.mlir"))

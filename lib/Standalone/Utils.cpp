@@ -7,10 +7,17 @@
 
 namespace mlir {
 using namespace mlir;
+
+bool isFloatOrFloatTensor(Type typ) {
+  return typ.isa<FloatType>() ||
+         (typ.isa<RankedTensorType>() &&
+          typ.dyn_cast<RankedTensorType>().getElementType().isa<FloatType>());
+}
+
 SmallVector<mlir::Operation *>
 cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 OpBuilder &builder, ValueRange regionArgs,
-                SmallVector<Value> bbOperands) {
+                SmallVector<Value> bbOperands, bool offsetInputs = true) {
   SmallVector<mlir::Operation *> newRegionOps;
   DenseMap<Value, Value> old_to_new;
   for (size_t i = 0; i < bbOperands.size(); i++) {
@@ -18,7 +25,7 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
     // in the primal, but the gradient signal is inserted at the end of the
     // adjoint, hence the shift. This is also currently used with more ops than
     // linalg.generic.
-    if (i == bbOperands.size() - 1) {
+    if (offsetInputs && i == bbOperands.size() - 1) {
       old_to_new[bbOperands[i]] = regionArgs[bbOperands.size()];
     } else {
       old_to_new[bbOperands[i]] = regionArgs[i];
@@ -113,12 +120,11 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
       rewriter.eraseOp(op);
     } else if (opName == "arith.cmpf") {
       continue;
-    } else {
-      if (op->getNumResults() != 0 &&
-          llvm::any_of(op->getResults(),
-                       [&](OpResult res) { return active.contains(res); })) {
-        populateVJP(op, moduleOp, env, rewriter);
-      }
+    } else if (op->getNumResults() != 0) {
+      // &&
+      //   llvm::any_of(op->getResults(),
+      //                [&](OpResult res) { return active.contains(res); })) {
+      populateVJP(op, moduleOp, env, rewriter);
     }
   }
 
@@ -179,6 +185,8 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
                          : DenseFPElementsAttr::get(shapedType, {0.0});
     return rewriter.create<arith::ConstantOp>(loc, denseAttr);
   }
+  llvm::outs() << "getZero for type " << operand.getType()
+               << " not yet implemented\n";
   llvm_unreachable("not yet implemented");
   return nullptr;
 }
@@ -204,19 +212,23 @@ Value constLike(Location loc, Value operand, double scalar,
 }
 
 void collectFreeVars(Block *parentBlock, Region &region,
-                     SmallVector<Value> &out) {
-  region.walk([&](Operation *regionOp) {
-    for (auto operand : regionOp->getOperands()) {
+                     llvm::SmallDenseSet<Value> &out) {
+  for (auto &op : region.getOps()) {
+    for (auto operand : op.getOperands()) {
       auto definingOp = operand.getDefiningOp();
       if (dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
         continue;
       }
-      if (operand.getParentBlock() != parentBlock &&
-          (std::find(out.begin(), out.end(), operand) == out.end())) {
-        out.push_back(operand);
+      if (operand.getParentBlock() != parentBlock && !out.contains(operand)) {
+        out.insert(operand);
       }
     }
-  });
+    for (auto &childRegion : op.getRegions()) {
+      for (auto &childBlock : childRegion.getBlocks()) {
+        collectFreeVars(&childBlock, childRegion, out);
+      }
+    }
+  }
 }
 
 // This is definitely a bandaid behind an explosion of complexity in the
@@ -252,7 +264,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     }
 
     // Collect the free variables in the then block of the if op
-    SmallVector<Value> freeOperands;
+    llvm::SmallDenseSet<Value> freeOperands;
     collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion(), freeOperands);
     collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
 
@@ -266,10 +278,47 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       }
     }
     return;
+  } else if (opName == "scf.for") {
+    auto forOp = dyn_cast<scf::ForOp>(op);
+    assert(forOp.getNumResults() > 0 &&
+           "for op with zero results not supported");
+    size_t result_idx = -1;
+    for (size_t idx = 0; idx < forOp.getNumResults(); idx++) {
+      if (isFloatOrFloatTensor(forOp.getResult(idx).getType())) {
+        result_idx = idx;
+        break;
+      }
+    }
+
+    Value result = forOp.getResult(result_idx);
+
+    // Value result = llvm::find_if(forOp.getResults(), [](OpResult res) {
+    //                  return isFloatOrFloatTensor(res.getType());
+    //                }).getBase();
+    auto vjp_value = env[result];
+    assert(vjp_value && "vjp value for scf.for op was not found");
+    llvm::SmallDenseSet<Value> freeOperands;
+    collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
+    for (auto freeOperand : freeOperands) {
+      // llvm::outs() << "found free operand: " << freeOperand << "\n";
+      auto dFreeOperand =
+          reverseForOp(forOp, freeOperand, vjp_value, result_idx, rewriter);
+      if (!env[freeOperand]) {
+        env[freeOperand] = dFreeOperand;
+      } else {
+        env[freeOperand] = rewriter.create<arith::AddFOp>(
+            freeOperand.getLoc(), env[freeOperand], dFreeOperand);
+      }
+    }
+    return;
   }
 
   size_t op_index = 0;
   for (Value operand : op->getOperands()) {
+    // TODO: This is a bandaid over proper activity analysis
+    if (operand.getType().isIntOrIndex()) {
+      continue;
+    }
     // Compute the pullback (VJP).
     // TODO: Gotta be a better way to structure/abstract this. It's
     // essentially a huge switch statement on the operator name.
@@ -346,6 +395,16 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       }
       vjp_value = reverseTensorExtractOp(dyn_cast<tensor::ExtractOp>(op),
                                          operand, vjp_value, rewriter);
+    } else if (opName == "tensor.insert") {
+      if (op_index > 0) {
+        continue;
+      }
+      // I don't know if this is super general, but it works for the case we're
+      // currently dealing with. Written to support a special case scf.for ops,
+      // which is conceptually a linalg.generic with slices.
+      auto insertOp = dyn_cast<tensor::InsertOp>(op);
+      vjp_value = rewriter.create<tensor::ExtractOp>(op->getLoc(), vjp_value,
+                                                     insertOp.indices());
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
       auto space = getZero(operand.getLoc(), operand, rewriter);
@@ -362,7 +421,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       // Additionally compute adjoints for all free variables. We only want
       // this to run once, hence the if op_index == 0.
       if (op_index == 0) {
-        SmallVector<Value> freeOperands;
+        llvm::SmallDenseSet<Value> freeOperands;
         collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
                         freeOperands);
         for (auto freeOperand : freeOperands) {
@@ -723,6 +782,52 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
       /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
       /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
   return adjointIf.getResult(0);
+}
+
+Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
+                   size_t result_idx, ConversionPatternRewriter &rewriter) {
+  PatternRewriter::InsertionGuard insertionGuard(rewriter);
+  SmallVector<Value> operandsWithIV{forOp.getInductionVar()};
+  operandsWithIV.insert(operandsWithIV.end(), forOp.getRegionIterArgs().begin(),
+                        forOp.getRegionIterArgs().end());
+  auto iterArgsInit = llvm::to_vector<4>(forOp.getIterOperands());
+  auto space = getZero(free_operand.getLoc(), free_operand, rewriter);
+  iterArgsInit.push_back(space);
+  auto adjointFor = rewriter.create<scf::ForOp>(
+      forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
+      iterArgsInit,
+      [&](OpBuilder &builder, Location loc, Value iv, ValueRange iterArgs) {
+        SmallVector<Value> regionArgs;
+        regionArgs.push_back(iv);
+        regionArgs.insert(regionArgs.end(), iterArgs.begin(), iterArgs.end());
+        auto primalRegionOps =
+            cloneBasicBlock(forOp.getLoopBody().getOps(), builder, regionArgs,
+                            operandsWithIV, /*offsetInputs=*/false);
+
+        DenseMap<Value, Value> env;
+        SmallVector<Value> primalResults;
+        for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
+             it++) {
+          auto op = *it;
+          auto opName = op->getName().getStringRef();
+          if (opName == "scf.yield") {
+            Value operand = op->getOperand(result_idx);
+            primalResults = op->getOperands();
+            env[operand] = vjp_value;
+            rewriter.setInsertionPointAfter(op);
+            rewriter.eraseOp(op);
+          } else {
+            populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
+          }
+        }
+        env[free_operand] = rewriter.create<arith::AddFOp>(
+            free_operand.getLoc(), env[free_operand],
+            iterArgs[iterArgs.size() - 1]);
+        primalResults.push_back(env[free_operand]);
+        rewriter.create<scf::YieldOp>(loc, primalResults);
+      });
+
+  return adjointFor.getResult(adjointFor.getNumResults() - 1);
 }
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
