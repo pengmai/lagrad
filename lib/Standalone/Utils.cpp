@@ -291,16 +291,16 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     }
 
     Value result = forOp.getResult(result_idx);
-
-    // Value result = llvm::find_if(forOp.getResults(), [](OpResult res) {
-    //                  return isFloatOrFloatTensor(res.getType());
-    //                }).getBase();
+    // llvm::outs() << "***START FOR LOOP***: " << forOp
+    //              << "\n***END FOR LOOP***\n";
     auto vjp_value = env[result];
     assert(vjp_value && "vjp value for scf.for op was not found");
     llvm::SmallDenseSet<Value> freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
     for (auto freeOperand : freeOperands) {
-      // llvm::outs() << "found free operand: " << freeOperand << "\n";
+      if (!isFloatOrFloatTensor(freeOperand.getType())) {
+        continue;
+      }
       auto dFreeOperand =
           reverseForOp(forOp, freeOperand, vjp_value, result_idx, rewriter);
       if (!env[freeOperand]) {
