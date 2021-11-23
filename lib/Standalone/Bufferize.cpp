@@ -19,6 +19,22 @@
 using namespace mlir;
 
 namespace {
+AffineMap getRankReduceSubviewLayout(int64_t resultRank,
+                                     ConversionPatternRewriter &rewriter) {
+  AffineExpr expr;
+  for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
+    if (exprIdx == resultRank - 1) {
+      expr = rewriter.getAffineDimExpr(exprIdx) +
+             rewriter.getAffineSymbolExpr(exprIdx);
+    } else {
+      expr = rewriter.getAffineDimExpr(exprIdx) *
+                 rewriter.getAffineSymbolExpr(exprIdx) +
+             expr;
+    }
+  }
+  return AffineMap::get(resultRank, resultRank, expr);
+}
+
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
@@ -58,15 +74,14 @@ public:
     }
     auto resultTensorType =
         op.getResult().getType().dyn_cast_or_null<RankedTensorType>();
-    // Curently only deal with 2D -> 1D rank reduction cases
-    if (!resultTensorType || resultTensorType.getRank() != 1 ||
+    auto resultRank = resultTensorType.getRank();
+    // Curently only deal with 2D -> 1D and 3D -> 2D rank reduction cases.
+    if (!resultTensorType || resultRank > 2 ||
         op.getOffsetSizeAndStrideStartOperandIndex() != 1) {
       return failure();
     }
 
-    auto expr = rewriter.getAffineDimExpr(0) + rewriter.getAffineSymbolExpr(0);
-    auto slice_layout = AffineMap::get(1, 1, expr);
-
+    auto slice_layout = getRankReduceSubviewLayout(resultRank, rewriter);
     auto resultType =
         MemRefType::get(resultTensorType.getShape(),
                         resultTensorType.getElementType(), slice_layout);
@@ -94,12 +109,13 @@ public:
     auto destType = getTypeConverter()
                         ->convertType(adaptor.source().getType())
                         .dyn_cast<MemRefType>();
-    if (op.getType().getRank() != 2 || op.getSourceType().getRank() != 1) {
+    if (op.getType().getRank() != op.getSourceType().getRank() + 1 ||
+        op.getSourceType().getRank() > 2) {
       return failure();
     }
 
-    auto expr = rewriter.getAffineDimExpr(0) + rewriter.getAffineSymbolExpr(0);
-    auto slice_layout = AffineMap::get(1, 1, expr);
+    auto slice_layout =
+        getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
     auto sliceType = MemRefType::get(destType.getShape(),
                                      destType.getElementType(), slice_layout);
     auto dest = rewriter.create<memref::AllocOp>(
