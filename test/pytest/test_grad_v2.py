@@ -133,6 +133,17 @@ def test_logsumexp():
     assert np.abs(expected - mlir_res).sum() < 1e-7
 
 
+def test_logsumexp_1d():
+    expected = np.array([9.54081e-01, 1.30126e-04, 1.05989e-02, 3.51895e-02])
+    assert (
+        np.abs(
+            np.array(extract_1d(jit_file(f"{MLIR_FILES}/generic/logsumexp_1d.mlir")))
+            - expected
+        ).sum()
+        < 1e-6
+    )
+
+
 def test_cross():
     assert extract_1d(jit_file(f"{MLIR_FILES}/cross_product.mlir")) == [-1, 2, -1]
 

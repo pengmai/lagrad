@@ -328,14 +328,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       return;
     }
     Value vjp_value = env[op->getResult(0)];
-    // TODO: To what extent do I need this? I put it in as hack to avoid
-    // changing the function type.
+    // We assume the value is dead if it hasn't been come across yet.
     if (!vjp_value) {
-      Value result = op->getResult(0);
-      vjp_value = onesLike(result.getLoc(), result, rewriter);
-      env[result] = vjp_value;
-      llvm::outs() << "Initializing value (not yet initialized): " << result
-                   << "\n";
+      return;
     }
 
     if (opName == "arith.mulf") {
