@@ -235,21 +235,26 @@ void convert_ql_to_icf(size_t d, size_t k, size_t n, double *Qs, double *Ls,
 void convert_ql_compressed_to_icf(size_t d, size_t k, size_t n, double *Qs,
                                   double *Ls_compressed, double *icf) {
   int icf_sz = d * (d + 1) / 2;
+  int tri_sz = d * (d - 1) / 2;
   double *temp_L = (double *)malloc(k * d * d * sizeof(double));
   for (size_t d0 = 0; d0 < k; d0++) {
     for (size_t d1 = 0; d1 < d; d1++) {
       icf[d0 * icf_sz + d1] = Qs[d0 * d + d1];
     }
 
-    size_t idx = 0;
-    for (size_t d1 = 0; d1 < d; d1++) {
-      for (size_t d2 = 0; d2 < d1; d2++) {
-        temp_L[d0 * d * d + d1 * d + d2] = Ls_compressed[idx];
-        idx++;
-      }
+    for (size_t d1 = 0; d1 < tri_sz; d1++) {
+      icf[d0 * icf_sz + d + d1] = Ls_compressed[d0 * tri_sz + d1];
     }
 
-    collapse_ltri(d, &temp_L[d0 * d * d], &icf[d0 * icf_sz + d]);
+    // size_t idx = 0;
+    // for (size_t d1 = 0; d1 < d; d1++) {
+    //   for (size_t d2 = 0; d2 < d1; d2++) {
+    //     temp_L[d0 * d * d + d1 * d + d2] = Ls_compressed[idx];
+    //     idx++;
+    //   }
+    // }
+
+    // collapse_ltri(d, &temp_L[d0 * d * d], &icf[d0 * icf_sz + d]);
   }
   free(temp_L);
 }

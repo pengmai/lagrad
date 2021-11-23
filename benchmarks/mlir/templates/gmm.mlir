@@ -1,689 +1,308 @@
-//
-// Based on the implementation from https://github.com/microsoft/ADBench/blob/994fbde50a3ee3c1edc7e7bcdb105470e63d7362/src/python/modules/PyTorch/gmm_objective.py
-//
-// func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+// Building upon gmm_buf_compressed.mlir, this file attempts to tensorize the
+// MLIR translation of the compressed C primal to evaluate its performance.
 
 #map0 = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0)>
+#map2 = affine_map<(d0, d1, d2) -> (d0, d2)>
+#map3 = affine_map<(d0, d1, d2) -> (d1, d2)>
+#map4 = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#map5 = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3)>
+#map6 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3)>
+#map7 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>
+#map8 = affine_map<(d0, d1, d2) -> (d0, d1)>
+#map9 = affine_map<(d0) -> (d0)>
+#map10 = affine_map<(d0, d1) -> (d1)>
+#map11 = affine_map<(d0) -> ()>
+#map12 = affine_map<(d0, d1, d2) -> (d0)>
+#map13 = affine_map<() -> ()>
+#map14 = affine_map<(d0, d1) -> ()>
+module  {
+  // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @lagrad_gmm_objective_full(
-  %alphas: tensor<{{k}}xf64>,
-  %means: tensor<{{k}}x{{d}}xf64>,
-  %Qs: tensor<{{k}}x{{d}}xf64>,
-  %Ls: tensor<{{k}}x{{d}}x{{d}}xf64>,
-  %x: tensor<{{n}}x{{d}}xf64>,
-  %wishart_gamma: f64,
-  %wishart_m: i64
-) -> tensor<f64> {
-  %Qdiags = math.exp %Qs : tensor<{{k}}x{{d}}xf64>
+  func @mlir_gmm_opt_compressed(
+    %alphas: tensor<{{k}}xf64>,
+    %means: tensor<{{k}}x{{d}}xf64>,
+    %Qs: tensor<{{k}}x{{d}}xf64>,
+    %Ls: tensor<{{k}}x{{tri_size}}xf64>,
+    %x: tensor<{{n}}x{{d}}xf64>,
+    %wishart_gamma: f64,
+    %wishart_m: i64
+  ) -> f64 {
+    %zero = arith.constant 0.0 : f64
+    %Qdiags_space = linalg.init_tensor [{{k}}, {{d}}] : tensor<{{k}}x{{d}}xf64>
+    %sum_qs_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
+    %xcentered_space = linalg.init_tensor [{{d}}] : tensor<{{d}}xf64>
+    %main_term_space = linalg.init_tensor [{{k}}] : tensor<{{k}}xf64>
+    %zerod_tensor = arith.constant dense<0.0> : tensor<f64>
+    %max_space = linalg.init_tensor [] : tensor<f64>
 
-  // Sum along the columns of the Q matrix
-  %sum_q_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %sum_qs = linalg.generic
-    {
-      indexing_maps = [#map0, #map1],
-      iterator_types = ["parallel", "reduction"]
+    // This is the preprocess Qs implementation in the original function.
+    %Qdiags = linalg.generic
+      {indexing_maps = [#map0, #map0], iterator_types = ["parallel", "parallel"]}
+      ins(%Qs : tensor<{{k}}x{{d}}xf64>)
+      outs(%Qdiags_space : tensor<{{k}}x{{d}}xf64>) {
+    ^bb0(%arg7: f64, %arg8: f64):  // no predecessors
+      %39 = math.exp %arg7 : f64
+      linalg.yield %39 : f64
+    } -> tensor<{{k}}x{{d}}xf64>
+
+    %sum_qs = linalg.generic
+      {indexing_maps = [#map0, #map1], iterator_types = ["parallel", "reduction"]}
+      ins(%Qs : tensor<{{k}}x{{d}}xf64>)
+      outs(%sum_qs_space : tensor<{{k}}xf64>) {
+    ^bb0(%arg7: f64, %arg8: f64):  // no predecessors
+      %39 = arith.addf %arg7, %arg8 : f64
+      linalg.yield %39 : f64
+    } -> tensor<{{k}}xf64>
+
+    %half = arith.constant 0.5 : f64
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %cn = arith.constant {{n}} : index
+    %ck = arith.constant {{k}} : index
+    %cd = arith.constant {{d}} : index
+    %slse = scf.for %ix = %c0 to %cn step %c1 iter_args(%slse_iv = %zero) -> f64 {
+      %main_term = scf.for %ik = %c0 to %ck step %c1 iter_args(%mt_iter = %main_term_space) -> tensor<{{k}}xf64> {
+        // Subtract
+        %x_slice = tensor.extract_slice %x[%ix, 0] [1, {{d}}] [1, 1] : tensor<{{n}}x{{d}}xf64> to tensor<{{d}}xf64>
+        %means_slice = tensor.extract_slice %means[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
+        %xcentered = linalg.generic
+          {indexing_maps = [#map9, #map9, #map9], iterator_types = ["parallel"]}
+          ins(%x_slice, %means_slice : tensor<{{d}}xf64>, tensor<{{d}}xf64>)
+          outs(%xcentered_space : tensor<{{d}}xf64>) {
+        ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+          %0 = arith.subf %arg0, %arg1 : f64
+          linalg.yield %0 : f64
+        } -> tensor<{{d}}xf64>
+
+        %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
+        %Ltri_slice = tensor.extract_slice %Ls[%ik, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
+
+        // inlined Qtimesx
+        // Elementwise multiplication
+        %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
+
+        // The triangular matrix-vector multiplication
+        // %Qxcentered = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64>, tensor<{{d}}xf64>) outs(%out_0 : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        %Qxcentered = scf.for %iv = %c0 to %cd step %c1 iter_args(%out_iter_i = %out_0) -> tensor<{{d}}xf64> {
+          %Lidx_0 = arith.muli %c2, %cd : index
+          %Lidx_1 = arith.subi %Lidx_0, %iv : index
+          %Lidx_2 = arith.subi %Lidx_1, %c1 : index
+          %Lidx_3 = arith.muli %Lidx_2, %iv : index
+          %Lidx_4 = arith.divsi %Lidx_3, %c2 : index
+
+          %iv_plus_1 = arith.addi %iv, %c1 : index
+          %out_iter_i_next:2 = scf.for %jv = %iv_plus_1 to %cd step %c1 iter_args(%out_iter = %out_iter_i, %Lidx = %Lidx_4) -> (tensor<{{d}}xf64>, index) {
+            %0 = tensor.extract %Ltri_slice[%Lidx] : tensor<{{tri_size}}xf64>
+            %1 = tensor.extract %xcentered[%iv] : tensor<{{d}}xf64>
+            %2 = tensor.extract %out_iter[%jv] : tensor<{{d}}xf64>
+            %3 = arith.mulf %0, %1 : f64
+            %4 = arith.addf %3, %2 : f64
+            %out_next = tensor.insert %4 into %out_iter[%jv] : tensor<{{d}}xf64>
+
+            %Lidx_next = arith.addi %Lidx, %c1 : index
+            scf.yield %out_next, %Lidx_next : tensor<{{d}}xf64>, index
+          }
+          scf.yield %out_iter_i_next#0 : tensor<{{d}}xf64>
+        }
+
+        %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
+        ^bb0(%arg0: f64, %arg1: f64):
+          %0 = arith.mulf %arg0, %arg0 : f64
+          %1 = arith.addf %0, %arg1 : f64
+          linalg.yield %1 : f64
+        } -> tensor<f64>
+        %msqnorm = tensor.extract %msqnorm_t[] : tensor<f64>
+        // %msqnorm = call @msqnorm(%Qxcentered) : (tensor<{{d}}xf64>) -> f64
+        %hmsqnorm = arith.mulf %msqnorm, %half : f64
+        %a_ik = tensor.extract %alphas[%ik] : tensor<{{k}}xf64>
+        %q_ik = tensor.extract %sum_qs[%ik] : tensor<{{k}}xf64>
+        %sum_aq = arith.addf %a_ik, %q_ik : f64
+        %main_term_ik = arith.subf %sum_aq, %hmsqnorm : f64
+        %main_term_next = tensor.insert %main_term_ik into %mt_iter[%ik] : tensor<{{k}}xf64>
+        scf.yield %main_term_next : tensor<{{k}}xf64>
+      }
+
+      // logsumexp %alphas inlined
+      // find the max
+      %max_init_val = tensor.extract %main_term[%c0] : tensor<{{k}}xf64>
+      %max_init = tensor.insert %max_init_val into %max_space[] : tensor<f64>
+
+      %max_t = linalg.generic
+        {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
+        ins(%main_term : tensor<{{k}}xf64>)
+        outs(%max_init : tensor<f64>) {
+      ^bb0(%arg0: f64, %arg1: f64):
+        %p = arith.cmpf "ogt", %arg0, %arg1 : f64
+        %next = scf.if %p -> (f64) {
+          scf.yield %arg0 : f64
+        } else {
+          scf.yield %arg1 : f64
+        }
+        linalg.yield %next : f64
+      } -> tensor<f64>
+
+      %max = tensor.extract %max_t[] : tensor<f64>
+      %se_noadd_t = linalg.generic
+        {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
+        ins(%main_term : tensor<{{k}}xf64>)
+        outs(%zerod_tensor : tensor<f64>) {
+      ^bb0(%arg0: f64, %arg1: f64):
+        %0 = arith.subf %arg0, %max : f64
+        %1 = math.exp %0 : f64
+        %2 = arith.addf %1, %arg1 : f64
+        linalg.yield %2 : f64
+      } -> tensor<f64>
+      %se_noadd = tensor.extract %se_noadd_t[] : tensor<f64>
+      %lse_noadd = math.log %se_noadd : f64
+      %lse = arith.addf %lse_noadd, %max : f64
+      // %slse_iter = call @mlogsumexp(%main_term) : (tensor<{{k}}xf64>) -> f64
+      %slse_next = arith.addf %slse_iv, %lse : f64
+      scf.yield %slse_next : f64
     }
-    ins(%Qs: tensor<{{k}}x{{d}}xf64>)
-    outs(%sum_q_space: tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{k}}xf64>
 
-  // Each datapoint is broadcasted, then the means are elementwise subtracted
-  %xcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %xcentered = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d0, d2)>,
-        affine_map<(d0, d1, d2) -> (d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel"]
+    // inlined logsumexp alphas
+    // find the max
+    %amax_init_val = tensor.extract %alphas[%c0] : tensor<{{k}}xf64>
+    %amax_init = tensor.insert %amax_init_val into %max_space[] : tensor<f64>
+
+    %amax_t = linalg.generic
+      {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
+      ins(%alphas : tensor<{{k}}xf64>)
+      outs(%amax_init : tensor<f64>) {
+    ^bb0(%arg0: f64, %arg1: f64):
+      %p = arith.cmpf "ogt", %arg0, %arg1 : f64
+      %next = scf.if %p -> (f64) {
+        scf.yield %arg0 : f64
+      } else {
+        scf.yield %arg1 : f64
+      }
+      linalg.yield %next : f64
+    } -> tensor<f64>
+
+    %amax = tensor.extract %amax_t[] : tensor<f64>
+    %ase_noadd_t_out = arith.constant dense<0.0> : tensor<f64>
+    %ase_noadd_t = linalg.generic
+      {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
+      ins(%alphas : tensor<{{k}}xf64>)
+      outs(%ase_noadd_t_out : tensor<f64>) {
+    ^bb0(%arg0: f64, %arg1: f64):
+      %0 = arith.subf %arg0, %amax : f64
+      %1 = math.exp %0 : f64
+      %2 = arith.addf %1, %arg1 : f64
+      linalg.yield %2 : f64
+    } -> tensor<f64>
+    %ase_noadd = tensor.extract %ase_noadd_t[] : tensor<f64>
+    %alse_noadd = math.log %ase_noadd : f64
+    %lse_alphas = arith.addf %alse_noadd, %amax : f64
+    // %lse_alphas = call @mlogsumexp(%alphas) : (tensor<{{k}}xf64>) -> f64
+
+    %cn_float = arith.constant {{n}}.0 : f64
+    %nlse_alphas = arith.mulf %cn_float, %lse_alphas : f64
+
+    // log wishart prior inlined
+    %c1_i64 = arith.index_cast %c1 : index to i64
+    %cd_i64 = arith.index_cast %cd : index to i64
+    %n_0 = arith.addi %wishart_m, %c1_i64 : i64
+    %n = arith.addi %n_0, %cd_i64 : i64
+
+    %lwishpri = scf.for %ik = %c0 to %ck step %c1 iter_args(%out_iter = %zero) -> (f64) {
+      %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
+      // Inlined msqnorm
+      %fro_0 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qdiags_slice : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
+      ^bb0(%arg0: f64, %arg1: f64):
+        %0 = arith.mulf %arg0, %arg0 : f64
+        %1 = arith.addf %0, %arg1 : f64
+        linalg.yield %1 : f64
+      } -> tensor<f64>
+      %frobenius_0 = tensor.extract %fro_0[] : tensor<f64>
+      // %frobenius_0 = call @msqnorm(%Qdiags_slice) : (tensor<{{d}}xf64>) -> f64
+
+      %Ltri_slice = tensor.extract_slice %Ls[%ik, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
+      // Inlined msqnorm_2d
+      %fro_1 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Ltri_slice : tensor<{{tri_size}}xf64>) outs(%zerod_tensor : tensor<f64>) {
+      ^bb0(%arg0: f64, %arg1: f64):
+        %0 = arith.mulf %arg0, %arg0 : f64
+        %1 = arith.addf %0, %arg1 : f64
+        linalg.yield %1 : f64
+      } -> tensor<f64>
+      %frobenius_1 = tensor.extract %fro_1[] : tensor<f64>
+      // %frobenius_1 = call @msqnorm_2d(%Ltri_slice) : (tensor<{{tri_size}}xf64>) -> f64
+
+      %frobenius = arith.addf %frobenius_0, %frobenius_1 : f64
+
+      %out_0 = arith.mulf %wishart_gamma, %wishart_gamma : f64
+      %out_1 = arith.mulf %out_0, %half : f64
+      %out_2 = arith.mulf %out_1, %frobenius : f64
+      %out_3 = arith.sitofp %wishart_m : i64 to f64
+      %out_4 = tensor.extract %sum_qs[%ik] : tensor<{{k}}xf64>
+      %out_5 = arith.mulf %out_3, %out_4 : f64
+      %out_6 = arith.subf %out_2, %out_5 : f64
+      %out_next = arith.addf %out_iter, %out_6 : f64
+      scf.yield %out_next : f64
     }
-    ins(%x, %means : tensor<{{n}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>)
-    outs(%xcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.subf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
+    // %lwishpri = call @mlog_wishart_prior(%wishart_gamma, %wishart_m, %sum_qs, %Qdiags, %Ls) : (f64, i64, tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>) -> f64
 
-  // Compute Qtimesx.
-  %Lxcentered_intermediate_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %Lxcentered_intermediate = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(n, k, d1, d2) -> (k, d1, d2)>,
-        affine_map<(n, k, d1, d2) -> (n, k, d2)>,
-        affine_map<(n, k, d1, d2) -> (n, k, d1)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel", "reduction"]
-    }
-    ins(
-      %Ls, %xcentered :
-      tensor<{{k}}x{{d}}x{{d}}xf64>,
-      tensor<{{n}}x{{k}}x{{d}}xf64>
-    )
-    outs(%Lxcentered_intermediate_shape: tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.mulf %arg0, %arg1 : f64
-    %1 = arith.addf %0, %arg2 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
+    %final_0 = arith.subf %slse, %nlse_alphas : f64
+    %final = arith.addf %final_0, %lwishpri : f64
+    return %final : f64
+  }
 
-  // // %subview = tensor.extract_slice %Ls[0, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<1x{{d}}x{{d}}xf64>
-  // // %U = tensor.cast %subview : tensor<1x{{d}}x{{d}}xf64> to tensor<*xf64>
-  // %subview = tensor.extract_slice %Lxcentered_intermediate[0, 0, 0] [1, 1, {{d}}] [1, 1, 1] : tensor<{{n}}x{{k}}x{{d}}xf64> to tensor<1x1x{{d}}xf64>
-  // %U = tensor.cast %subview : tensor<1x1x{{d}}xf64> to tensor<*xf64>
-  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  func @lagrad_gmm_compressed(
+    %arg0: tensor<{{k}}xf64>,
+    %arg1: tensor<{{k}}x{{d}}xf64>,
+    %arg2: tensor<{{k}}x{{d}}xf64>,
+    %arg3: tensor<{{k}}x{{tri_size}}xf64>,
+    %arg4: tensor<{{n}}x{{d}}xf64>,
+    %arg5: f64,
+    %arg6: i64
+  ) -> (
+    tensor<{{k}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{d}}xf64>,
+    tensor<{{k}}x{{tri_size}}xf64>
+  ) {
+    %zero = arith.constant 0.0 : f64
 
-  %Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %Lxcentered = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel"]
-    }
-    ins(
-      %Qdiags, %xcentered, %Lxcentered_intermediate :
+    %f = constant @mlir_gmm_opt_compressed : (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>, tensor<{{n}}x{{d}}xf64>, f64, i64) -> f64
+    %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
+      tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{n}}x{{k}}x{{d}}xf64>,
-      tensor<{{n}}x{{k}}x{{d}}xf64>
-    )
-    outs(%Lxcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-    %0 = arith.mulf %arg0, %arg1 : f64
-    %1 = arith.addf %0, %arg2 : f64
-    %2 = arith.mulf %1, %1 : f64
-    linalg.yield %2 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
-
-  %sqsum_Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
-  %sqsum_Lxcentered = linalg.generic
-    {indexing_maps = [
-      affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-      affine_map<(d0, d1, d2) -> (d0, d1)>
-    ],
-    iterator_types = ["parallel", "parallel", "reduction"]}
-    ins(%Lxcentered : tensor<{{n}}x{{k}}x{{d}}xf64>)
-    outs(%sqsum_Lxcentered_shape : tensor<{{n}}x{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{n}}x{{k}}xf64>
-
-  %alphasPlusSumQs = arith.addf %alphas, %sum_qs : tensor<{{k}}xf64>
-
-  %inner_term_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
-  %half = arith.constant 0.5 : f64
-  %inner_term = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d1)>,
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0, d1)>
-      ],
-      iterator_types = ["parallel", "parallel"]
-    }
-    ins(%alphasPlusSumQs, %sqsum_Lxcentered : tensor<{{k}}xf64>, tensor<{{n}}x{{k}}xf64>)
-    outs(%inner_term_shape : tensor<{{n}}x{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.mulf %arg1, %half : f64
-    %1 = arith.subf %arg0, %0 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}x{{k}}xf64>
-
-  // Bit of a bandaid.
-  %max_init = arith.constant dense<-1000000000.0> : tensor<{{n}}xf64>
-  %max = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
-    outs(%max_init : tensor<{{n}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.cmpf "ogt", %arg0, %arg1 : f64
-    %1 = scf.if %0 -> f64 {
-      scf.yield %arg0 : f64
-    } else {
-      scf.yield %arg1 : f64
-    }
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}xf64>
-  
-  // // %subview = tensor.extract_slice %inner_term[0, 0][1, {{k}}][1, 1] : tensor<{{n}}x{{k}}xf64> to tensor<1x{{k}}xf64>
-  // // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
-  // // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-
-  %lse_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
-  %lse_intermediate = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0)>,
-        affine_map<(d0, d1) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%inner_term, %max : tensor<{{n}}x{{k}}xf64>, tensor<{{n}}xf64>)
-    outs(%lse_init : tensor<{{n}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.subf %arg0, %arg1 : f64
-    %1 = math.exp %0 : f64
-    %2 = arith.addf %1, %arg2 : f64
-    linalg.yield %2 : f64
-  } -> tensor<{{n}}xf64>
-  %lse_before_add = math.log %lse_intermediate : tensor<{{n}}xf64>
-  %lse = arith.addf %lse_before_add, %max : tensor<{{n}}xf64>
-
-  %slse_init = arith.constant dense<0.0> : tensor<f64>
-  %slse = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0) -> (d0)>,
-        affine_map<(d0) -> ()>
-      ],
-      iterator_types = ["reduction"]
-    }
-    ins(%lse : tensor<{{n}}xf64>)
-    outs(%slse_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<f64>
-
-  // log_wishart_prior
-  %Qdiags_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %Qdiags_summed = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%Qdiags : tensor<{{k}}x{{d}}xf64>)
-    outs(%Qdiags_summed_init : tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %arg0, %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{k}}xf64>
-
-  // This will have a ton of redundant computation
-  %L_sq_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %L_sq_summed = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction", "reduction"]
-    }
-    ins(%Ls : tensor<{{k}}x{{d}}x{{d}}xf64>)
-    outs(%L_sq_summed_init : tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %arg0, %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{k}}xf64>
-  %Qdiags_Lsq_summed = arith.addf %Qdiags_summed, %L_sq_summed : tensor<{{k}}xf64>
-
-  %wishart_out_init = arith.constant dense<0.0> : tensor<f64>
-  %wishart_out_1 = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0) -> (d0)>,
-        affine_map<(d0) -> ()>
-      ],
-      iterator_types = ["reduction"]
-    }
-    ins(%Qdiags_Lsq_summed : tensor<{{k}}xf64>)
-    outs(%wishart_out_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %half, %wishart_gamma : f64
-    %1 = arith.mulf %0, %wishart_gamma : f64
-    %2 = arith.mulf %1, %arg0 : f64
-    %3 = arith.addf %2, %arg1 : f64
-    linalg.yield %3 : f64
-  } -> tensor<f64>
-
-  %wishart_sum_qs_init = arith.constant dense<0.0> : tensor<f64>
-  %wishart_sum_qs = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
-      iterator_types = ["reduction"]
-    }
-    ins(%sum_qs : tensor<{{k}}xf64>)
-    outs(%wishart_sum_qs_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.sitofp %wishart_m : i64 to f64
-    %1 = arith.mulf %0, %arg0 : f64
-    %2 = arith.addf %1, %arg1 : f64
-    linalg.yield %2 : f64
-  } -> tensor<f64>
-
-  %wishart_out = arith.subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
-
-  // logsumexp alphas
-  %sumexp_alphas_init = arith.constant dense<0.0> : tensor<f64>
-  %sumexp_alphas = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
-      iterator_types = ["reduction"]
-    }
-    ins(%alphas : tensor<{{k}}xf64>)
-    outs(%sumexp_alphas_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = math.exp %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<f64>
-  %logsumexp_alphas = math.log %sumexp_alphas : tensor<f64>
-
-  %n_tensor = arith.constant dense<{{n}}.> : tensor<f64>
-  %n_logsumexp_alphas = arith.mulf %n_tensor, %logsumexp_alphas : tensor<f64>
-
-  %final_0 = arith.subf %slse, %n_logsumexp_alphas : tensor<f64>
-  %final_1 = arith.addf %final_0, %wishart_out : tensor<f64>
-  return %final_1 : tensor<f64>
-}
-
-
-func @lagrad_gmm_objective_tri(
-  %alphas: tensor<{{k}}xf64>,
-  %means: tensor<{{k}}x{{d}}xf64>,
-  %Qs: tensor<{{k}}x{{d}}xf64>,
-  %Ls: tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-  %x: tensor<{{n}}x{{d}}xf64>,
-  %wishart_gamma: f64,
-  %wishart_m: i64
-) -> tensor<f64> {
-  %Qdiags = math.exp %Qs : tensor<{{k}}x{{d}}xf64>
-
-  // Sum along the columns of the Q matrix
-  %sum_q_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %sum_qs = linalg.generic
-    {
-      indexing_maps = [#map0, #map1],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%Qs: tensor<{{k}}x{{d}}xf64>)
-    outs(%sum_q_space: tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{k}}xf64>
-
-  // Each datapoint is broadcasted, then the means are elementwise subtracted
-  %xcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %xcentered = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d0, d2)>,
-        affine_map<(d0, d1, d2) -> (d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel"]
-    }
-    ins(%x, %means : tensor<{{n}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>)
-    outs(%xcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.subf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
-
-  // Compute Qtimesx.
-  %Lxcentered_intermediate_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %Lxcentered_intermediate = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(n, k, d1, d2) -> (k, d1, d2)>,
-        affine_map<(n, k, d1, d2) -> (n, k, d2)>,
-        affine_map<(n, k, d1, d2) -> (n, k, d1)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel", "reduction"]
-    }
-    ins(
-      %Ls, %xcentered :
-      tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-      tensor<{{n}}x{{k}}x{{d}}xf64>
-    )
-    outs(%Lxcentered_intermediate_shape: tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.mulf %arg0, %arg1 : f64
-    %1 = arith.addf %0, %arg2 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
-
-  %Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}x{{d}}xf64>
-  %Lxcentered = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>
-      ],
-      iterator_types = ["parallel", "parallel", "parallel"]
-    }
-    ins(
-      %Qdiags, %xcentered, %Lxcentered_intermediate :
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{n}}x{{k}}x{{d}}xf64>,
-      tensor<{{n}}x{{k}}x{{d}}xf64>
+      tensor<{{k}}x{{tri_size}}xf64>,
+      tensor<{{n}}x{{d}}xf64>,
+      f64,
+      i64
+    ) -> f64, (
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>,
+      tensor<{{n}}x{{d}}xf64>,
+      f64,
+      i64
+    ) -> (
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>
     )
-    outs(%Lxcentered_shape : tensor<{{n}}x{{k}}x{{d}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-    %0 = arith.mulf %arg0, %arg1 : f64
-    %1 = arith.addf %0, %arg2 : f64
-    %2 = arith.mulf %1, %1 : f64
-    linalg.yield %2 : f64
-  } -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
-  %sqsum_Lxcentered_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
-  %sqsum_Lxcentered = linalg.generic
-    {indexing_maps = [
-      affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-      affine_map<(d0, d1, d2) -> (d0, d1)>
-    ],
-    iterator_types = ["parallel", "parallel", "reduction"]}
-    ins(%Lxcentered : tensor<{{n}}x{{k}}x{{d}}xf64>)
-    outs(%sqsum_Lxcentered_shape : tensor<{{n}}x{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<{{n}}x{{k}}xf64>
-
-  %alphasPlusSumQs = arith.addf %alphas, %sum_qs : tensor<{{k}}xf64>
-
-  %inner_term_shape = arith.constant dense<0.0> : tensor<{{n}}x{{k}}xf64>
-  %half = arith.constant 0.5 : f64
-  %inner_term = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d1)>,
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0, d1)>
-      ],
-      iterator_types = ["parallel", "parallel"]
-    }
-    ins(%alphasPlusSumQs, %sqsum_Lxcentered : tensor<{{k}}xf64>, tensor<{{n}}x{{k}}xf64>)
-    outs(%inner_term_shape : tensor<{{n}}x{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.mulf %arg1, %half : f64
-    %1 = arith.subf %arg0, %0 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}x{{k}}xf64>
-
-  %max_init = arith.constant dense<-1000000000.0> : tensor<{{n}}xf64>
-  %max = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%inner_term : tensor<{{n}}x{{k}}xf64>)
-    outs(%max_init : tensor<{{n}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.cmpf "ogt", %arg0, %arg1 : f64
-    %1 = scf.if %0 -> f64 {
-      scf.yield %arg0 : f64
-    } else {
-      scf.yield %arg1 : f64
-    }
-    linalg.yield %1 : f64
-  } -> tensor<{{n}}xf64>
-  
-  // // %subview = tensor.extract_slice %inner_term[0, 0][1, {{k}}][1, 1] : tensor<{{n}}x{{k}}xf64> to tensor<1x{{k}}xf64>
-  // // %U = tensor.cast %subview : tensor<1x{{k}}xf64> to tensor<*xf64>
-  // // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-
-  %lse_init = arith.constant dense<0.0> : tensor<{{n}}xf64>
-  %lse_intermediate = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0)>,
-        affine_map<(d0, d1) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%inner_term, %max : tensor<{{n}}x{{k}}xf64>, tensor<{{n}}xf64>)
-    outs(%lse_init : tensor<{{n}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-    %0 = arith.subf %arg0, %arg1 : f64
-    %1 = math.exp %0 : f64
-    %2 = arith.addf %1, %arg2 : f64
-    linalg.yield %2 : f64
-  } -> tensor<{{n}}xf64>
-  %lse_before_add = math.log %lse_intermediate : tensor<{{n}}xf64>
-  %lse = arith.addf %lse_before_add, %max : tensor<{{n}}xf64>
-
-  %slse_init = arith.constant dense<0.0> : tensor<f64>
-  %slse = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0) -> (d0)>,
-        affine_map<(d0) -> ()>
-      ],
-      iterator_types = ["reduction"]
-    }
-    ins(%lse : tensor<{{n}}xf64>)
-    outs(%slse_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.addf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
-  } -> tensor<f64>
-
-  // log_wishart_prior
-  %Qdiags_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %Qdiags_summed = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1) -> (d0, d1)>,
-        affine_map<(d0, d1) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction"]
-    }
-    ins(%Qdiags : tensor<{{k}}x{{d}}xf64>)
-    outs(%Qdiags_summed_init : tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %arg0, %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{k}}xf64>
-
-  // This will have a ton of redundant computation
-  %L_sq_summed_init = arith.constant dense<0.0> : tensor<{{k}}xf64>
-  %L_sq_summed = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0, d1, d2) -> (d0, d1, d2)>,
-        affine_map<(d0, d1, d2) -> (d0)>
-      ],
-      iterator_types = ["parallel", "reduction", "reduction"]
-    }
-    ins(%Ls : tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">)
-    outs(%L_sq_summed_init : tensor<{{k}}xf64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %arg0, %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<{{k}}xf64>
-  %Qdiags_Lsq_summed = arith.addf %Qdiags_summed, %L_sq_summed : tensor<{{k}}xf64>
-
-  %wishart_out_init = arith.constant dense<0.0> : tensor<f64>
-  %wishart_out_1 = linalg.generic
-    {
-      indexing_maps = [
-        affine_map<(d0) -> (d0)>,
-        affine_map<(d0) -> ()>
-      ],
-      iterator_types = ["reduction"]
-    }
-    ins(%Qdiags_Lsq_summed : tensor<{{k}}xf64>)
-    outs(%wishart_out_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.mulf %half, %wishart_gamma : f64
-    %1 = arith.mulf %0, %wishart_gamma : f64
-    %2 = arith.mulf %1, %arg0 : f64
-    %3 = arith.addf %2, %arg1 : f64
-    linalg.yield %3 : f64
-  } -> tensor<f64>
-
-  %wishart_sum_qs_init = arith.constant dense<0.0> : tensor<f64>
-  %wishart_sum_qs = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
-      iterator_types = ["reduction"]
-    }
-    ins(%sum_qs : tensor<{{k}}xf64>)
-    outs(%wishart_sum_qs_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = arith.sitofp %wishart_m : i64 to f64
-    %1 = arith.mulf %0, %arg0 : f64
-    %2 = arith.addf %1, %arg1 : f64
-    linalg.yield %2 : f64
-  } -> tensor<f64>
-
-  %wishart_out = arith.subf %wishart_out_1, %wishart_sum_qs : tensor<f64>
-
-  // logsumexp alphas
-  %sumexp_alphas_init = arith.constant dense<0.0> : tensor<f64>
-  %sumexp_alphas = linalg.generic
-    {
-      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>],
-      iterator_types = ["reduction"]
-    }
-    ins(%alphas : tensor<{{k}}xf64>)
-    outs(%sumexp_alphas_init : tensor<f64>) {
-  ^bb0(%arg0: f64, %arg1: f64):
-    %0 = math.exp %arg0 : f64
-    %1 = arith.addf %0, %arg1 : f64
-    linalg.yield %1 : f64
-  } -> tensor<f64>
-  %logsumexp_alphas = math.log %sumexp_alphas : tensor<f64>
-
-  %n_tensor = arith.constant dense<{{n}}.> : tensor<f64>
-  %n_logsumexp_alphas = arith.mulf %n_tensor, %logsumexp_alphas : tensor<f64>
-
-  %final_0 = arith.subf %slse, %n_logsumexp_alphas : tensor<f64>
-  %final_1 = arith.addf %final_0, %wishart_out : tensor<f64>
-  return %final_1 : tensor<f64>
-}
-
-func @lagrad_gmm_full(
-  %alphas: tensor<{{k}}xf64>,
-  %means: tensor<{{k}}x{{d}}xf64>,
-  %Qs: tensor<{{k}}x{{d}}xf64>,
-  %Ls: tensor<{{k}}x{{d}}x{{d}}xf64>,
-  %x: tensor<{{n}}x{{d}}xf64>,
-  %wishart_gamma: f64,
-  %wishart_m: i64
-) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>) {
-  %f = constant @lagrad_gmm_objective_full : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64>,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> tensor<f64>
-  %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64>,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> tensor<f64>, (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64>,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>)
-  %res:4 = call_indirect %df(
-    %alphas,
-    %means,
-    %Qs,
-    %Ls,
-    %x,
-    %wishart_gamma,
-    %wishart_m
-  ) : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64>,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>)
-  return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>
-}
-
-func @lagrad_gmm_tri(
-  %alphas: tensor<{{k}}xf64>,
-  %means: tensor<{{k}}x{{d}}xf64>,
-  %Qs: tensor<{{k}}x{{d}}xf64>,
-  %Ls: tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-  %x: tensor<{{n}}x{{d}}xf64>,
-  %wishart_gamma: f64,
-  %wishart_m: i64
-) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">) {
-  %f = constant @lagrad_gmm_objective_tri : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> tensor<f64>
-  %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> tensor<f64>, (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">)
-  %res:4 = call_indirect %df(
-    %alphas,
-    %means,
-    %Qs,
-    %Ls,
-    %x,
-    %wishart_gamma,
-    %wishart_m
-  ) : (
-    tensor<{{k}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">,
-    tensor<{{n}}x{{d}}xf64>,
-    f64,
-    i64
-  ) -> (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">)
-  return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64, "ltri">
+    %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>,
+      tensor<{{n}}x{{d}}xf64>,
+      f64,
+      i64
+    ) -> (
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>
+    )
+    return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>
+  }
 }

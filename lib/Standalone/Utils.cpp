@@ -43,18 +43,14 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
       }
     });
     for (size_t i = 0; i < clonedOp->getNumOperands(); i++) {
-      assert(op.getNumResults() < 2 &&
-             "basic block op with more than two results "
-             "not yet "
-             "supported");
       // We assume that region arguments and intermediate values will populate
       // this map. If an entry is missing, it should have been defined outside
       // the linalg.generic body.
       if (old_to_new[clonedOp->getOperand(i)]) {
         clonedOp->setOperand(i, old_to_new[clonedOp->getOperand(i)]);
       }
-      if (op.getNumResults() == 1) {
-        old_to_new[op.getResult(0)] = clonedOp->getResult(0);
+      for (size_t j = 0; j < op.getNumResults(); j++) {
+        old_to_new[op.getResult(j)] = clonedOp->getResult(j);
       }
     }
     newRegionOps.push_back(clonedOp);
@@ -815,9 +811,15 @@ Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
             populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
           }
         }
-        env[free_operand] = rewriter.create<arith::AddFOp>(
-            free_operand.getLoc(), env[free_operand],
-            iterArgs[iterArgs.size() - 1]);
+        if (!env[free_operand]) {
+          // Assume free_operand is not active.
+          env[free_operand] =
+              getZero(free_operand.getLoc(), free_operand, rewriter);
+        } else {
+          env[free_operand] = rewriter.create<arith::AddFOp>(
+              free_operand.getLoc(), env[free_operand],
+              iterArgs[iterArgs.size() - 1]);
+        }
         primalResults.push_back(env[free_operand]);
         rewriter.create<scf::YieldOp>(loc, primalResults);
       });
