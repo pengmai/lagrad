@@ -180,7 +180,7 @@ private:
     auto llvmI32Ty = IntegerType::get(context, 32);
     rewriter.create<LLVM::GlobalOp>(moduleOp.getLoc(), llvmI32Ty,
                                     /*isConstant=*/true,
-                                    LLVM::Linkage::External, "enzyme_const",
+                                    LLVM::Linkage::Linkonce, "enzyme_const",
                                     IntegerAttr::get(llvmI32Ty, 0));
     return SymbolRefAttr::get(context, "enzyme_const");
   }

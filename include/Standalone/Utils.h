@@ -44,7 +44,4 @@ Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
 
 Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter);
-
-Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
-                       int op_index, ConversionPatternRewriter &rewriter);
 } // namespace mlir
