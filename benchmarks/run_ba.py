@@ -2,6 +2,7 @@ import argparse
 import pandas as pd
 import json
 from compile import (
+    compile_mlir_to_enzyme,
     jit_mlir,
     compile_c,
     compile_enzyme,
@@ -31,9 +32,10 @@ def main(args):
         "x0_idx": 7,
         "rad_idx": 9,
     }
-    # mlir_template = mlir_env.get_template("ba.mlir")
-    mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
-    enzyme_template = c_env.get_template("enzyme_ba.c")
+    mlir_template = mlir_env.get_template("ba.mlir")
+    # mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
+    enzyme_template = mlir_env.get_template("ba_enzyme_reproj.mlir")
+    enzyme_w_template = mlir_env.get_template("ba_enzyme_w.mlir")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
     if args.print:
@@ -41,11 +43,24 @@ def main(args):
         return
 
     compile_mlir(mlir_template.render(**config).encode("utf-8"), "ba_mlir.o")
-    compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "enzyme_ba.o")
+    compile_mlir_to_enzyme(
+        enzyme_template.render(**config).encode("utf-8"),
+        "enzyme_ba_reproj.o",
+        emit="obj",
+    )
+    compile_mlir_to_enzyme(
+        enzyme_w_template.render(**config).encode("utf-8"), "enzyme_ba_w.o", emit="obj"
+    )
     compile_c(driver_template.render(**config).encode("utf-8"), "ba_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
     stdout = link_and_run(
-        ["ba_mlir.o", "enzyme_ba.o", "ba_driver.o", "mlir_c_abi.o"],
+        [
+            "ba_mlir.o",
+            "enzyme_ba_reproj.o",
+            "enzyme_ba_w.o",
+            "ba_driver.o",
+            "mlir_c_abi.o",
+        ],
         "ba_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
@@ -63,7 +78,7 @@ def main(args):
         results = pd.DataFrame.from_dict(
             {key: json.loads(line) for key, line in zip(keys, lines)}
         )
-        print(results.mean())
+        print(results[2:].mean())
 
         # TODO: Meant to serialize the output results to a file.
         # if outfile:
