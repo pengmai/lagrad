@@ -133,6 +133,28 @@ def test_logsumexp():
     assert np.abs(expected - mlir_res).sum() < 1e-7
 
 
+def disabled_test_nonconst_out():
+    from autograd import elementwise_grad
+    import autograd.numpy as np
+
+    with open(f"{MLIR_FILES}/generic/nonconst_out.mlir") as f:
+        template = Template(f.read())
+    np.random.seed(0)
+    A = np.array(
+        [
+            [0.377, 0.283, 0.155, 0.858],
+            [0.3, 0.431, 0.851, 0.137],
+            [0.776, 0.555, 0.771, 0.233],
+            [0.623, 0.193, 0.005, 0.691],
+        ]
+    )
+    B = np.array([4.0, -3.0, 2.0, 1.0])
+    C = np.array([1.0, 0.2, -2.3, -1.7])
+
+    print(elementwise_grad(lambda x, y, z: y * z + np.dot(x, y), 1)(A, B, C))
+    print(np.array([2.076, 1.462, 1.782, 1.919]) + C)
+
+
 def test_logsumexp_1d():
     expected = np.array([9.54081e-01, 1.30126e-04, 1.05989e-02, 3.51895e-02])
     assert (
