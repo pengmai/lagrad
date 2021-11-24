@@ -64,7 +64,6 @@ func @mlir_trimatvec_compressed_adjoint(%icf: tensor<{{(n * (n - 1) / 2)|round|i
   %ones = arith.constant dense<1.0> : tensor<{{n}}xf64>
   %arg1_space = memref.alloc() : memref<{{(n * (n - 1) / 2)|round|int}}xf64>
   %zero = arith.constant 0.0 : f64
-  linalg.fill(%zero, %arg1_space) : f64, memref<{{(n * (n - 1) / 2)|round|int}}xf64>
 
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -75,8 +74,8 @@ func @mlir_trimatvec_compressed_adjoint(%icf: tensor<{{(n * (n - 1) / 2)|round|i
       %1 = tensor.extract %x[%jv] : tensor<{{n}}xf64>
       %2 = memref.load %arg1_space[%jt] : memref<{{(n * (n - 1) / 2)|round|int}}xf64>
       %3 = arith.mulf %0, %1 : f64
-      %4 = arith.addf %3, %2 : f64
-      memref.store %4, %arg1_space[%jt] : memref<{{(n * (n - 1) / 2)|round|int}}xf64>
+      // %4 = arith.addf %3, %2 : f64
+      memref.store %3, %arg1_space[%jt] : memref<{{(n * (n - 1) / 2)|round|int}}xf64>
 
       %kt = arith.addi %jt, %c1 : index
       scf.yield %kt : index
