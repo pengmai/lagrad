@@ -121,8 +121,8 @@ def compile_mlir(contents, output, lower_type="loops"):
     llvm_dialect = run_safe(
         [
             f"{BIN}/standalone-opt",
-            "-take-grads",
             # "-linalg-generalize-named-ops",
+            "-take-grads",
             "-canonicalize",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
