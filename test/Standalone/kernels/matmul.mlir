@@ -1,5 +1,5 @@
 func @matmul(%A : tensor<3x4xf32>, %B : tensor<4x5xf32>) -> tensor<3x5xf32> {
-  %out = constant dense<0.0> : tensor<3x5xf32>
+  %out = arith.constant dense<0.0> : tensor<3x5xf32>
   %res = linalg.matmul ins(%A, %B : tensor<3x4xf32>, tensor<4x5xf32>) outs(%out : tensor<3x5xf32>) -> tensor<3x5xf32>
   return %res : tensor<3x5xf32>
 }
