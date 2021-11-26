@@ -396,6 +396,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       auto insertOp = dyn_cast<tensor::InsertOp>(op);
       vjp_value = rewriter.create<tensor::ExtractOp>(op->getLoc(), vjp_value,
                                                      insertOp.indices());
+
+      // The destination is effectively the same memory location as the result.
+      env[insertOp.dest()] = env[insertOp.result()];
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
       auto space = getZero(operand.getLoc(), operand, rewriter);

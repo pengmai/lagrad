@@ -199,6 +199,10 @@ def test_custom_grad_init():
     assert extract_1d(jit_file(f"{MLIR_FILES}/custom_grad_init.mlir")) == [2.3, 0.0]
 
 
+def test_insert_multi():
+    assert extract_1d(jit_file(f"{MLIR_FILES}/insert_multi.mlir")) == [1, 0, 1]
+
+
 def test_if_else():
     output = jit_file(f"{MLIR_FILES}/ifelse.mlir").split("Unranked")[1:]
     parsed = [extract_scalar(line) for line in output]
