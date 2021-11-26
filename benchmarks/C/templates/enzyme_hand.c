@@ -1,15 +1,7 @@
 #define TARGET_OS_EMBEDDED 0
+#include "shared_types.h"
 #include <math.h>
 #include <stdlib.h>
-
-typedef struct {
-  int nrows;
-  int ncols;
-  double *data;
-} Matrix;
-typedef struct {
-  int verts[3];
-} Triangle;
 
 /*========================================================================*/
 /*                            MATRIX METHODS                              */
@@ -297,6 +289,7 @@ void get_posed_relatives(int bone_count,
   delete_matrix(R);
 }
 
+/* The 4x4 matrices here are transposed (column major) relative to ADBench */
 static inline void get_skinned_vertex_positions(
     int bone_count, const Matrix *__restrict base_relatives, const int *parents,
     const Matrix *__restrict inverse_base_absolutes,
@@ -311,13 +304,13 @@ static inline void get_skinned_vertex_positions(
 
   get_posed_relatives(bone_count, base_relatives, pose_params, relatives);
   relatives_to_absolutes(bone_count, relatives, parents, absolutes);
-
   // Get bone transforms->
   for (i = 0; i < bone_count; i++) {
     mat_mult(&absolutes[i], &inverse_base_absolutes[i], &transforms[i]);
   }
 
   // Transform vertices by necessary transforms-> + apply skinning
+  /* ncols is 544 */
   resize(positions, 3, base_positions->ncols);
   fill(positions, 0.0);
   Matrix *curr_positions = get_new_matrix(4, base_positions->ncols);
@@ -325,6 +318,7 @@ static inline void get_skinned_vertex_positions(
   int i_bone, i_vert;
   for (i_bone = 0; i_bone < bone_count; i_bone++) {
     mat_mult(&transforms[i_bone], base_positions, curr_positions);
+    /* positions->ncols is also 544 */
     for (i_vert = 0; i_vert < positions->ncols; i_vert++) {
       for (i = 0; i < 3; i++) {
         positions->data[i + i_vert * positions->nrows] +=
@@ -334,12 +328,14 @@ static inline void get_skinned_vertex_positions(
     }
   }
 
+  /* Always false */
   if (is_mirrored) {
     for (i = 0; i < positions->ncols; i++) {
       positions->data[0 + i * positions->nrows] *= -1;
     }
   }
 
+  /* Always true */
   if (apply_global) {
     apply_global_transform(pose_params, positions);
   }
@@ -391,6 +387,8 @@ void to_pose_params(int count, double const *__restrict theta,
 
     i_pose_params++;
   }
+  printf("pose params:\n");
+  print_d_arr_2d(pose_params->data, pose_params->ncols, pose_params->nrows);
 }
 
 void hand_objective(double const *__restrict theta, int bone_count,
@@ -463,10 +461,7 @@ void hand_objective_complicated(
 extern int enzyme_const;
 extern int enzyme_dup;
 extern int enzyme_dupnoneed;
-void __enzyme_autodiff(...) noexcept;
-
-// tapenade -o hand_tapenade -head "hand_objective(err)/(theta)
-// hand_objective_complicated(err)/(theta us)" hand.c
+extern void __enzyme_autodiff(void *, ...);
 void dhand_objective(double const *theta, double *dtheta, int bone_count,
                      const char **bone_names, const int *parents,
                      Matrix *base_relatives, Matrix *inverse_base_absolutes,
@@ -474,30 +469,31 @@ void dhand_objective(double const *theta, double *dtheta, int bone_count,
                      const Triangle *triangles, int is_mirrored,
                      int corresp_count, const int *correspondences,
                      Matrix *points, double *err, double *derr) {
-  __enzyme_autodiff(
-      hand_objective, enzyme_dup, theta, dtheta, enzyme_const, bone_count,
-      enzyme_const, bone_names, enzyme_const, parents, enzyme_const,
-      base_relatives, enzyme_const, inverse_base_absolutes, enzyme_const,
-      base_positions, enzyme_const, weights, enzyme_const, triangles,
-      enzyme_const, is_mirrored, enzyme_const, corresp_count, enzyme_const,
-      correspondences, enzyme_const, points, enzyme_dupnoneed, err, derr);
+  // __enzyme_autodiff(
+  //     hand_objective, enzyme_dup, theta, dtheta, enzyme_const, bone_count,
+  //     enzyme_const, bone_names, enzyme_const, parents, enzyme_const,
+  //     base_relatives, enzyme_const, inverse_base_absolutes, enzyme_const,
+  //     base_positions, enzyme_const, weights, enzyme_const, triangles,
+  //     enzyme_const, is_mirrored, enzyme_const, corresp_count, enzyme_const,
+  //     correspondences, enzyme_const, points, enzyme_dupnoneed, err, derr);
 }
 
-void dhand_objective_complicated(double const *theta, double *dtheta,
-                                 double const *us, double *dus, int bone_count,
-                                 const char **bone_names, const int *parents,
-                                 Matrix *base_relatives,
-                                 Matrix *inverse_base_absolutes,
-                                 Matrix *base_positions, Matrix *weights,
-                                 const Triangle *triangles, int is_mirrored,
-                                 int corresp_count, const int *correspondences,
-                                 Matrix *points, double *err, double *derr) {
-  __enzyme_autodiff(hand_objective_complicated, enzyme_dup, theta, dtheta,
-                    enzyme_dup, us, dus, enzyme_const, bone_count, enzyme_const,
-                    bone_names, enzyme_const, parents, enzyme_const,
-                    base_relatives, enzyme_const, inverse_base_absolutes,
-                    enzyme_const, base_positions, enzyme_const, weights,
-                    enzyme_const, triangles, enzyme_const, is_mirrored,
-                    enzyme_const, corresp_count, enzyme_const, correspondences,
-                    enzyme_const, points, enzyme_dupnoneed, err, derr);
-}
+// void dhand_objective_complicated(double const *theta, double *dtheta,
+//                                  double const *us, double *dus, int
+//                                  bone_count, const char **bone_names, const
+//                                  int *parents, Matrix *base_relatives, Matrix
+//                                  *inverse_base_absolutes, Matrix
+//                                  *base_positions, Matrix *weights, const
+//                                  Triangle *triangles, int is_mirrored, int
+//                                  corresp_count, const int *correspondences,
+//                                  Matrix *points, double *err, double *derr) {
+//   __enzyme_autodiff(hand_objective_complicated, enzyme_dup, theta, dtheta,
+//                     enzyme_dup, us, dus, enzyme_const, bone_count,
+//                     enzyme_const, bone_names, enzyme_const, parents,
+//                     enzyme_const, base_relatives, enzyme_const,
+//                     inverse_base_absolutes, enzyme_const, base_positions,
+//                     enzyme_const, weights, enzyme_const, triangles,
+//                     enzyme_const, is_mirrored, enzyme_const, corresp_count,
+//                     enzyme_const, correspondences, enzyme_const, points,
+//                     enzyme_dupnoneed, err, derr);
+// }

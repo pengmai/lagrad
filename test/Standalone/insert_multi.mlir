@@ -5,8 +5,8 @@ func @proj(%A: tensor<3xf64>) -> tensor<2xf64> {
   %0 = tensor.extract %A[%c0] : tensor<3xf64> // s1
   %1 = tensor.extract %A[%c2] : tensor<3xf64> // s2
   %t0 = linalg.init_tensor [2] : tensor<2xf64>
-  %t1 = tensor.insert %0 into %t0[%c0] {tag = "s3"} : tensor<2xf64> // s3
-  %t2 = tensor.insert %1 into %t1[%c1] {tag = "s4"}: tensor<2xf64> // s4
+  %t1 = tensor.insert %0 into %t0[%c0] : tensor<2xf64> // s3
+  %t2 = tensor.insert %1 into %t1[%c1] : tensor<2xf64> // s4
   return %t2 : tensor<2xf64>
 }
 
