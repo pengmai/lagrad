@@ -248,6 +248,11 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     // The input is an integer so can't have a gradient signal.
     return;
   }
+  if (opName == "linalg.fill") {
+    // We ignore fill ops for now because we assume they don't propagate
+    // gradient signal.
+    return;
+  }
   if (opName == "scf.if") {
     auto ifOp = dyn_cast<scf::IfOp>(op);
     assert(ifOp.getNumResults() == 1 &&
@@ -287,9 +292,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     }
 
     Value result = forOp.getResult(result_idx);
-    // llvm::outs() << "***START FOR LOOP***: " << forOp
-    //              << "\n***END FOR LOOP***\n";
     auto vjp_value = env[result];
+    env[forOp.getIterOperands()[result_idx]] = env[result];
     assert(vjp_value && "vjp value for scf.for op was not found");
     llvm::SmallDenseSet<Value> freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);

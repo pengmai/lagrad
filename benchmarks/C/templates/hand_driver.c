@@ -91,8 +91,7 @@ int main() {
   // F64Descriptor2D pose_params =
   //     mto_pose_params(deadbeef, input.theta, 0, input.n_theta, 1);
   // printf("Pose params:\n");
-  // print_d_arr_2d(pose_params.aligned, pose_params.size_0,
-  // pose_params.size_1);
+  // print_d_arr_2d(pose_params.aligned, pose_params.size_0, pose_params.size_1);
 
   F64Descriptor1D dpp =
       dtopose_params(deadbeef, input.theta, 0, input.n_theta, 1);

@@ -19,15 +19,25 @@ c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 def main(args):
     driver_template = c_env.get_template("hand_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
+    enzyme_c_template = c_env.get_template("enzyme_hand.c")
+    lagrad_template = mlir_env.get_template("hand.mlir")
+
+    config = {
+        "nbones": 22,
+    }
+
     if args.print:
-        # TODO: Print the mlir template
+        print(lagrad_template.render(**config))
         return
 
-    config = {}
     compile_c(driver_template.render(**config).encode("utf-8"), "hand_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
+    compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
+    compile_mlir(lagrad_template.render(**config).encode("utf-8"), "hand_lagrad.o")
     stdout = link_and_run(
-        ["hand_driver.o", "mlir_c_abi.o"], "hand_driver.out", link_runner_utils=True
+        ["hand_driver.o", "mlir_c_abi.o", "hand_enzyme.o", "hand_lagrad.o"],
+        "hand_driver.out",
+        link_runner_utils=True,
     ).decode("utf-8")
     print(stdout)
 
