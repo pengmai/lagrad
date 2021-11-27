@@ -297,10 +297,12 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     assert(vjp_value && "vjp value for scf.for op was not found");
     llvm::SmallDenseSet<Value> freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
+    // size_t fv_count = 0;
     for (auto freeOperand : freeOperands) {
       if (!isFloatOrFloatTensor(freeOperand.getType())) {
         continue;
       }
+      // fv_count++;
       auto dFreeOperand =
           reverseForOp(forOp, freeOperand, vjp_value, result_idx, rewriter);
       if (!env[freeOperand]) {
@@ -310,6 +312,20 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
             freeOperand.getLoc(), env[freeOperand], dFreeOperand);
       }
     }
+    // // only works for GMMs
+    // if (forOp.getResultTypes()[0].isa<FloatType>()) {
+    //   llvm::errs() << "OUTER FOR OP:\nDifferentiated through " << fv_count
+    //                << " free variables:\n";
+    // } else {
+    //   llvm::errs() << "INNER FOR OP:\nDifferentiated through " << fv_count
+    //                << " free variables:\n";
+    // }
+    // for (auto freeOperand : freeOperands) {
+    //   if (isFloatOrFloatTensor(freeOperand.getType())) {
+    //     llvm::errs() << "fv: " << freeOperand << "\n";
+    //   }
+    // }
+
     return;
   }
 
@@ -411,6 +427,16 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
           extractSliceOp.offsets(), extractSliceOp.sizes(),
           extractSliceOp.strides(), extractSliceOp.static_offsets(),
           extractSliceOp.static_sizes(), extractSliceOp.static_strides());
+    } else if (opName == "tensor.insert_slice") {
+      if (op_index > 0) {
+        continue;
+      }
+      auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(op);
+      vjp_value = rewriter.create<tensor::ExtractSliceOp>(
+          op->getLoc(), insertSliceOp.getSourceType(), vjp_value,
+          insertSliceOp.getMixedOffsets(), insertSliceOp.getMixedSizes(),
+          insertSliceOp.getMixedStrides());
+      env[insertSliceOp.dest()] = env[insertSliceOp.getResult()];
     } else if (opName == "linalg.generic") {
       auto genericOp = dyn_cast<linalg::GenericOp>(op);
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
