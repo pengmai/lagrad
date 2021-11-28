@@ -26,7 +26,24 @@ extern F64Descriptor2D mto_pose_params(/*theta=*/double *, double *, int64_t,
                                        int64_t, int64_t);
 extern F64Descriptor1D dtopose_params(/*theta=*/double *, double *, int64_t,
                                       int64_t, int64_t);
-
+extern F64Descriptor3D mget_posed_relatives(/*base_relatives=*/double *,
+                                            double *, int64_t, int64_t, int64_t,
+                                            int64_t, int64_t, int64_t, int64_t,
+                                            /*pose_params=*/double *, double *,
+                                            int64_t, int64_t, int64_t, int64_t,
+                                            int64_t);
+// TODO: This is incorrect
+extern F64Descriptor2D dget_posed_relatives(/*base_relatives=*/double *,
+                                            double *, int64_t, int64_t, int64_t,
+                                            int64_t, int64_t, int64_t, int64_t,
+                                            /*pose_params=*/double *, double *,
+                                            int64_t, int64_t, int64_t, int64_t,
+                                            int64_t);
+extern F64Descriptor1D dtest(/*theta=*/double *, double *, int64_t, int64_t,
+                             int64_t,
+                             /*base_relatives=*/double *, double *, int64_t,
+                             int64_t, int64_t, int64_t, int64_t, int64_t,
+                             int64_t);
 void enzyme_jacobian_simple(HandInput *input, Matrix *base_relatives,
                             Matrix *inverse_base_absolutes,
                             Matrix *base_positions, Matrix *weights,
@@ -79,24 +96,45 @@ int main() {
   //                    input.n_theta);
   double *J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
 
-  // double err[3 * input.n_pts];
+  double err[3 * input.n_pts];
   // enzyme_jacobian_simple(&input, base_relatives, inverse_base_absolutes,
   //                        &base_positions, &weights, &points, J);
-  // hand_objective(input.theta, input.model.n_bones, input.model.bone_names,
-  //                input.model.parents, base_relatives, inverse_base_absolutes,
-  //                &base_positions, &weights, NULL, input.model.is_mirrored,
-  //                input.n_pts, input.correspondences, &points, err);
+  hand_objective(input.theta, input.model.n_bones, input.model.bone_names,
+                 input.model.parents, base_relatives, inverse_base_absolutes,
+                 &base_positions, &weights, NULL, input.model.is_mirrored,
+                 input.n_pts, input.correspondences, &points, err);
 
   double *deadbeef = (double *)0xdeadbeef;
-  // F64Descriptor2D pose_params =
-  //     mto_pose_params(deadbeef, input.theta, 0, input.n_theta, 1);
+  F64Descriptor2D pose_params =
+      mto_pose_params(deadbeef, input.theta, 0, input.n_theta, 1);
   // printf("Pose params:\n");
-  // print_d_arr_2d(pose_params.aligned, pose_params.size_0, pose_params.size_1);
+  // print_d_arr_2d(pose_params.aligned, pose_params.size_0,
+  // pose_params.size_1);
 
-  F64Descriptor1D dpp =
-      dtopose_params(deadbeef, input.theta, 0, input.n_theta, 1);
-  printf("dPose params:\n");
-  print_d_arr(dpp.aligned, dpp.size);
+  // F64Descriptor1D dpp =
+  //     dtopose_params(deadbeef, input.theta, 0, input.n_theta, 1);
+  // printf("dPose params:\n");
+  // print_d_arr(dpp.aligned, dpp.size);
+
+  // F64Descriptor3D relatives = mget_posed_relatives(
+  //     deadbeef, input.model.base_relatives, 0, input.model.n_bones, 4, 4, 16,
+  //     4, 1, pose_params.allocated, pose_params.aligned, pose_params.offset,
+  //     pose_params.size_0, pose_params.size_1, pose_params.stride_0,
+  //     pose_params.stride_1);
+
+  F64Descriptor1D dt =
+      dtest(deadbeef, input.theta, 0, input.n_theta, 1, deadbeef,
+            input.model.base_relatives, 0, input.model.n_bones, 4, 4, 16, 4, 1);
+  printf("dt:\n");
+  print_d_arr(dt.aligned, dt.size);
+
+  // F64Descriptor2D drelatives = dget_posed_relatives(
+  //     deadbeef, input.model.base_relatives, 0, input.model.n_bones, 4, 4, 16,
+  //     4, 1, pose_params.allocated, pose_params.aligned, pose_params.offset,
+  //     pose_params.size_0, pose_params.size_1, pose_params.stride_0,
+  //     pose_params.stride_1);
+  // printf("drelatives:\n");
+  // print_d_arr_2d(drelatives.aligned, drelatives.size_0, drelatives.size_1);
   // verify_hand_results(ref_J, J, J_rows, input.n_theta, "Enzyme/C");
   // serialize_hand_results("benchmarks/results/hand_test.txt", J, J_rows,
   //                        input.n_theta);

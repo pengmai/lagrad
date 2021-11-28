@@ -387,8 +387,6 @@ void to_pose_params(int count, double const *__restrict theta,
 
     i_pose_params++;
   }
-  printf("pose params:\n");
-  print_d_arr_2d(pose_params->data, pose_params->ncols, pose_params->nrows);
 }
 
 void hand_objective(double const *__restrict theta, int bone_count,

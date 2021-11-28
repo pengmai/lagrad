@@ -24,6 +24,7 @@ def main(args):
 
     config = {
         "nbones": 22,
+        "ntheta": 26,
     }
 
     if args.print:
