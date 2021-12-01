@@ -17,5 +17,7 @@ std::unique_ptr<mlir::Pass> createBufferizePass();
 std::unique_ptr<mlir::Pass> createTriangularLoopsPass();
 
 std::unique_ptr<mlir::Pass> createStaticAllocsPass();
+
+std::unique_ptr<mlir::Pass> createStandaloneDCEPass();
 } // end namespace Standalone
 } // end namespace mlir

@@ -51,7 +51,7 @@ BUFFERIZE = [
     "-buffer-hoisting",
     "-buffer-loop-hoisting",
     "-promote-buffers-to-stack",
-    "-buffer-deallocation",
+    # "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
     # "-convert-linalg-to-affine-loops",
@@ -124,6 +124,7 @@ def compile_mlir(contents, output, lower_type="loops"):
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
+            "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
             "-canonicalize",

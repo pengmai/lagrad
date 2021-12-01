@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
   mlir::registerPass(mlir::Standalone::createBufferizePass);
   mlir::registerPass(mlir::Standalone::createTriangularLoopsPass);
   mlir::registerPass(mlir::Standalone::createStaticAllocsPass);
+  mlir::registerPass(mlir::Standalone::createStandaloneDCEPass);
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::standalone::StandaloneDialect>();

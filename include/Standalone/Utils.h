@@ -12,7 +12,7 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder);
 
 Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 
-Value getZero(Location loc, Value operand, OpBuilder &rewriter);
+Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init);
 
 void collectFreeVars(Block *parentBlock, Region &region,
                      SmallVector<Value> &out);
@@ -36,8 +36,9 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
                   DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter);
 
-Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
-                   size_t result_idx, ConversionPatternRewriter &rewriter);
+ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operand,
+                        Value vjp_value, size_t result_idx,
+                        ConversionPatternRewriter &rewriter);
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
                              Value vjp_value, OpBuilder &builder);

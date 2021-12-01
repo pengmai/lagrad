@@ -118,14 +118,14 @@ public:
         getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
     auto sliceType = MemRefType::get(destType.getShape(),
                                      destType.getElementType(), slice_layout);
-    auto dest = rewriter.create<memref::AllocOp>(
-        op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
-    rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
+    // auto dest = rewriter.create<memref::AllocOp>(
+    //     op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
+    // rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
     auto subview = rewriter.create<memref::SubViewOp>(
-        op.getLoc(), sliceType, dest, op.getMixedOffsets(), op.getMixedSizes(),
-        op.getMixedStrides());
+        op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
+        op.getMixedSizes(), op.getMixedStrides());
     rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
-    rewriter.replaceOp(op, dest.getResult());
+    rewriter.replaceOp(op, adaptor.dest());
     return success();
   }
 };

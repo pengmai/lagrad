@@ -211,6 +211,7 @@ def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str
         + [
             "-take-grads",
             "-canonicalize",
+            "-standalone-dce",
             "-convert-elementwise-to-linalg",
         ]
         + BUFFERIZE

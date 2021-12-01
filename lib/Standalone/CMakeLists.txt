@@ -10,6 +10,7 @@ add_mlir_dialect_library(MLIRStandalone
         TriangularLoops.cpp
         StaticAllocs.cpp
         ActivityAnalysis.cpp
+        DeadCodeElimination.cpp
         Utils.cpp
 
         ADDITIONAL_HEADER_DIRS

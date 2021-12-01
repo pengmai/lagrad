@@ -14,6 +14,12 @@ bool isFloatOrFloatTensor(Type typ) {
           typ.dyn_cast<RankedTensorType>().getElementType().isa<FloatType>());
 }
 
+bool isIntOrIntTensor(Type typ) {
+  return typ.isIntOrIndex() ||
+         (typ.isa<RankedTensorType>() &&
+          typ.dyn_cast<RankedTensorType>().getElementType().isIntOrIndex());
+}
+
 SmallVector<mlir::Operation *>
 cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 OpBuilder &builder, ValueRange regionArgs,
@@ -168,18 +174,28 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder) {
   return nullptr;
 }
 
-Value getZero(Location loc, Value operand, OpBuilder &rewriter) {
+Value getZero(Location loc, Value operand, OpBuilder &rewriter,
+              bool init = false) {
   if (operand.getType().isa<FloatType>()) {
     return rewriter.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 0.0));
   }
   if (operand.getType().isa<ShapedType>()) {
     auto shapedType = operand.getType().dyn_cast<ShapedType>();
-    // Will automatically be broadcasted to the right shape.
-    auto denseAttr = shapedType.getElementTypeBitWidth() == 32
-                         ? DenseFPElementsAttr::get(shapedType, {0.0f})
-                         : DenseFPElementsAttr::get(shapedType, {0.0});
-    return rewriter.create<arith::ConstantOp>(loc, denseAttr);
+    if (init) {
+      auto zero = rewriter.create<arith::ConstantOp>(
+          loc, FloatAttr::get(shapedType.getElementType(), 0.0));
+      auto space = rewriter.create<linalg::InitTensorOp>(
+          loc, shapedType.getShape(), shapedType.getElementType());
+      auto filled = rewriter.create<linalg::FillOp>(loc, zero, space);
+      return filled.getResult(0);
+    } else {
+      // Will automatically be broadcasted to the right shape.
+      auto denseAttr = shapedType.getElementTypeBitWidth() == 32
+                           ? DenseFPElementsAttr::get(shapedType, {0.0f})
+                           : DenseFPElementsAttr::get(shapedType, {0.0});
+      return rewriter.create<arith::ConstantOp>(loc, denseAttr);
+    }
   }
   llvm::outs() << "getZero for type " << operand.getType()
                << " not yet implemented\n";
@@ -211,6 +227,9 @@ void collectFreeVars(Block *parentBlock, Region &region,
                      llvm::SmallDenseSet<Value> &out) {
   for (auto &op : region.getOps()) {
     for (auto operand : op.getOperands()) {
+      if (!isFloatOrFloatTensor(operand.getType())) {
+        continue;
+      }
       auto definingOp = operand.getDefiningOp();
       if (dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
         continue;
@@ -297,19 +316,18 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     assert(vjp_value && "vjp value for scf.for op was not found");
     llvm::SmallDenseSet<Value> freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
-    // size_t fv_count = 0;
-    for (auto freeOperand : freeOperands) {
-      if (!isFloatOrFloatTensor(freeOperand.getType())) {
-        continue;
-      }
-      // fv_count++;
-      auto dFreeOperand =
-          reverseForOp(forOp, freeOperand, vjp_value, result_idx, rewriter);
-      if (!env[freeOperand]) {
-        env[freeOperand] = dFreeOperand;
+
+    auto free_operand_vec = llvm::to_vector<4>(freeOperands);
+    auto vjp_values =
+        reverseForOp(forOp, free_operand_vec, vjp_value, result_idx, rewriter);
+    for (auto result_pair : llvm::zip(free_operand_vec, vjp_values)) {
+      auto free_operand = std::get<0>(result_pair);
+      auto result_vjp = std::get<1>(result_pair);
+      if (!env[free_operand]) {
+        env[free_operand] = result_vjp;
       } else {
-        env[freeOperand] = rewriter.create<arith::AddFOp>(
-            freeOperand.getLoc(), env[freeOperand], dFreeOperand);
+        env[free_operand] = rewriter.create<arith::AddFOp>(
+            free_operand.getLoc(), env[free_operand], result_vjp);
       }
     }
     // // only works for GMMs
@@ -332,7 +350,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
   size_t op_index = 0;
   for (Value operand : op->getOperands()) {
     // TODO: This is a bandaid over proper activity analysis
-    if (operand.getType().isIntOrIndex()) {
+    if (!isFloatOrFloatTensor(operand.getType())) {
       continue;
     }
     // Compute the pullback (VJP).
@@ -421,12 +439,18 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       env[insertOp.dest()] = env[insertOp.result()];
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
-      auto space = getZero(operand.getLoc(), operand, rewriter);
-      vjp_value = rewriter.create<tensor::InsertSliceOp>(
-          operand.getLoc(), space.getType(), vjp_value, space,
+      if (!env[operand]) {
+        env[operand] =
+            getZero(operand.getLoc(), operand, rewriter, /*init=*/true);
+      }
+      // auto space = getZero(operand.getLoc(), operand, rewriter);
+      assert(env[operand] && "Gradient location was not initialized");
+      env[operand] = rewriter.create<tensor::InsertSliceOp>(
+          operand.getLoc(), operand.getType(), vjp_value, env[operand],
           extractSliceOp.offsets(), extractSliceOp.sizes(),
           extractSliceOp.strides(), extractSliceOp.static_offsets(),
           extractSliceOp.static_sizes(), extractSliceOp.static_strides());
+      continue;
     } else if (opName == "tensor.insert_slice") {
       if (op_index > 0) {
         continue;
@@ -464,6 +488,12 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
             env[freeOperand] = rewriter.create<arith::AddFOp>(
                 freeOperand.getLoc(), result, env[freeOperand]);
           }
+        }
+
+        // Also update the output gradients
+        for (auto it :
+             llvm::zip(genericOp.getOutputOperands(), genericOp.getResults())) {
+          env[std::get<0>(it)->get()] = env[std::get<1>(it)];
         }
       }
       vjp_value =
@@ -808,15 +838,20 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
   return adjointIf.getResult(0);
 }
 
-Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
-                   size_t result_idx, ConversionPatternRewriter &rewriter) {
+ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
+                        Value vjp_value, size_t result_idx,
+                        ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   SmallVector<Value> operandsWithIV{forOp.getInductionVar()};
   operandsWithIV.insert(operandsWithIV.end(), forOp.getRegionIterArgs().begin(),
                         forOp.getRegionIterArgs().end());
   auto iterArgsInit = llvm::to_vector<4>(forOp.getIterOperands());
-  auto space = getZero(free_operand.getLoc(), free_operand, rewriter);
-  iterArgsInit.push_back(space);
+
+  for (auto free_operand : free_operands) {
+    auto space =
+        getZero(free_operand.getLoc(), free_operand, rewriter, /*init=*/true);
+    iterArgsInit.push_back(space);
+  }
   auto adjointFor = rewriter.create<scf::ForOp>(
       forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
       iterArgsInit,
@@ -829,6 +864,10 @@ Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
                             operandsWithIV, /*offsetInputs=*/false);
 
         DenseMap<Value, Value> env;
+        for (size_t i = 0; i < free_operands.size(); i++) {
+          env[free_operands[i]] =
+              iterArgs[iterArgs.size() - free_operands.size() + i];
+        }
         SmallVector<Value> primalResults;
         for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
              it++) {
@@ -844,20 +883,22 @@ Value reverseForOp(scf::ForOp forOp, Value free_operand, Value vjp_value,
             populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
           }
         }
-        if (!env[free_operand]) {
-          // Assume free_operand is not active.
-          env[free_operand] =
-              getZero(free_operand.getLoc(), free_operand, rewriter);
-        } else {
-          env[free_operand] = rewriter.create<arith::AddFOp>(
-              free_operand.getLoc(), env[free_operand],
-              iterArgs[iterArgs.size() - 1]);
+        for (size_t i = 0; i < free_operands.size(); i++) {
+          auto free_operand = free_operands[i];
+          if (!env[free_operand]) {
+            // Assume free_operand is not active.
+            env[free_operand] =
+                getZero(free_operand.getLoc(), free_operand, rewriter);
+          } else {
+            // env[free_operand] = rewriter.create<arith::AddFOp>(
+            //     free_operand.getLoc(), env[free_operand],
+            //     iterArgs[iterArgs.size() - free_operands.size() + i]);
+          }
+          primalResults.push_back(env[free_operand]);
         }
-        primalResults.push_back(env[free_operand]);
         rewriter.create<scf::YieldOp>(loc, primalResults);
       });
-
-  return adjointFor.getResult(adjointFor.getNumResults() - 1);
+  return adjointFor.getResults().take_back(free_operands.size());
 }
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
@@ -868,12 +909,15 @@ Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
   assert(tensorType.hasStaticShape() &&
          "only static shapes are currently supported");
   auto zero = getZero(operand.getLoc(), op.result(), builder);
-  auto space = builder.create<linalg::InitTensorOp>(
+  Value space = builder.create<linalg::InitTensorOp>(
       operand.getLoc(), ValueRange{}, tensorType.getShape(),
       op.result().getType());
-  auto filled = builder.create<linalg::FillOp>(operand.getLoc(), zero, space);
-  return builder.create<tensor::InsertOp>(op.getLoc(), vjp_value,
-                                          filled.getResult(0), op.indices());
+  if (tensorType.getRank() != 0) {
+    space = builder.create<linalg::FillOp>(operand.getLoc(), zero, space)
+                .getResult(0);
+  }
+  return builder.create<tensor::InsertOp>(op.getLoc(), vjp_value, space,
+                                          op.indices());
 }
 
 Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
