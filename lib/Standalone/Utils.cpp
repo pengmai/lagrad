@@ -395,10 +395,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       // auto selectOp = dyn_cast<mlir::SelectOp>(op);
       llvm_unreachable("std.select not yet implemented");
     } else if (opName == "math.exp") {
-      assert(op->getNumResults() == 1 &&
-             "math.exp op did not have exactly 1 result");
-      vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
-                                                 op->getResult(0));
+      auto expOp = dyn_cast<math::ExpOp>(op);
+      vjp_value = rewriter.create<arith::MulFOp>(expOp.getLoc(), vjp_value,
+                                                 expOp.getResult());
     } else if (opName == "math.sin") {
       auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), cos, vjp_value);
@@ -439,14 +438,11 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       env[insertOp.dest()] = env[insertOp.result()];
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
-      if (!env[operand]) {
-        env[operand] =
-            getZero(operand.getLoc(), operand, rewriter, /*init=*/true);
-      }
-      // auto space = getZero(operand.getLoc(), operand, rewriter);
-      assert(env[operand] && "Gradient location was not initialized");
+      auto space = env[operand] ? env[operand]
+                                : getZero(operand.getLoc(), operand, rewriter,
+                                          /*init=*/true);
       env[operand] = rewriter.create<tensor::InsertSliceOp>(
-          operand.getLoc(), operand.getType(), vjp_value, env[operand],
+          operand.getLoc(), operand.getType(), vjp_value, space,
           extractSliceOp.offsets(), extractSliceOp.sizes(),
           extractSliceOp.strides(), extractSliceOp.static_offsets(),
           extractSliceOp.static_sizes(), extractSliceOp.static_strides());
@@ -469,6 +465,11 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       // Additionally compute adjoints for all free variables. We only want
       // this to run once, hence the if op_index == 0.
       if (op_index == 0) {
+        // Also update the output gradients
+        for (auto it :
+             llvm::zip(genericOp.getOutputOperands(), genericOp.getResults())) {
+          env[std::get<0>(it)->get()] = env[std::get<1>(it)];
+        }
         llvm::SmallDenseSet<Value> freeOperands;
         collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
                         freeOperands);
@@ -488,12 +489,6 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
             env[freeOperand] = rewriter.create<arith::AddFOp>(
                 freeOperand.getLoc(), result, env[freeOperand]);
           }
-        }
-
-        // Also update the output gradients
-        for (auto it :
-             llvm::zip(genericOp.getOutputOperands(), genericOp.getResults())) {
-          env[std::get<0>(it)->get()] = env[std::get<1>(it)];
         }
       }
       vjp_value =
@@ -528,6 +523,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (op_index > 1)
         continue;
       if (op_index == 0) {
+        auto matvecOp = dyn_cast<linalg::MatvecOp>(op);
+        // TODO: This is probably a bandaid solution.
+        env[matvecOp.getOutputOperand(0)->get()] = env[matvecOp.getResult(0)];
         // Broadcast the gradient signal
         assert(operand.getType().isa<RankedTensorType>() &&
                "matvec input was not a ranked tensor type");
