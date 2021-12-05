@@ -19,12 +19,14 @@ c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 def main(args):
     driver_template = c_env.get_template("hand_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
+    # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
     lagrad_template = mlir_env.get_template("hand.mlir")
 
     config = {
         "nbones": 22,
         "ntheta": 26,
+        "nverts": 544,
     }
 
     if args.print:

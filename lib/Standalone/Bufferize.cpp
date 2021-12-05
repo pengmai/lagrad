@@ -24,7 +24,8 @@ AffineMap getRankReduceSubviewLayout(int64_t resultRank,
   AffineExpr expr;
   for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
     if (exprIdx == resultRank - 1) {
-      expr = rewriter.getAffineDimExpr(exprIdx) +
+      expr = rewriter.getAffineDimExpr(exprIdx) *
+                 rewriter.getAffineSymbolExpr(resultRank) +
              rewriter.getAffineSymbolExpr(exprIdx);
     } else {
       expr = rewriter.getAffineDimExpr(exprIdx) *
@@ -32,7 +33,7 @@ AffineMap getRankReduceSubviewLayout(int64_t resultRank,
              expr;
     }
   }
-  return AffineMap::get(resultRank, resultRank, expr);
+  return AffineMap::get(resultRank, resultRank + 1, expr);
 }
 
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {

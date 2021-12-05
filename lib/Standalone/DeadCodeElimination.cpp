@@ -55,7 +55,14 @@ public:
                              forOp.getResults(),        // op results
                              yieldOp.getOperands()      // iter yield
                              )) {
-      bool forwarded = std::get<2>(it).use_empty();
+      auto result = std::get<2>(it);
+      bool forwarded =
+          result.use_empty() && (result.getType().isa<FloatType>() ||
+                                 (result.getType().isa<RankedTensorType>() &&
+                                  result.getType()
+                                      .dyn_cast<RankedTensorType>()
+                                      .getElementType()
+                                      .isa<FloatType>()));
       keepMask.push_back(!forwarded);
       canonicalize |= forwarded;
       if (forwarded) {

@@ -28,6 +28,22 @@ def test_grad_collapse_shape():
     )
 
 
+def test_collapse_shape_col():
+    expected = [-1, -2, -3, -4]
+    assert (
+        extract_1d(jit_file(f"{MLIR_FILES}/bufferize/collapse_shape_col.mlir"))
+        == expected
+    )
+
+
+def test_grad_collapse_shape_col():
+    expected = np.broadcast_to(np.array([0, 0, 1, 0]), (4, 4)).tolist()
+    assert (
+        extract_2d(jit_file(f"{MLIR_FILES}/bufferize/grad_collapse_shape_col.mlir"))
+        == expected
+    )
+
+
 def test_collapse_shape_2d():
     assert extract_2d(jit_file(f"{MLIR_FILES}/bufferize/collapse_shape_2d.mlir")) == [
         [2.5, 3],

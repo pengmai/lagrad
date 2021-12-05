@@ -209,6 +209,7 @@ def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str
         args
         or (["-linalg-generalize-named-ops"] if linalg_generalize else [])
         + [
+            "-loop-invariant-code-motion",
             "-take-grads",
             "-canonicalize",
             "-standalone-dce",

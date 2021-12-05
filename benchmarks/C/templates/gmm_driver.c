@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 1
+#define NUM_RUNS 3
 
 typedef struct {
   double *data;
@@ -16,7 +16,7 @@ typedef struct {
 } UnrankedMemref;
 double *deadbeef = (double *)0xdeadbeef;
 
-extern UnrankedMemref lagrad_gmm_objective_full(
+extern double mlir_gmm_opt_full(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
     /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -262,35 +262,35 @@ unsigned long mlir_optimized_full_adjoint(GMMInput gmm_input,
 }
 // {% endif %}
 // {% if method == 'enzyme_mlir_compressed' %}
-// unsigned long mlir_optimized_compressed_primal(GMMInput gmm_input,
-//                                                double *ref_alphas,
-//                                                double *ref_means,
-//                                                double *ref_icf,
-//                                                double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   int tri_size = d * (d - 1) / 2;
-//   int icf_size = d * (d + 1) / 2;
-//   double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
-//   for (size_t i = 0; i < k; i++) {
-//     for (size_t j = 0; j < tri_size; j++) {
-//       compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
-//     }
-//   }
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   double res = enzyme_gmm_opt_compressed(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
-//       1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
+unsigned long mlir_optimized_compressed_primal(GMMInput gmm_input,
+                                               double *ref_alphas,
+                                               double *ref_means,
+                                               double *ref_icf,
+                                               double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  int tri_size = d * (d - 1) / 2;
+  int icf_size = d * (d + 1) / 2;
+  double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
+  for (size_t i = 0; i < k; i++) {
+    for (size_t j = 0; j < tri_size; j++) {
+      compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
+    }
+  }
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  double res = enzyme_gmm_opt_compressed(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
 
-//   printf("MLIR opt primal res: %f\n", res);
-//   free(compressed_Ls);
-//   return timediff(start, stop);
-// }
+  printf("MLIR opt primal res: %f\n", res);
+  free(compressed_Ls);
+  return timediff(start, stop);
+}
 
 unsigned long mlir_optimized_compressed_adjoint(GMMInput gmm_input,
                                                 double *ref_alphas,
@@ -310,8 +310,8 @@ unsigned long mlir_optimized_compressed_adjoint(GMMInput gmm_input,
   gettimeofday(&start, NULL);
   GMMCompressedGrad ans = enzyme_gmm_opt_diff_compressed(
       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-      d, 1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
       /*wishart_gamma=*/gmm_input.wishart_gamma,
       /*wishart_m=*/gmm_input.wishart_m);
@@ -378,48 +378,49 @@ unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
 }
 // {% endif %}
 
-// unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
-//                                      double *ref_means, double *ref_icf,
-//                                      double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   lagrad_gmm_objective_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-//   return timediff(start, stop);
-// }
+unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
+                                     double *ref_means, double *ref_icf,
+                                     double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  double res = mlir_gmm_opt_full(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
+  printf("MLIR full primal: %f\n", res);
+  return timediff(start, stop);
+}
 
-// unsigned long lagrad_gmm_full_adjoint(GMMInput gmm_input, double *ref_alphas,
-//                                       double *ref_means, double *ref_icf,
-//                                       double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   GMMGrad ans = lagrad_gmm_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
+unsigned long lagrad_gmm_full_adjoint(GMMInput gmm_input, double *ref_alphas,
+                                      double *ref_means, double *ref_icf,
+                                      double *temp_icf) {
+  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  GMMGrad ans = lagrad_gmm_full(
+      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
+      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input.wishart_gamma,
+      /*wishart_m=*/gmm_input.wishart_m);
+  gettimeofday(&stop, NULL);
 
-//   print_d_arr(ans.dls.aligned + 10, 10);
-//   convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
-//   check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
-//                 ref_means, temp_icf, ref_icf, "LAGrad Full");
-//   free(ans.dalphas.aligned);
-//   free(ans.dmeans.aligned);
-//   free(ans.dqs.aligned);
-//   free(ans.dls.aligned);
-//   return timediff(start, stop);
-// }
+  // print_d_arr(ans.dls.aligned + 10, 10);
+  convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
+  check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
+                ref_means, temp_icf, ref_icf, "LAGrad Full");
+  free(ans.dalphas.aligned);
+  free(ans.dmeans.aligned);
+  free(ans.dqs.aligned);
+  free(ans.dls.aligned);
+  return timediff(start, stop);
+}
 
 // unsigned long lagrad_gmm_tri_primal(GMMInput gmm_input, double *ref_alphas,
 //                                     double *ref_means, double *ref_icf,
@@ -463,69 +464,69 @@ unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
 //   return timediff(start, stop);
 // }
 
-unsigned long lagrad_gmm_compressed_primal(GMMInput gmm_input,
-                                           double *ref_alphas,
-                                           double *ref_means, double *ref_icf,
-                                           double *temp_icf) {
-  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-  int tri_size = d * (d - 1) / 2;
-  int icf_size = d * (d + 1) / 2;
-  double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
-  for (size_t i = 0; i < k; i++) {
-    for (size_t j = 0; j < tri_size; j++) {
-      compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
-    }
-  }
-  struct timeval start, stop;
-  gettimeofday(&start, NULL);
-  double res = mlir_gmm_opt_compressed(
-      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
-      1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
-      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-      /*wishart_gamma=*/gmm_input.wishart_gamma,
-      /*wishart_m=*/gmm_input.wishart_m);
-  gettimeofday(&stop, NULL);
-  printf("mlir primal: %f\n", res);
-  free(compressed_Ls);
-  return timediff(start, stop);
-}
+// unsigned long lagrad_gmm_compressed_primal(GMMInput gmm_input,
+//                                            double *ref_alphas,
+//                                            double *ref_means, double *ref_icf,
+//                                            double *temp_icf) {
+//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+//   int tri_size = d * (d - 1) / 2;
+//   int icf_size = d * (d + 1) / 2;
+//   double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
+//   for (size_t i = 0; i < k; i++) {
+//     for (size_t j = 0; j < tri_size; j++) {
+//       compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
+//     }
+//   }
+//   struct timeval start, stop;
+//   gettimeofday(&start, NULL);
+//   double res = mlir_gmm_opt_compressed(
+//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+//       1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+//       /*wishart_gamma=*/gmm_input.wishart_gamma,
+//       /*wishart_m=*/gmm_input.wishart_m);
+//   gettimeofday(&stop, NULL);
+//   printf("MLIR compressed primal: %f\n", res);
+//   free(compressed_Ls);
+//   return timediff(start, stop);
+// }
 
-unsigned long lagrad_gmm_compressed_adjoint(GMMInput gmm_input,
-                                            double *ref_alphas,
-                                            double *ref_means, double *ref_icf,
-                                            double *temp_icf) {
-  int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-  int icf_size = d * (d + 1) / 2;
-  int tri_size = d * (d - 1) / 2;
-  double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
-  for (size_t i = 0; i < k; i++) {
-    for (size_t j = 0; j < tri_size; j++) {
-      compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
-    }
-  }
-  struct timeval start, stop;
-  gettimeofday(&start, NULL);
-  GMMCompressedGrad ans = lagrad_gmm_compressed(
-      /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
-      1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
-      /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-      /*wishart_gamma=*/gmm_input.wishart_gamma,
-      /*wishart_m=*/gmm_input.wishart_m);
-  gettimeofday(&stop, NULL);
+// unsigned long lagrad_gmm_compressed_adjoint(GMMInput gmm_input,
+//                                             double *ref_alphas,
+//                                             double *ref_means, double *ref_icf,
+//                                             double *temp_icf) {
+//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
+//   int icf_size = d * (d + 1) / 2;
+//   int tri_size = d * (d - 1) / 2;
+//   double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
+//   for (size_t i = 0; i < k; i++) {
+//     for (size_t j = 0; j < tri_size; j++) {
+//       compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
+//     }
+//   }
+//   struct timeval start, stop;
+//   gettimeofday(&start, NULL);
+//   GMMCompressedGrad ans = lagrad_gmm_compressed(
+//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
+//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+//       1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
+//       /*wishart_gamma=*/gmm_input.wishart_gamma,
+//       /*wishart_m=*/gmm_input.wishart_m);
+//   gettimeofday(&stop, NULL);
 
-  convert_ql_compressed_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned,
-                               temp_icf);
-  check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
-                ref_means, temp_icf, ref_icf, "LAGrad Compressed");
-  free(ans.dalphas.aligned);
-  free(ans.dmeans.aligned);
-  free(ans.dqs.aligned);
-  free(ans.dls.aligned);
-  free(compressed_Ls);
-  return timediff(start, stop);
-}
+//   convert_ql_compressed_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned,
+//                                temp_icf);
+//   check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
+//                 ref_means, temp_icf, ref_icf, "LAGrad Compressed");
+//   free(ans.dalphas.aligned);
+//   free(ans.dmeans.aligned);
+//   free(ans.dqs.aligned);
+//   free(ans.dls.aligned);
+//   free(compressed_Ls);
+//   return timediff(start, stop);
+// }
 
 void serialize_reference(GMMInput gmm_input) {
   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
@@ -560,7 +561,7 @@ int main() {
   bodyFunc funcs[] = {
       // enzyme_gmm_full_primal,
       // enzyme_gmm_full_adjoint,
-      enzyme_gmm_compressed_primal,
+      // enzyme_gmm_compressed_primal,
 
       // {% if method == 'enzyme_c' %}
       // enzyme_gmm_compressed_adjoint,
@@ -579,12 +580,11 @@ int main() {
       // {% endif %}
 
       // lagrad_gmm_full_primal,
-
-      // lagrad_gmm_full_adjoint,
+      lagrad_gmm_full_adjoint,
       // lagrad_gmm_tri_primal,
       // lagrad_gmm_tri_adjoint,
       // lagrad_gmm_compressed_primal,
-      lagrad_gmm_compressed_adjoint,
+      // lagrad_gmm_compressed_adjoint,
   };
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
 
@@ -615,4 +615,5 @@ int main() {
   free(ref_means);
   free(ref_icf);
   free(temp_icf);
+  free(results_df);
 }

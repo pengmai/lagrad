@@ -88,18 +88,51 @@ func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf
     %c = math.cos %norm : f64
 
     %xx = arith.mulf %x, %x : f64
+    %yy = arith.mulf %y, %y : f64
+    %zz = arith.mulf %z, %z : f64
     %xy = arith.mulf %x, %y : f64
     %xz = arith.mulf %x, %z : f64
+    %yz = arith.mulf %y, %z : f64
     %onemcos = arith.subf %one, %c : f64
-    %zs = arith.mulf %z, %s : f64
+    %xs = arith.mulf %x, %s : f64
     %ys = arith.mulf %y, %s : f64
+    %zs = arith.mulf %z, %s : f64
     // First row
-    
     %onemxx = arith.subf %one, %xx : f64
     %res_00_0 = arith.mulf %onemxx, %c : f64
     %res_00_1 = arith.addf %xx, %res_00_0 : f64
     %res_0 = tensor.insert %res_00_1 into %res_space[%c0, %c0] : tensor<3x3xf64>
-    scf.yield %res_0 : tensor<3x3xf64>
+    %res_10_0 = arith.mulf %xy, %onemcos : f64
+    %res_10 = arith.subf %res_10_0, %zs : f64
+    %res_1 = tensor.insert %res_10 into %res_0[%c1, %c0] : tensor<3x3xf64>
+    %res_20_0 = arith.mulf %xz, %onemcos : f64
+    %res_20 = arith.addf %res_20_0, %ys : f64
+    %res_2 = tensor.insert %res_20 into %res_1[%c2, %c0] : tensor<3x3xf64>
+
+    // Second row
+    %res_01_0 = arith.mulf %xy, %onemcos : f64
+    %res_01 = arith.addf %res_01_0, %zs : f64
+    %res_3 = tensor.insert %res_01 into %res_2[%c0, %c1] : tensor<3x3xf64>
+    %onemyy = arith.subf %one, %yy : f64
+    %res_11_0 = arith.mulf %onemyy, %c : f64
+    %res_11 = arith.addf %yy, %res_11_0 : f64
+    %res_4 = tensor.insert %res_11 into %res_3[%c1, %c1] : tensor<3x3xf64>
+    %res_21_0 = arith.mulf %yz, %onemcos : f64
+    %res_21 = arith.subf %res_21_0, %xs : f64
+    %res_5 = tensor.insert %res_21 into %res_4[%c2, %c1] : tensor<3x3xf64>
+
+    // Third row
+    %res_02_0 = arith.mulf %xz, %onemcos : f64
+    %res_02 = arith.subf %res_02_0, %ys : f64
+    %res_6 = tensor.insert %res_02 into %res_5[%c0, %c2] : tensor<3x3xf64>
+    %res_12_0 = arith.mulf %yz, %onemcos : f64
+    %res_12 = arith.addf %res_12_0, %xs : f64
+    %res_7 = tensor.insert %res_12 into %res_6[%c1, %c2] : tensor<3x3xf64>
+    %onemzz = arith.subf %one, %zz : f64
+    %res_22_0 = arith.mulf %onemzz, %c : f64
+    %res_22 = arith.addf %zz, %res_22_0 : f64
+    %res_8 = tensor.insert %res_22 into %res_7[%c2, %c2] : tensor<3x3xf64>
+    scf.yield %res_8 : tensor<3x3xf64>
   }
   return %res : tensor<3x3xf64>
 }
@@ -242,7 +275,7 @@ func @mget_skinned_vertex_positions(
   %parents: tensor<{{nbones}}xi32>,
   %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
   %base_positions: tensor<{{nverts}}x4xf64>,
-  %weights: tensor<{{nbones}}x{{nverts}}xf64>,
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>,
   %pose_params: tensor<{{nbones + 3}}x3xf64>
 ) -> tensor<{{nverts}}x3xf64> {
   %relatives = call @mget_posed_relatives(%base_relatives, %pose_params) : (tensor<{{nbones}}x4x4xf64>, tensor<{{nbones + 3}}x3xf64>) -> tensor<{{nbones}}x4x4xf64>
@@ -252,8 +285,9 @@ func @mget_skinned_vertex_positions(
 
   %positions_init = arith.constant dense<0.0> : tensor<{{nverts}}x3xf64>
   %zero = arith.constant 0.0 : f64
-  %curr_positions_space = linalg.init_tensor [{{nverts}}, 4] : tensor<{{nverts}}x4xf64>
-  %curr_positions_init = linalg.fill(%zero, %curr_positions_space) : f64, tensor<{{nverts}}x4xf64> -> tensor<{{nverts}}x4xf64>
+  // %curr_positions_space = linalg.init_tensor [{{nverts}}, 4] : tensor<{{nverts}}x4xf64>
+  // %curr_positions_init = linalg.fill(%zero, %curr_positions_space) : f64, tensor<{{nverts}}x4xf64> -> tensor<{{nverts}}x4xf64>
+  %curr_positions_init = arith.constant dense<0.0> : tensor<{{nverts}}x4xf64>
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %cb = arith.constant {{nbones}} : index
@@ -278,11 +312,15 @@ func @mget_skinned_vertex_positions(
     } -> tensor<{{nverts}}x4xf64>
     // %curr_positions = linalg.matmul ins(%base_positions, %transforms_slice : tensor<{{nverts}}x4xf64>, tensor<4x4xf64>) outs(%curr_positions_init : tensor<{{nverts}}x4xf64>) -> tensor<{{nverts}}x4xf64>
     %cp_slice = tensor.extract_slice %curr_positions[0, 0] [{{nverts}}, 3] [1, 1] : tensor<{{nverts}}x4xf64> to tensor<{{nverts}}x3xf64>
-    %weight_slice = tensor.extract_slice %weights[%iv, 0] [1, {{nverts}}] [1, 1] : tensor<{{nbones}}x{{nverts}}xf64> to tensor<{{nverts}}xf64>
+    %weight_slice = tensor.extract_slice %weights[0, %iv] [{{nverts}}, 1] [1, 1] : tensor<{{nverts}}x{{nbones}}xf64> to tensor<{{nverts}}xf64>
 
-    // %p = arith.cmpi "eq", %c0, %iv : index
+    %c7 = arith.constant 7 : index
+    %p = arith.cmpi "eq", %c7, %iv : index
     // scf.if %p {
-    //   %U = tensor.cast %weight_slice : tensor<{{nverts}}xf64> to tensor<*xf64>
+    //   %slice = tensor.extract_slice %weights[0, 0] [10, 1] [1, 1] : tensor<{{nverts}}x{{nbones}}xf64> to tensor<10xf64>
+    //   // %slice = tensor.extract_slice %relatives[7, 0, 0] [1, 4, 4] [1, 1, 1] : tensor<{{nbones}}x4x4xf64> to tensor<4x4xf64>
+    //   %U = tensor.cast %slice : tensor<10xf64> to tensor<*xf64>
+    //   // %U = tensor.cast %transforms_slice : tensor<4x4xf64> to tensor<*xf64>
     //   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
     // }
 
@@ -301,9 +339,9 @@ func @mget_skinned_vertex_positions(
     scf.yield %positions_next : tensor<{{nverts}}x3xf64>
   }
 
-  // %p_slice = tensor.extract_slice %positions[0, 0] [1, 3] [1, 1] : tensor<3x{{nverts}}xf64> to tensor<3xf64>
-  // %U = tensor.cast %p_slice : tensor<3xf64> to tensor<*xf64>
-  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  %p_slice = tensor.extract_slice %positions[0, 0] [1, 3] [1, 1] : tensor<{{nverts}}x3xf64> to tensor<3xf64>
+  %U = tensor.cast %p_slice : tensor<3xf64> to tensor<*xf64>
+  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
 
   return %positions : tensor<{{nverts}}x3xf64>
 }
@@ -314,7 +352,7 @@ func @mlir_hand_objective(
   %base_relatives: tensor<{{nbones}}x4x4xf64>,
   %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
   %base_positions: tensor<{{nverts}}x4xf64>,
-  %weights: tensor<{{nbones}}x{{nverts}}xf64>
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>
 ) {
   %pose_params = call @mto_pose_params(%theta) : (tensor<{{ntheta}}xf64>) -> tensor<{{nbones + 3}}x3xf64>
   %res = call @mget_skinned_vertex_positions(
@@ -329,7 +367,7 @@ func @mlir_hand_objective(
     tensor<{{nbones}}xi32>,
     tensor<{{nbones}}x4x4xf64>,
     tensor<{{nverts}}x4xf64>,
-    tensor<{{nbones}}x{{nverts}}xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
     tensor<{{nbones + 3}}x3xf64>
   ) -> tensor<{{nverts}}x3xf64>
   return

@@ -27,6 +27,10 @@ def generate_gmm_results(config, outfile=None):
     )
     compile_enzyme(config["enzyme"].render(**config).encode("utf-8"), "gmm_enzyme.o")
     compile_mlir(config["mlir"].render(**config).encode("utf-8"), "gmm_kernel.o")
+    # compile_mlir(
+    #     config["mlir_compressed"].render(**config).encode("utf-8"),
+    #     "gmm_compressed_kernel.o",
+    # )
     compile_mlir_to_enzyme(
         config["mlir_enzyme"].render(**config).encode("utf-8"),
         output="gmm_mlir_enzyme.o",
@@ -39,6 +43,7 @@ def generate_gmm_results(config, outfile=None):
             "helpers.o",
             "gmm_enzyme.o",
             "gmm_kernel.o",
+            # "gmm_compressed_kernel.o",
             "gmm_mlir_enzyme.o",
         ],
         "gmm_driver.out",
@@ -71,7 +76,14 @@ def generate_gmm_results(config, outfile=None):
         )
         if outfile:
             serialized_config = config.copy()
-            for template in ["driver", "helpers", "mlir", "enzyme", "mlir_enzyme"]:
+            for template in [
+                "driver",
+                "helpers",
+                "mlir",
+                "enzyme",
+                "mlir_enzyme",
+                "mlir_compressed",
+            ]:
                 del serialized_config[template]
             # results_dict = {"config": serialized_config, "results": results.to_dict()}
             # with open(outfile, "w") as f:
@@ -86,19 +98,29 @@ def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
-    mlir_enzyme_template = mlir_env.get_template("gmm_buf_optimized.mlir")
-    # mlir_template = mlir_env.get_template("gmm_loops_compressed_v2.mlir")
+    mlir_compressed_template = mlir_env.get_template("gmm_compressed.mlir")
+    mlir_enzyme_full_template = mlir_env.get_template("gmm_buf_optimized.mlir")
+    # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_compressed.mlir")
+    # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_bufferized_opt.mlir")
+
+    mlir_enzyme_template = mlir_env.get_template("gmm_buf_compressed.mlir")
+    # This is crashing Enzyme for some reason.
+    # mlir_enzyme_template = mlir_env.get_template("gmm_buf.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
+    d, k = 10, 25
     config = {
-        "k": 25,
+        "k": k,
         "n": 1000,
-        "d": 10,
-        "method": "enzyme_mlir",
+        "d": d,
+        "tri_size": int(d * (d - 1) / 2),
+        "method": "enzyme_mlir_compressed",
         "application": "gmm",
         "driver": driver_template,
         "helpers": helpers_template,
         "mlir": mlir_template,
+        "mlir_compressed": mlir_compressed_template,
         "mlir_enzyme": mlir_enzyme_template,
+        "mlir_enzyme_full": mlir_enzyme_full_template,
         "enzyme": enzyme_template,
     }
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -108,7 +130,8 @@ def main(args):
     )
 
     if args.print:
-        print(mlir_enzyme_template.render(**config))
+        print(mlir_compressed_template.render(**config))
+        # print(mlir_template.render(**config))
     else:
         if args.results_file:
             with open(args.results_file) as f:

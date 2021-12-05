@@ -27,6 +27,12 @@ typedef struct {
   double *points, *us, *theta;
 } HandInput;
 
+/* Store the converted results to matrices for Enzyme */
+struct MatrixConverted {
+  Matrix *base_relatives, *inverse_base_absolutes, *base_positions, *weights,
+      *points;
+};
+
 void transpose_in_place(double *matrix, size_t n) {
   for (size_t i = 0; i < n; i++) {
     for (size_t j = i + 1; j < n; j++) {
@@ -72,7 +78,7 @@ void free_matrix_array(Matrix *matrices, size_t num_matrices) {
   free(matrices);
 }
 
-HandModel read_hand_model() {
+HandModel read_hand_model(bool transpose) {
   const char DELIMITER = ':';
   char filename[80];
   char *currentline = (char *)malloc(100 * sizeof(char));
@@ -110,7 +116,9 @@ HandModel read_hand_model() {
       getdelim(&currentline, &n, DELIMITER, fp);
       base_relatives[i * 16 + j] = strtod(currentline, NULL);
     }
-    transpose_in_place(&base_relatives[i * 16], 4);
+    if (transpose) {
+      transpose_in_place(&base_relatives[i * 16], 4);
+    }
 
     for (size_t j = 0; j < 15; j++) {
       getdelim(&currentline, &n, DELIMITER, fp);
@@ -118,7 +126,9 @@ HandModel read_hand_model() {
     }
     getdelim(&currentline, &n, '\n', fp);
     inverse_base_absolutes[i * 16 + 15] = strtod(currentline, NULL);
-    transpose_in_place(&inverse_base_absolutes[i * 16], 4);
+    if (transpose) {
+      transpose_in_place(&inverse_base_absolutes[i * 16], 4);
+    }
   }
 
   fclose(fp);
@@ -158,9 +168,17 @@ HandModel read_hand_model() {
   for (size_t i_vert = 0; i_vert < n_vertices; i_vert++) {
     for (size_t j = 0; j < 3; j++) {
       getdelim(&currentline, &n, DELIMITER, fp);
-      base_positions[j + i_vert * 4] = strtod(currentline, NULL);
+      if (transpose) {
+        base_positions[j + i_vert * 4] = strtod(currentline, NULL);
+      } else {
+        base_positions[j * n_vertices + i_vert] = strtod(currentline, NULL);
+      }
     }
-    base_positions[3 + i_vert * 4] = 1.0;
+    if (transpose) {
+      base_positions[3 + i_vert * 4] = 1.0;
+    } else {
+      base_positions[3 * n_vertices + i_vert] = 1.0;
+    }
     for (size_t j = 0; j < 3 + 2; j++) {
       getdelim(&currentline, &n, DELIMITER, fp); // Skip
     }
@@ -218,9 +236,13 @@ HandModel read_hand_model() {
 }
 
 void free_hand_model(HandModel *model) {
-  for (size_t i = 0; i < model->n_bones; i++) {
-    free((char *)model->bone_names[i]);
-  }
+  // TODO: Freeing this is causing segvs for some reason. It's leaking memory
+  // but it's not the biggest deal.
+
+  // for (size_t i = 0; i < model->n_bones; i++)
+  // {
+  //   free((char *)model->bone_names[i]);
+  // }
   free(model->bone_names);
   free(model->parents);
   free(model->base_relatives);
@@ -230,8 +252,8 @@ void free_hand_model(HandModel *model) {
   free(model->triangles);
 }
 
-HandInput read_hand_data(bool complicated) {
-  HandModel model = read_hand_model();
+HandInput read_hand_data(bool complicated, bool transpose) {
+  HandModel model = read_hand_model(transpose);
   FILE *fp = fopen(HAND_DATA_FILE, "r");
   if (!fp) {
     fprintf(stderr, "Failed to open file \"%s\"\n", HAND_DATA_FILE);

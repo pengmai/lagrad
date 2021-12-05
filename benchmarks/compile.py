@@ -50,6 +50,7 @@ BUFFERIZE = [
     "-finalizing-bufferize",
     "-buffer-hoisting",
     "-buffer-loop-hoisting",
+    "-standalone-loop-hoisting",
     "-promote-buffers-to-stack",
     # "-buffer-deallocation",
 ]
@@ -121,12 +122,14 @@ def compile_mlir(contents, output, lower_type="loops"):
     llvm_dialect = run_safe(
         [
             f"{BIN}/standalone-opt",
+            "-loop-invariant-code-motion",
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
             "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
+            # "-linalg-fuse-elementwise-ops",
             "-canonicalize",
         ]
         + BUFFERIZE

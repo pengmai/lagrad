@@ -78,14 +78,14 @@ module  {
         } -> tensor<{{d}}xf64>
 
         %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
-        %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64>
+        %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64, "ltri">
 
         // inlined Qtimesx
         // Elementwise multiplication
         %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
 
         // The triangular matrix-vector multiplication
-        %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64>, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
         %Qxcentered = arith.addf %out_0, %out_1 : tensor<{{d}}xf64>
 
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
@@ -198,9 +198,9 @@ module  {
       } -> tensor<f64>
       %frobenius_0 = tensor.extract %fro_0[] : tensor<f64>
 
-      %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64>
+      %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64, "ltri">
       // Inlined msqnorm_2d
-      %fro_1 = linalg.generic {indexing_maps = [#map0, #map14], iterator_types = ["reduction", "reduction"]} ins(%Ltri_slice : tensor<{{d}}x{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
+      %fro_1 = linalg.generic {indexing_maps = [#map0, #map14], iterator_types = ["reduction", "reduction"]} ins(%Ltri_slice : tensor<{{d}}x{{d}}xf64, "ltri">) outs(%zerod_tensor : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %0 = arith.mulf %arg0, %arg0 : f64
         %1 = arith.addf %0, %arg1 : f64
