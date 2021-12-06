@@ -259,6 +259,40 @@ void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter) {
   });
 }
 
+Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
+                         size_t op_index, ConversionPatternRewriter &rewriter) {
+  auto bmmOp = dyn_cast<linalg::BatchMatmulOp>(op);
+  size_t op_rank = 4;
+  auto idMap = rewriter.getMultiDimIdentityMap(op_rank);
+  auto zero = getZero(operand.getLoc(), operand, rewriter);
+  assert(op_index < 2 && "Invalid operand index for batch matmul");
+  auto indexingMaps =
+      op_index == 0 ? SmallVector<AffineMap, 6>{idMap.getSubMap({0, 1, 2}),
+                                                idMap.getSubMap({0, 3, 2}),
+                                                idMap.getSubMap({0, 1, 3})}
+                    : SmallVector<AffineMap, 6>{idMap.getSubMap({0, 2, 1}),
+                                                idMap.getSubMap({0, 2, 3}),
+                                                idMap.getSubMap({0, 1, 3})};
+  SmallVector<StringRef, 6> iteratorTypes(
+      {getParallelIteratorTypeName(), getParallelIteratorTypeName(),
+       getReductionIteratorTypeName(), getParallelIteratorTypeName()});
+  auto inputs = op_index == 0
+                    ? SmallVector<Value, 2>{vjp_value, bmmOp.getOperand(1)}
+                    : SmallVector<Value, 2>{bmmOp.getOperand(0), vjp_value};
+  auto adjoint = rewriter.create<linalg::GenericOp>(
+      operand.getLoc(),
+      /*resultTensorTypes=*/operand.getType(),
+      /*inputs=*/inputs,
+      /*outputs=*/ValueRange({zero}), indexingMaps, iteratorTypes,
+      [](OpBuilder &builder, Location loc, ValueRange regionArgs) {
+        auto mul =
+            builder.create<arith::MulFOp>(loc, regionArgs[0], regionArgs[1]);
+        auto add = builder.create<arith::AddFOp>(loc, mul, regionArgs[2]);
+        builder.create<linalg::YieldOp>(loc, add.getResult());
+      });
+  return adjoint.getResult(0);
+}
+
 void populateVJP(Operation *op, ModuleOp moduleOp,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
@@ -474,7 +508,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
         collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
                         freeOperands);
         for (auto freeOperand : freeOperands) {
-          if (!freeOperand.getType().isa<FloatType>()) {
+          if (!isFloatOrFloatTensor(freeOperand.getType())) {
             continue;
           }
           // Not totally sure if we can use the VJP value as-is, watch out
@@ -490,6 +524,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
                 freeOperand.getLoc(), result, env[freeOperand]);
           }
         }
+      }
+      if (!isFloatOrFloatTensor(operand.getType())) {
+        continue;
       }
       vjp_value =
           reverseGenericOp(genericOp, operand, vjp_value, op_index, rewriter);
@@ -682,6 +719,12 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
             builder.create<linalg::YieldOp>(loc, add_res);
           });
       vjp_value = matmulOp.getResult(0);
+    } else if (opName == "linalg.batch_matmul") {
+      if (op_index > 1) {
+        continue;
+      }
+      vjp_value =
+          reverseBatchMatmul(op, operand, vjp_value, op_index, rewriter);
     } else {
       llvm::outs() << "(populateVJP) unrecognized op: " << opName << "\n";
     }
@@ -718,8 +761,9 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
   } else {
     output = getZero(operand.getLoc(), operand, rewriter);
   }
-  auto outputShape = output.getType().dyn_cast<ShapedType>();
-  assert(outputShape.hasRank() && "output must be a ranked type");
+  auto outputShape = output.getType().dyn_cast_or_null<ShapedType>();
+  assert(outputShape && outputShape.hasRank() &&
+         "output must be a ranked type");
   auto generic_indexing_maps = op.getIndexingMaps();
   auto op_count = op.getNumOperands();
   SmallVector<Value> inputs;
