@@ -399,10 +399,12 @@ func @mlir_hand_objective(
   %base_relatives: tensor<{{nbones}}x4x4xf64>,
   %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
   %base_positions: tensor<{{nverts}}x4xf64>,
-  %weights: tensor<{{nverts}}x{{nbones}}xf64>
-) {
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>,
+  %correspondences: tensor<{{npts}}xi32>,
+  %points : tensor<{{npts}}x3xf64>
+) -> tensor<{{npts}}x3xf64> {
   %pose_params = call @mto_pose_params(%theta) : (tensor<{{ntheta}}xf64>) -> tensor<{{nbones + 3}}x3xf64>
-  %res = call @mget_skinned_vertex_positions(
+  %vertex_positions = call @mget_skinned_vertex_positions(
     %base_relatives,
     %parents,
     %inverse_base_absolutes,
@@ -417,5 +419,85 @@ func @mlir_hand_objective(
     tensor<{{nverts}}x{{nbones}}xf64>,
     tensor<{{nbones + 3}}x3xf64>
   ) -> tensor<{{nverts}}x3xf64>
-  return
+
+  %err_init = arith.constant dense<0.0> : tensor<{{npts}}x3xf64>
+  %range = arith.constant dense<[0, 1, 2]> : tensor<3xindex>
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c3 = arith.constant 3 : index
+  %cpts = arith.constant {{npts}} : index
+  %err = scf.for %iv = %c0 to %cpts step %c1 iter_args(%e_outer = %err_init) -> tensor<{{npts}}x3xf64> {
+    %err_partial = scf.for %jv = %c0 to %c3 step %c1 iter_args(%e_inner = %e_outer) -> tensor<{{npts}}x3xf64> {
+      %arg0 = tensor.extract %points[%iv, %jv] : tensor<{{npts}}x3xf64>
+      %i_0 = tensor.extract %correspondences[%iv] : tensor<{{npts}}xi32>
+      %i = arith.index_cast %i_0 : i32 to index
+      %vp = tensor.extract %vertex_positions[%i, %jv] : tensor<{{nverts}}x3xf64>
+      %0 = arith.subf %arg0, %vp : f64
+      %e_next = tensor.insert %0 into %e_inner[%iv, %jv] : tensor<{{npts}}x3xf64>
+      scf.yield %e_next : tensor<{{npts}}x3xf64>
+    }
+    scf.yield %err_partial : tensor<{{npts}}x3xf64>
+  }
+  return %err : tensor<{{npts}}x3xf64>
+}
+
+func @lagrad_hand_objective(
+  %theta : tensor<{{ntheta}}xf64>,
+  %parents: tensor<{{nbones}}xi32>,
+  %base_relatives: tensor<{{nbones}}x4x4xf64>,
+  %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
+  %base_positions: tensor<{{nverts}}x4xf64>,
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>,
+  %correspondences: tensor<{{npts}}xi32>,
+  %points : tensor<{{npts}}x3xf64>
+) -> tensor<{{ntheta}}xf64> {
+  %f = constant @mlir_hand_objective : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{npts}}x3xf64>
+  %df = standalone.grad %f {of = [0]} : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{npts}}x3xf64>, (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{ntheta}}xf64>
+  %dtheta = call_indirect %df(
+    %theta,
+    %parents,
+    %base_relatives,
+    %inverse_base_absolutes,
+    %base_positions,
+    %weights,
+    %correspondences,
+    %points
+  ) : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{ntheta}}xf64>
+  return %dtheta : tensor<{{ntheta}}xf64>
 }
