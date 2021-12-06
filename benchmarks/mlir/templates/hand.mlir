@@ -53,7 +53,7 @@ func @dtopose_params(%theta: tensor<{{ntheta}}xf64>) -> tensor<{{ntheta}}xf64> {
   return %res : tensor<{{ntheta}}xf64>
 }
 
-func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
+func @mangle_axis_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -270,6 +270,61 @@ func @dget_posed_relatives(%base_relatives: tensor<{{nbones}}x4x4xf64>, %pose_pa
   return %res : tensor<{{nbones + 3}}x3xf64>
 }
 
+func @mapply_global_transform(%pose_params: tensor<{{nbones + 3}}x3xf64>, %positions: tensor<{{nverts}}x3xf64>) -> tensor<{{nverts}}x3xf64> {
+  %angle_axis = tensor.extract_slice %pose_params[0, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %pose_slice = tensor.extract_slice %pose_params[1, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %pose_slice_2 = tensor.extract_slice %pose_params[2, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %R_0 = call @mangle_axis_to_rotation_matrix(%angle_axis) : (tensor<3xf64>) -> tensor<3x3xf64>
+
+  %R = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>],
+      iterator_types = ["parallel", "parallel"]
+    }
+    ins(%R_0, %pose_slice : tensor<3x3xf64>, tensor<3xf64>)
+    outs(%R_0 : tensor<3x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.mulf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  } -> tensor<3x3xf64>
+
+  %tmp_init = arith.constant dense<0.0> : tensor<{{nverts}}x3xf64>
+  %tmp = linalg.generic
+    {
+      doc = "Column-major matrix multiplication",
+      indexing_maps = [
+        affine_map<(d0, d1, d2) -> (d2, d0)>,
+        affine_map<(d0, d1, d2) -> (d1, d2)>,
+        affine_map<(d0, d1, d2) -> (d1, d0)>
+      ],
+      iterator_types = ["parallel", "parallel", "reduction"]
+    }
+    ins(%R, %positions : tensor<3x3xf64>, tensor<{{nverts}}x3xf64>)
+    outs(%tmp_init : tensor<{{nverts}}x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
+  } -> tensor<{{nverts}}x3xf64>
+
+  %positions_new = linalg.generic
+    {
+      indexing_maps = [
+        affine_map<(d0, d1) -> (d0, d1)>,
+        affine_map<(d0, d1) -> (d1)>,
+        affine_map<(d0, d1) -> (d0, d1)>
+      ],
+      iterator_types = ["parallel", "parallel"]
+    }
+    ins(%tmp, %pose_slice_2 : tensor<{{nverts}}x3xf64>, tensor<3xf64>)
+    outs(%positions : tensor<{{nverts}}x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  } -> tensor<{{nverts}}x3xf64>
+  return %positions_new : tensor<{{nverts}}x3xf64>
+}
+
 func @mget_skinned_vertex_positions(
   %base_relatives: tensor<{{nbones}}x4x4xf64>,
   %parents: tensor<{{nbones}}xi32>,
@@ -316,14 +371,6 @@ func @mget_skinned_vertex_positions(
 
     %c7 = arith.constant 7 : index
     %p = arith.cmpi "eq", %c7, %iv : index
-    // scf.if %p {
-    //   %slice = tensor.extract_slice %weights[0, 0] [10, 1] [1, 1] : tensor<{{nverts}}x{{nbones}}xf64> to tensor<10xf64>
-    //   // %slice = tensor.extract_slice %relatives[7, 0, 0] [1, 4, 4] [1, 1, 1] : tensor<{{nbones}}x4x4xf64> to tensor<4x4xf64>
-    //   %U = tensor.cast %slice : tensor<10xf64> to tensor<*xf64>
-    //   // %U = tensor.cast %transforms_slice : tensor<4x4xf64> to tensor<*xf64>
-    //   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-    // }
-
     %positions_next = linalg.generic
       {
         indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>],
@@ -339,11 +386,11 @@ func @mget_skinned_vertex_positions(
     scf.yield %positions_next : tensor<{{nverts}}x3xf64>
   }
 
-  %p_slice = tensor.extract_slice %positions[0, 0] [1, 3] [1, 1] : tensor<{{nverts}}x3xf64> to tensor<3xf64>
-  %U = tensor.cast %p_slice : tensor<3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-
-  return %positions : tensor<{{nverts}}x3xf64>
+  %positions_global = call @mapply_global_transform(%pose_params, %positions) : (tensor<{{nbones + 3}}x3xf64>, tensor<{{nverts}}x3xf64>) -> tensor<{{nverts}}x3xf64>
+  // %p_slice = tensor.extract_slice %positions_global[0, 0] [10, 3] [1, 1] : tensor<{{nverts}}x3xf64> to tensor<10x3xf64>
+  // %U = tensor.cast %p_slice : tensor<10x3xf64> to tensor<*xf64>
+  // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  return %positions_global : tensor<{{nverts}}x3xf64>
 }
 
 func @mlir_hand_objective(
