@@ -65,3 +65,16 @@ def test_angle_axis_to_rotation_matrix():
     adjoint = extract_1d(line2)
     assert primal == expected_pri
     assert adjoint == expected_adj
+
+
+def test_apply_global_transform():
+    expected_first = [
+        [1.80638e06, 449664, -501519],
+        [-86042.1, 462425, 609530],
+        [544, 544, 544],
+    ]
+    adjoint = extract_2d(jit_file(f"{MLIR_FILES}/hand/apply_global_transform.mlir"))
+    nonzero = adjoint[:3]
+    zero_vals = adjoint[3:]
+    assert nonzero == expected_first
+    assert zero_vals == [[0] * len(zero_vals[0])] * len(zero_vals)

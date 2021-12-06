@@ -16,7 +16,7 @@ hand_objective(double const *__restrict theta, int bone_count,
                int corresp_count, const int *__restrict correspondences,
                Matrix *points, double *__restrict err);
 
-extern void mlir_hand_objective(
+extern F64Descriptor2D mlir_hand_objective(
     /*theta=*/double *, double *, int64_t, int64_t, int64_t,
     /*parents=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
     /*base_relatives=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
@@ -25,8 +25,31 @@ extern void mlir_hand_objective(
     int64_t, int64_t, int64_t, int64_t,
     /*base_positions=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
     int64_t,
-    /*weights=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
-    int64_t);
+    /*weights=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*correspondence=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
+    /*points=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t);
+
+extern F64Descriptor2D dapply_global_transform(/*pose_params=*/double *,
+                                               double *, int64_t, int64_t,
+                                               int64_t, int64_t, int64_t,
+                                               /*postions=*/double *, double *,
+                                               int64_t, int64_t, int64_t,
+                                               int64_t, int64_t);
+extern void dglobal(const double *pose_params, double *dpp, double *positions,
+                    double *dp);
+
+extern F64Descriptor1D lagrad_hand_objective(
+    /*theta=*/double *, double *, int64_t, int64_t, int64_t,
+    /*parents=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
+    /*base_relatives=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t,
+    /*inverse_base_absolutes=*/double *, double *, int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t, int64_t,
+    /*base_positions=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
+    int64_t,
+    /*weights=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*correspondence=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
+    /*points=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t);
 
 extern void dhand_objective(double const *theta, double *dtheta, int bone_count,
                             const char **bone_names, const int *parents,
@@ -125,15 +148,33 @@ unsigned long enzyme_colmaj_hand_simple(HandInput *input,
   return timediff(start, stop);
 }
 
+double *deadbeef = (double *)0xdeadbeef;
 int main() {
-  double a[3] = {1., 2., 3.};
-  double da[3] = {0};
-  double R[9] = {0};
-  double dR[9] = {1., 1., 1., 1., 1., 1., 1., 1., 1.};
-  // aapointer(a, R);
-  daapointer(a, da, R, dR);
-  print_d_arr(da, 3);
-  print_d_arr_2d(R, 3, 3);
+  double *pose_params = (double *)malloc(25 * 3 * sizeof(double));
+  double *positions = (double *)malloc(544 * 3 * sizeof(double));
+  double *dpose_params = (double *)malloc(25 * 3 * sizeof(double));
+  double *dpositions = (double *)malloc(544 * 3 * sizeof(double));
+  for (size_t i = 0; i < 25 * 3; i++) {
+    pose_params[i] = i + 1;
+    dpose_params[i] = 0.0;
+  }
+  for (size_t i = 0; i < 544 * 3; i++) {
+    positions[i] = i + 1;
+    dpositions[i] = 1.0;
+  }
+
+  // random_init_d_2d(pose_params, 25, 3);
+  // random_init_d_2d(positions, 544, 3);
+  F64Descriptor2D res =
+      dapply_global_transform(deadbeef, pose_params, 0, 25, 3, 3, 1, deadbeef,
+                              positions, 0, 544, 3, 3, 1);
+  printf("LAGrad:\n");
+  print_d_arr_2d(res.aligned, res.size_0, res.size_1);
+  dglobal(pose_params, dpose_params, positions, dpositions);
+  printf("Enzyme:\n");
+  print_d_arr_2d(dpose_params, 25, 3);
+  free(pose_params);
+  free(positions);
   return 0;
   /* Preamble */
   HandInput input = read_hand_data(false, true);
@@ -159,54 +200,38 @@ int main() {
                      input.n_theta);
   double *J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
 
-  // unsigned long ecm = enzyme_colmaj_hand_simple(&input, &converted, J,
-  // ref_J); printf("Enzyme colmajor took: %lu\n", ecm);
-
-  double err[3 * input.n_pts];
-  hand_objective(input.theta, input.model.n_bones, input.model.bone_names,
-                 input.model.parents, base_relatives, inverse_base_absolutes,
-                 &base_positions, &weights, NULL, input.model.is_mirrored,
-                 input.n_pts, input.correspondences, &points, err);
+  // double err[3 * input.n_pts];
+  // // double thetab[26] = {0};
+  // // double errb[6] = {1, 1, 1, 1, 1, 1};
+  // hand_objective(input.theta, input.model.n_bones, input.model.bone_names,
+  //                input.model.parents, base_relatives, inverse_base_absolutes,
+  //                &base_positions, &weights, NULL, input.model.is_mirrored,
+  //                input.n_pts, input.correspondences, &points, err);
+  // // printf("Enzyme elementwise grad:\n");
+  // // print_d_arr(errb, 26);
+  // printf("Enzyme err:\n");
   // print_d_arr(err, 6);
 
-  double *deadbeef = (double *)0xdeadbeef;
   // print_d_arr(input.correspondences, 6);
-  mlir_hand_objective(
-      /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
-      /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
-      input.model.n_bones, 1,
-      /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
-      input.model.n_bones, 4, 4, 16, 4, 1,
-      /*inverse_base_absolutes=*/deadbeef, input.model.inverse_base_absolutes,
-      0, input.model.n_bones, 4, 4, 16, 4, 1,
-      /*base_positions=*/deadbeef, input.model.base_positions, 0,
-      input.model.n_vertices, 4, 4, 1,
-      /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
-      input.model.n_bones, input.model.n_bones, 1);
-  // F64Descriptor2D pose_params =
-  //     mto_pose_params(deadbeef, input.theta, 0, input.n_theta, 1);
-  // printf("Pose params:\n");
-  // print_d_arr_2d(pose_params.aligned, pose_params.size_0,
-  // pose_params.size_1);
 
-  // F64Descriptor1D dt =
-  //     dtest(deadbeef, input.theta, 0, input.n_theta, 1, deadbeef,
-  //           input.model.base_relatives, 0, input.model.n_bones, 4, 4, 16, 4,
-  //           1, (int *)deadbeef, input.model.parents, 0, input.model.n_bones,
-  //           1);
-  // printf("dt:\n");
-  // print_d_arr(dt.aligned, dt.size);
-
-  // F64Descriptor2D drelatives = dget_posed_relatives(
-  //     deadbeef, input.model.base_relatives, 0, input.model.n_bones, 4, 4, 16,
-  //     4, 1, pose_params.allocated, pose_params.aligned, pose_params.offset,
-  //     pose_params.size_0, pose_params.size_1, pose_params.stride_0,
-  //     pose_params.stride_1);
-  // printf("drelatives:\n");
-  // print_d_arr_2d(drelatives.aligned, drelatives.size_0, drelatives.size_1);
-  // verify_hand_results(ref_J, J, J_rows, input.n_theta, "Enzyme/C");
-  // serialize_hand_results("benchmarks/results/hand_test.txt", J, J_rows,
-  //                        input.n_theta);
+  // F64Descriptor1D dtheta = lagrad_hand_objective(
+  //     /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
+  //     /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
+  //     input.model.n_bones, 1,
+  //     /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
+  //     input.model.n_bones, 4, 4, 16, 4, 1,
+  //     /*inverse_base_absolutes=*/deadbeef,
+  //     input.model.inverse_base_absolutes, 0, input.model.n_bones, 4, 4, 16,
+  //     4, 1,
+  //     /*base_positions=*/deadbeef, input.model.base_positions, 0,
+  //     input.model.n_vertices, 4, 4, 1,
+  //     /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
+  //     input.model.n_bones, input.model.n_bones, 1,
+  //     /*correspondences=*/(int32_t *)deadbeef, input.correspondences, 0,
+  //     input.n_pts, 1,
+  //     /*points=*/deadbeef, input.points, 0, input.n_pts, 3, 3, 1);
+  // printf("MLIR grad:\n");
+  // print_d_arr(dtheta.aligned, dtheta.size);
 
   /* Cleanup */
   free_matrix_array(base_relatives, input.model.n_bones);
