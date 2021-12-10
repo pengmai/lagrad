@@ -95,6 +95,48 @@ def generate_trimatvec_data(args, config):
         print(output)
 
 
+def cache_main(args):
+    mlir_templ = mlir_env.get_template("cache_loop.mlir")
+    # mlir_templ = mlir_env.get_template("DELETEME_cache_loop_bufferized.mlir")
+    enzyme_templ = mlir_env.get_template("cache_loop_enzyme.mlir")
+    driver_templ = driver_env.get_template("cache_loop_driver.c")
+    helpers_templ = driver_env.get_template("mlir_c_abi.c")
+    config = {"n": 22, "d": 1024}
+    if args.print:
+        print(enzyme_templ.render(**config))
+        return
+    compile_mlir(mlir_templ.render(**config).encode("utf-8"), "cache_loop_lagrad.o")
+    compile_mlir_to_enzyme(
+        enzyme_templ.render(**config).encode("utf-8"),
+        output="cache_loop_enzyme.o",
+        emit="obj",
+    )
+    compile_c(driver_templ.render(**config).encode("utf-8"), "cache_loop_driver.o")
+    compile_c(helpers_templ.render(**config).encode("utf-8"), "cache_loop_helpers.o")
+    stdout = link_and_run(
+        [
+            "cache_loop_driver.o",
+            "cache_loop_helpers.o",
+            "cache_loop_enzyme.o",
+            "cache_loop_lagrad.o",
+        ],
+        "cache_loop.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
+    try:
+        lines = stdout.splitlines()
+        keys = ["enzyme", "manual_mlir"]
+        if len(lines) != len(keys):
+            raise Exception("Computation error")
+        results = pd.DataFrame.from_dict(
+            {key: json.loads(line) for key, line in zip(keys, lines)}
+        )
+        print(results[2:].mean())
+    except (json.JSONDecodeError, Exception):
+        print("Failed to parse output")
+
+
 def loop_main(args):
     driver_templ = driver_env.get_template("loop_driver.c")
     helpers_templ = driver_env.get_template("mlir_c_abi.c")
@@ -188,4 +230,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # trimatvec_main(args)
-    loop_main(args)
+    # loop_main(args)
+    cache_main(args)

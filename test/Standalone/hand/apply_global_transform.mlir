@@ -130,7 +130,7 @@ func @mapply_global_transform(%pose_params: tensor<25x3xf64>, %positions: tensor
       iterator_types = ["parallel", "parallel"]
     }
     ins(%tmp, %pose_slice_2 : tensor<544x3xf64>, tensor<3xf64>)
-    outs(%positions : tensor<544x3xf64>) {
+    outs(%tmp_init : tensor<544x3xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64

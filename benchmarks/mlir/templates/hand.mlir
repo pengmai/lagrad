@@ -205,6 +205,7 @@ func @mget_posed_relatives(%base_relatives: tensor<{{nbones}}x4x4xf64>, %pose_pa
   %one = arith.constant 1.0 : f64
   %matmul_init = arith.constant dense<0.0> : tensor<4x4xf64>
   %tr_space = linalg.init_tensor [4, 4] : tensor<4x4xf64>
+  %zero3 = arith.constant dense<0.0> : tensor<3xf64>
   %tr_init = linalg.fill(%zero, %tr_space) : f64, tensor<4x4xf64> -> tensor<4x4xf64>
   %rel_space = linalg.init_tensor [{{nbones}}, 4, 4] : tensor<{{nbones}}x4x4xf64>
   %relatives = scf.for %iv = %c0 to %cb step %c1 iter_args(%rel = %rel_space) -> tensor<{{nbones}}x4x4xf64> {
@@ -212,11 +213,7 @@ func @mget_posed_relatives(%base_relatives: tensor<{{nbones}}x4x4xf64>, %pose_pa
     %pose_slice_casted = tensor.extract_slice %pose_params[%pose_idx, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
 
     // Bypass the issue with the function call
-    %pose_slice = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]} ins(%pose_slice_casted : tensor<3xf64>) outs(%pose_slice_casted : tensor<3xf64>) {
-    ^bb0(%arg0: f64, %arg1: f64):
-      %0 = arith.addf %arg0, %zero : f64
-      linalg.yield %0 : f64
-    } -> tensor<3xf64>
+    %pose_slice = arith.addf %pose_slice_casted, %zero3 : tensor<3xf64>
 
     %R = call @meuler_angles_to_rotation_matrix(%pose_slice) : (tensor<3xf64>) -> tensor<3x3xf64>
     %tr_0 = tensor.insert_slice %R into %tr_init[0, 0] [3, 3] [1, 1] : tensor<3x3xf64> into tensor<4x4xf64>
@@ -495,7 +492,7 @@ func @mlir_hand_objective(
       iterator_types = ["parallel", "parallel"]
     }
     ins(%tmp, %pose_slice_2 : tensor<{{nverts}}x3xf64>, tensor<3xf64>)
-    outs(%positions : tensor<{{nverts}}x3xf64>) {
+    outs(%tmp_init : tensor<{{nverts}}x3xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64

@@ -235,11 +235,39 @@ def test_if_different_type():
     assert extract_scalar(jit_file(f"{MLIR_FILES}/ifdifferenttype.mlir")) == 9.96035
 
 
+def test_scalar_scf_for():
+    expected = 12 * 1.1 ** 11
+
+    def test(x):
+        r = 1
+        stack = []
+        for _ in range(12):
+            stack.append(r)
+            r *= x
+
+        dx = 0
+        dr = 1
+        for _ in range(12):
+            r = stack.pop()
+            dx += dr * r
+            print(dr)
+            dr *= x
+        return dx
+
+    print(test(1.1), (test(1.1) - expected) < 1e-6)
+    # assert extract_scalar(jit_file(f"{MLIR_FILES}/scf/forscalar.mlir")) == expected
+
+
 def test_tensor_scf_for():
     assert (
         extract_2d(jit_file(f"{MLIR_FILES}/scf/fortensor.mlir"))
         == (np.ones((4, 4)) * 4).tolist()
     )
+
+
+def test_for_intermediate():
+    expected = [[5, 6, 7, 8], [1, 2, 3, 4]]
+    assert extract_2d(jit_file(f"{MLIR_FILES}/scf/forintermediate.mlir")) == expected
 
 
 def test_nested_with_slice():

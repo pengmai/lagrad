@@ -51,6 +51,37 @@ def test_pose_relatives_body():
     )
 
 
+def test_get_posed_relatives():
+    expected = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+        [7.64197, -6.62924, -39.948],
+        [10.2865, 50.6281, -136.472],
+        [130.857, -149.433, -339.47],
+        [-196.358, -92.8808, -411.033],
+        [291.604, -413.609, -653.054],
+        [-607.845, -505.337, -739.837],
+        [578.474, -675.249, -845.945],
+        [-930.038, -923.424, -895.76],
+        [973.027, -850.391, -914.047],
+        [-819.011, -980.066, -643.158],
+        [1395.82, -873.335, -932.316],
+        [-115.773, -462.371, 54.694],
+        [1797.5, -652.014, -946.62],
+        [1004.88, 500.791, 922.301],
+        [2187.01, -91.9165, -926.029],
+        [2098.76, 1466.5, 1467.93],
+        [2553.83, 788.091, -829.505],
+        [2710.84, 1919.31, 1258.32],
+        [2755.56, 1735.47, -723.26],
+        [2662.28, 1571.34, 200.056],
+        [2504.22, 2277.98, -816.961],
+        [2166.97, 520.21, -1370.05],
+    ]
+    assert extract_2d(jit_file(f"{MLIR_FILES}/hand/get_posed_relatives.mlir")) == expected
+
+
 def test_angle_axis_to_rotation_matrix():
     expected_adj = [0.958705, 0.352867, -0.25297]
     expected_pri = [
@@ -78,3 +109,12 @@ def test_apply_global_transform():
     zero_vals = adjoint[3:]
     assert nonzero == expected_first
     assert zero_vals == [[0] * len(zero_vals[0])] * len(zero_vals)
+
+
+def test_compute_err_simple():
+    adjoint = extract_2d(jit_file(f"{MLIR_FILES}/hand/compute_err_simple.mlir"))
+    for i, row in enumerate(adjoint):
+        if i in [10, 16]:
+            assert row == [-1, -1, -1]
+        else:
+            assert row == [0, 0, 0]

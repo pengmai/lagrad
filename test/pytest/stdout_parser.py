@@ -6,7 +6,7 @@ def remove_whitespace(output: str):
     return re.sub(r"\s+", "", output)
 
 
-float_regex = r"[-+]?[0-9]*\.?[0-9]+"
+float_regex = r"[-+]?[0-9]*\.?[0-9]+(?:e[+-]?[0-9]+)?"
 
 
 def extract_scalar(output: str):
