@@ -17,6 +17,49 @@
 using namespace mlir;
 
 namespace {
+class ConvertStaticAlloca : public OpRewritePattern<LLVM::AllocaOp> {
+public:
+  ConvertStaticAlloca(MLIRContext *context)
+      : OpRewritePattern<LLVM::AllocaOp>(context, /*benefit=*/1) {}
+
+  LogicalResult matchAndRewrite(LLVM::AllocaOp op,
+                                PatternRewriter &rewriter) const override {
+    auto ptrToIntOp =
+        dyn_cast_or_null<LLVM::PtrToIntOp>(op.getOperand().getDefiningOp());
+    if (!ptrToIntOp) {
+      return failure();
+    }
+
+    auto gepOp =
+        dyn_cast_or_null<LLVM::GEPOp>(ptrToIntOp.getOperand().getDefiningOp());
+    if (!gepOp) {
+      return failure();
+    }
+
+    auto elementType = ptrToIntOp.arg()
+                           .getType()
+                           .dyn_cast<LLVM::LLVMPointerType>()
+                           .getElementType();
+
+    size_t allocSize = elementType.getIntOrFloatBitWidth() / 8;
+    for (auto indexVal : gepOp.indices()) {
+      auto indexConstOp =
+          dyn_cast_or_null<LLVM::ConstantOp>(indexVal.getDefiningOp());
+      assert(indexConstOp &&
+             "Expected index value to be defined by a constant op");
+      allocSize *= indexConstOp.value()
+                       .dyn_cast<IntegerAttr>()
+                       .getValue()
+                       .getSExtValue();
+    }
+
+    auto staticSize = rewriter.create<LLVM::ConstantOp>(
+        op->getLoc(), rewriter.getI64Type(), rewriter.getIndexAttr(allocSize));
+    rewriter.updateRootInPlace(op, [&]() { op.setOperand(staticSize); });
+    return failure();
+  }
+};
+
 class ConvertStaticMalloc : public RewritePattern {
 public:
   ConvertStaticMalloc(MLIRContext *ctx)
@@ -85,6 +128,7 @@ struct StaticAllocsPass
     auto *context = &getContext();
     RewritePatternSet patterns(context);
     patterns.add<ConvertStaticMalloc>(patterns.getContext());
+    patterns.add<ConvertStaticAlloca>(patterns.getContext());
 
     if (failed(applyPatternsAndFoldGreedily(getOperation()->getRegions(),
                                             std::move(patterns)))) {

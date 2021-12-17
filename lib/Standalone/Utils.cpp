@@ -115,7 +115,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
       Value operand = op->getOperand(0);
       // Initialize the gradient signal to 1.0
       if (topLevel) {
-        env[operand] = onesLike(op->getLoc(), operand, rewriter);
+        env[operand] = onesLike(op->getLoc(), operand, rewriter, /*init=*/true);
       } else {
         env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
@@ -141,6 +141,11 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
           gradientsOf[i].dyn_cast<IntegerAttr>().getValue().getSExtValue();
       returnType[i] = region->getArgument(argIndex).getType();
       returnValue[i] = env[region->getArgument(argIndex)];
+      if (!returnValue[i]) {
+        // Int tensors aren't being filtered out for some reason. This is a
+        // temporary bandaid.
+        returnValue[i] = region->getArgument(argIndex);
+      }
     }
   } else {
     returnType.resize(1);
@@ -157,13 +162,27 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
   rewriter.create<mlir::ReturnOp>(region->getLoc(), returnValue);
   return funcOp;
 }
-Value onesLike(Location loc, Value operand, OpBuilder &builder) {
+
+Value onesLike(Location loc, Value operand, OpBuilder &builder,
+               bool init = false) {
   if (operand.getType().isa<FloatType>()) {
     return builder.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 1.0));
   }
   if (operand.getType().isa<ShapedType>()) {
     auto shapedType = operand.getType().dyn_cast<ShapedType>();
+    assert(shapedType.getElementType().isa<FloatType>() &&
+           "Shaped type was not a float type");
+    if (init) {
+      auto floatVal = shapedType.getElementTypeBitWidth() == 32 ? APFloat(1.0f)
+                                                                : APFloat(1.0);
+      auto one = builder.create<arith::ConstantFloatOp>(
+          loc, floatVal, shapedType.getElementType().dyn_cast<FloatType>());
+      auto space = builder.create<linalg::InitTensorOp>(
+          loc, shapedType.getShape(), shapedType.getElementType());
+      auto filled = builder.create<linalg::FillOp>(loc, one, space);
+      return filled.getResult(0);
+    }
     auto denseAttr = shapedType.getElementTypeBitWidth() == 32
                          ? DenseFPElementsAttr::get(shapedType, {1.0f})
                          : DenseFPElementsAttr::get(shapedType, {1.0});
@@ -449,6 +468,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                  op->getResult(0));
     } else if (opName == "std.call") {
+      if (!isFloatOrFloatTensor(operand.getType())) {
+        continue;
+      }
       vjp_value = reverseCallOp(dyn_cast<CallOp>(op), moduleOp, vjp_value,
                                 op_index, rewriter);
     } else if (opName == "tensor.extract") {
@@ -880,14 +902,61 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
   return adjointIf.getResult(0);
 }
 
+// Augment the primal for loop to cache iteration values.
+void populatePrimalCache(scf::ForOp forOp, ConversionPatternRewriter &rewriter,
+                         DenseMap<Value, Value> &val_to_cached) {
+  PatternRewriter::InsertionGuard insertionGuard(rewriter);
+
+  // Determine which values to cache.
+  SmallVector<Value> valuesToCache;
+  for (auto iterOp : forOp.getRegionIterArgs()) {
+    if (iterOp.getType().isIntOrIndexOrFloat()) {
+      valuesToCache.push_back(iterOp);
+    }
+  }
+  // As a bit of a hack, cache the values using a MemRef because it's easier
+  // than modifying the iter arguments to properly use tensors.
+  rewriter.setInsertionPoint(forOp);
+  auto cacheSize =
+      rewriter
+          .create<arith::SubIOp>(forOp.getLoc(), forOp.upperBound(),
+                                 forOp.lowerBound())
+          .getResult();
+
+  SmallVector<Value> caches;
+  for (auto cacheVal : valuesToCache) {
+    assert(cacheVal.getType().isIntOrIndexOrFloat() &&
+           "Caching non-scalars not yet supported");
+    auto primalCache = rewriter.create<memref::AllocOp>(
+        cacheVal.getLoc(),
+        MemRefType::get({/*dynamic size*/ -1}, cacheVal.getType()), cacheSize);
+    caches.push_back(primalCache.getResult());
+  }
+
+  rewriter.setInsertionPoint(&forOp.getBody()->front());
+  for (auto cpair : llvm::zip(caches, valuesToCache)) {
+    auto ccache = std::get<0>(cpair);
+    auto valToCache = std::get<1>(cpair);
+    rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
+                                     forOp.getInductionVar());
+    val_to_cached[valToCache] = ccache;
+  }
+}
+
 ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
                         Value vjp_value, size_t result_idx,
                         ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
-  SmallVector<Value> operandsWithIV{forOp.getInductionVar()};
-  operandsWithIV.insert(operandsWithIV.end(), forOp.getRegionIterArgs().begin(),
-                        forOp.getRegionIterArgs().end());
-  auto iterArgsInit = llvm::to_vector<4>(forOp.getIterOperands());
+  // Record the ops to clone before augmenting the primal with the caches.
+  auto primalOps = forOp.getLoopBody().getOps();
+  DenseMap<Value, Value> iterArgsToCached;
+  populatePrimalCache(forOp, rewriter, iterArgsToCached);
+  SmallVector<Value> operandsWithIV{
+      forOp.getInductionVar(),
+      // This is only valid under certain conditions, i.e. if the result was
+      // only read once.
+      forOp.getRegionIterArgs()[result_idx]};
+  SmallVector<Value> iterArgsInit({vjp_value});
 
   for (auto free_operand : free_operands) {
     auto space =
@@ -899,32 +968,48 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
       iterArgsInit,
       [&](OpBuilder &builder, Location loc, Value iv, ValueRange iterArgs) {
         SmallVector<Value> regionArgs;
-        regionArgs.push_back(iv);
-        regionArgs.insert(regionArgs.end(), iterArgs.begin(), iterArgs.end());
-        auto primalRegionOps =
-            cloneBasicBlock(forOp.getLoopBody().getOps(), builder, regionArgs,
-                            operandsWithIV, /*offsetInputs=*/false);
+        Value idx = builder.create<arith::SubIOp>(loc, forOp.upperBound(), iv);
+        Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+        idx = builder.create<arith::SubIOp>(loc, idx, one);
+        regionArgs.push_back(idx);
+        regionArgs.push_back(forOp.getResult(result_idx));
+        for (auto cpair : iterArgsToCached) {
+          operandsWithIV.push_back(cpair.first);
+          auto loaded = builder.create<memref::LoadOp>(cpair.second.getLoc(),
+                                                       cpair.second, idx);
+          regionArgs.push_back(loaded);
+        }
+        auto primalRegionOps = cloneBasicBlock(
+            primalOps, builder, /*new=*/regionArgs, /*old=*/operandsWithIV,
+            /*offsetInputs=*/false);
 
         DenseMap<Value, Value> env;
         for (size_t i = 0; i < free_operands.size(); i++) {
           env[free_operands[i]] =
               iterArgs[iterArgs.size() - free_operands.size() + i];
         }
-        SmallVector<Value> primalResults;
+        SmallVector<Value> adjointResults;
         for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
              it++) {
           auto op = *it;
           auto opName = op->getName().getStringRef();
           if (opName == "scf.yield") {
             Value operand = op->getOperand(result_idx);
-            primalResults = op->getOperands();
-            env[operand] = vjp_value;
+            env[operand] = iterArgs[0];
             rewriter.setInsertionPointAfter(op);
             rewriter.eraseOp(op);
           } else {
             populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
           }
         }
+
+        if (env[forOp.getResult(result_idx)]) {
+          adjointResults.push_back(env[forOp.getResult(result_idx)]);
+        } else {
+          // The primal result was unused in the primal loop body.
+          adjointResults.push_back(iterArgs[0]);
+        }
+
         for (size_t i = 0; i < free_operands.size(); i++) {
           auto free_operand = free_operands[i];
           if (!env[free_operand]) {
@@ -936,11 +1021,11 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
             //     free_operand.getLoc(), env[free_operand],
             //     iterArgs[iterArgs.size() - free_operands.size() + i]);
           }
-          primalResults.push_back(env[free_operand]);
+          adjointResults.push_back(env[free_operand]);
         }
-        rewriter.create<scf::YieldOp>(loc, primalResults);
+        rewriter.create<scf::YieldOp>(loc, adjointResults);
       });
-  return adjointFor.getResults().take_back(free_operands.size());
+  return adjointFor.getResults().drop_front(1);
 }
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,

@@ -56,7 +56,6 @@ public:
     // TODO: Only works for one unique differentiated function type at a time.
     auto primalType = op->getOperand(0).getType().dyn_cast<FunctionType>();
     auto floatType = getScalarFloatType(primalType.getInput(0));
-    auto llvmFloatPtr = LLVM::LLVMPointerType::get(floatType);
     assert(primalType.getNumResults() < 2 &&
            "Expected 0 or 1 results from the primal");
 
@@ -92,6 +91,8 @@ public:
           assert(memrefType && "Operator marked const was not a MemRef");
         }
         if (memrefType) {
+          auto pointeeType =
+              LLVM::LLVMPointerType::get(memrefType.getElementType());
           auto rank = memrefType.getRank();
           // Ignore the first pointer
           arguments.push_back(enzyme_const_addr.getResult());
@@ -102,7 +103,7 @@ public:
                             .getResult(0);
           arguments.push_back(rewriter
                                   .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmFloatPtr, casted,
+                                      user->getLoc(), pointeeType, casted,
                                       rewriter.getI64ArrayAttr(0))
                                   .getResult());
 
@@ -112,7 +113,7 @@ public:
           }
           arguments.push_back(rewriter
                                   .create<LLVM::ExtractValueOp>(
-                                      user->getLoc(), llvmFloatPtr, casted,
+                                      user->getLoc(), pointeeType, casted,
                                       rewriter.getI64ArrayAttr(1))
                                   .getResult());
 
@@ -128,7 +129,7 @@ public:
                         typeConverter.convertType(shadow.getType()), shadow)
                     .getResult(0);
             auto extractShadowOp = rewriter.create<LLVM::ExtractValueOp>(
-                shadow.getLoc(), llvmFloatPtr, shadowCasted,
+                shadow.getLoc(), pointeeType, shadowCasted,
                 rewriter.getI64ArrayAttr(1));
             arguments.push_back(extractShadowOp.getResult());
           }

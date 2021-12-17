@@ -8,7 +8,7 @@ namespace mlir {
 void runActivityAnalysis(Operation *op, ValueRange args,
                          llvm::SmallDenseSet<Value> &liveset);
 
-Value onesLike(Location loc, Value operand, OpBuilder &builder);
+Value onesLike(Location loc, Value operand, OpBuilder &builder, bool init);
 
 Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 

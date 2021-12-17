@@ -52,7 +52,7 @@ BUFFERIZE = [
     "-buffer-loop-hoisting",
     "-standalone-loop-hoisting",
     "-promote-buffers-to-stack",
-    # "-buffer-deallocation",
+    "-buffer-deallocation",
 ]
 LOWER_TO_LOOPS = [
     # "-convert-linalg-to-affine-loops",
@@ -122,11 +122,11 @@ def compile_mlir(contents, output, lower_type="loops"):
     llvm_dialect = run_safe(
         [
             f"{BIN}/standalone-opt",
-            "-loop-invariant-code-motion",
+            # "-loop-invariant-code-motion",
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
-            "-standalone-dce",
+            # "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
             # "-linalg-fuse-elementwise-ops",
@@ -195,22 +195,22 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
     temp_ll_file = osp.join(TMP, "preenzyme.ll")
     with open(temp_ll_file, "w") as f:
         f.write(llvm_ir.decode("utf-8"))
-    llvm_ir = run_safe(
-        [
-            CLANG_12,
-            "-S",
-            "-emit-llvm",
-            temp_ll_file,
-            "-o",
-            "/dev/stdout",
-            "-O2",
-            "-fno-vectorize",
-            "-fno-slp-vectorize",
-            "-fno-unroll-loops",
-        ],
-        stdin=llvm_ir,
-        suppress_stderr=True,
-    )
+    # llvm_ir = run_safe(
+    #     [
+    #         CLANG_12,
+    #         "-S",
+    #         "-emit-llvm",
+    #         temp_ll_file,
+    #         "-o",
+    #         "/dev/stdout",
+    #         "-O2",
+    #         "-fno-vectorize",
+    #         "-fno-slp-vectorize",
+    #         "-fno-unroll-loops",
+    #     ],
+    #     stdin=llvm_ir,
+    #     suppress_stderr=True,
+    # )
     postenzyme = run_safe(
         [
             OPT_12,

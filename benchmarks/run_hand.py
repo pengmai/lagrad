@@ -2,6 +2,7 @@ import argparse
 import pandas as pd
 import json
 from compile import (
+    compile_mlir_to_enzyme,
     jit_mlir,
     compile_c,
     compile_enzyme,
@@ -21,24 +22,39 @@ def main(args):
     helper_template = c_env.get_template("mlir_c_abi.c")
     # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
-    lagrad_template = mlir_env.get_template("hand.mlir")
+    enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
+    # lagrad_template = mlir_env.get_template("hand.mlir")
+    lagrad_template = mlir_env.get_template("hand_inlined.mlir")
 
     config = {
         "nbones": 22,
         "ntheta": 26,
         "nverts": 544,
+        "npts": 2,
     }
 
     if args.print:
+        # print(enzyme_mlir_template.render(**config))
         print(lagrad_template.render(**config))
         return
 
+    compile_mlir_to_enzyme(
+        enzyme_mlir_template.render(**config).encode("utf-8"),
+        "hand_enzyme_mlir.o",
+        emit="obj",
+    )
     compile_c(driver_template.render(**config).encode("utf-8"), "hand_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
     compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
     compile_mlir(lagrad_template.render(**config).encode("utf-8"), "hand_lagrad.o")
     stdout = link_and_run(
-        ["hand_driver.o", "mlir_c_abi.o", "hand_enzyme.o", "hand_lagrad.o"],
+        [
+            "hand_driver.o",
+            "mlir_c_abi.o",
+            "hand_enzyme.o",
+            "hand_lagrad.o",
+            "hand_enzyme_mlir.o",
+        ],
         "hand_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
