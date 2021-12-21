@@ -1,3 +1,4 @@
+import warnings
 import subprocess
 import os.path as osp
 
@@ -126,7 +127,7 @@ def compile_mlir(contents, output, lower_type="loops"):
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
-            # "-standalone-dce",
+            "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
             # "-linalg-fuse-elementwise-ops",
@@ -193,24 +194,36 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
     )
     llvm_ir = run_safe(["mlir-translate", "-mlir-to-llvmir"], stdin=llvm_dialect)
     temp_ll_file = osp.join(TMP, "preenzyme.ll")
-    with open(temp_ll_file, "w") as f:
-        f.write(llvm_ir.decode("utf-8"))
-    # llvm_ir = run_safe(
-    #     [
-    #         CLANG_12,
-    #         "-S",
-    #         "-emit-llvm",
-    #         temp_ll_file,
-    #         "-o",
-    #         "/dev/stdout",
-    #         "-O2",
-    #         "-fno-vectorize",
-    #         "-fno-slp-vectorize",
-    #         "-fno-unroll-loops",
-    #     ],
-    #     stdin=llvm_ir,
-    #     suppress_stderr=True,
-    # )
+
+    pre_ad_opt = True
+    if pre_ad_opt:
+        with open(temp_ll_file, "w") as f:
+            f.write(llvm_ir.decode("utf-8"))
+        llvm_ir = run_safe(
+            [
+                CLANG_12,
+                "-S",
+                "-emit-llvm",
+                temp_ll_file,
+                "-o",
+                "/dev/stdout",
+                "-O2",
+                "-fno-vectorize",
+                "-fno-slp-vectorize",
+                "-ffast-math",
+                "-fno-unroll-loops",
+            ],
+            stdin=llvm_ir,
+            suppress_stderr=True,
+        )
+        # with open(osp.join(TMP, "preenzyme_post_O2.ll"), "w") as f:
+        #     f.write(llvm_ir.decode("utf-8"))
+    else:
+        warnings.warn("pre-Enzyme optimization disabled")
+    # warnings.warn("Using hand-modified post_O2 hand tracking")
+    # with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
+    #     llvm_ir = f.read().encode("utf-8")
+
     postenzyme = run_safe(
         [
             OPT_12,

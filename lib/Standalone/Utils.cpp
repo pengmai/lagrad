@@ -371,17 +371,14 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
     auto free_operand_vec = llvm::to_vector<4>(freeOperands);
-    auto vjp_values =
-        reverseForOp(forOp, free_operand_vec, vjp_value, result_idx, rewriter);
+    auto vjp_values = reverseForOp(forOp, free_operand_vec, vjp_value,
+                                   result_idx, env, rewriter);
     for (auto result_pair : llvm::zip(free_operand_vec, vjp_values)) {
       auto free_operand = std::get<0>(result_pair);
       auto result_vjp = std::get<1>(result_pair);
-      if (!env[free_operand]) {
-        env[free_operand] = result_vjp;
-      } else {
-        env[free_operand] = rewriter.create<arith::AddFOp>(
-            free_operand.getLoc(), env[free_operand], result_vjp);
-      }
+      // If the free operand already has a space in the gradient, the for op
+      // will add to that space.
+      env[free_operand] = result_vjp;
     }
     // // only works for GMMs
     // if (forOp.getResultTypes()[0].isa<FloatType>()) {
@@ -477,8 +474,21 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (op_index > 0) {
         continue;
       }
-      vjp_value = reverseTensorExtractOp(dyn_cast<tensor::ExtractOp>(op),
-                                         operand, vjp_value, rewriter);
+      auto extractOp = dyn_cast<tensor::ExtractOp>(op);
+      bool requires_add = env[operand] != nullptr;
+      auto space = requires_add ? env[operand]
+                                : getZero(operand.getLoc(), operand, rewriter,
+                                          /*init=*/true);
+      Value new_val = vjp_value;
+      if (requires_add) {
+        auto before = rewriter.create<tensor::ExtractOp>(op->getLoc(), space,
+                                                         extractOp.indices());
+        new_val =
+            rewriter.create<arith::AddFOp>(op->getLoc(), before, vjp_value);
+      }
+      env[operand] = rewriter.create<tensor::InsertOp>(
+          op->getLoc(), new_val, space, extractOp.indices());
+      continue;
     } else if (opName == "tensor.insert") {
       if (op_index > 0) {
         continue;
@@ -945,6 +955,7 @@ void populatePrimalCache(scf::ForOp forOp, ConversionPatternRewriter &rewriter,
 
 ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
                         Value vjp_value, size_t result_idx,
+                        DenseMap<Value, Value> outer_env,
                         ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
@@ -959,8 +970,10 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
   SmallVector<Value> iterArgsInit({vjp_value});
 
   for (auto free_operand : free_operands) {
-    auto space =
-        getZero(free_operand.getLoc(), free_operand, rewriter, /*init=*/true);
+    auto space = outer_env[free_operand]
+                     ? outer_env[free_operand]
+                     : getZero(free_operand.getLoc(), free_operand, rewriter,
+                               /*init=*/true);
     iterArgsInit.push_back(space);
   }
   auto adjointFor = rewriter.create<scf::ForOp>(
@@ -1016,10 +1029,6 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
             // Assume free_operand is not active.
             env[free_operand] =
                 getZero(free_operand.getLoc(), free_operand, rewriter);
-          } else {
-            // env[free_operand] = rewriter.create<arith::AddFOp>(
-            //     free_operand.getLoc(), env[free_operand],
-            //     iterArgs[iterArgs.size() - free_operands.size() + i]);
           }
           adjointResults.push_back(env[free_operand]);
         }

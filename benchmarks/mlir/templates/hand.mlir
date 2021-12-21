@@ -385,15 +385,14 @@ func @mlir_hand_objective(
   %weights: tensor<{{nverts}}x{{nbones}}xf64>,
   %correspondences: tensor<{{npts}}xi32>,
   %points : tensor<{{npts}}x3xf64>
-) -> tensor<{{npts}}x3xf64> {
-// ) -> tensor<{{nbones}}x4x4xf64> {
+// ) -> tensor<{{npts}}x3xf64> {
+) -> tensor<{{primal_shape}}xf64> {
   %pose_params = call @mto_pose_params(%theta) : (tensor<{{ntheta}}xf64>) -> tensor<{{nbones + 3}}x3xf64>
   // Inlined get_skinned_vertex_positions
   %relatives = call @mget_posed_relatives(%base_relatives, %pose_params) : (tensor<{{nbones}}x4x4xf64>, tensor<{{nbones + 3}}x3xf64>) -> tensor<{{nbones}}x4x4xf64>
   %absolutes = call @mrelatives_to_absolutes(%relatives, %parents) : (tensor<{{nbones}}x4x4xf64>, tensor<{{nbones}}xi32>) -> tensor<{{nbones}}x4x4xf64>
   %transforms_init = arith.constant dense<0.0> : tensor<{{nbones}}x4x4xf64>
   %transforms = linalg.batch_matmul ins(%inverse_base_absolutes, %absolutes : tensor<{{nbones}}x4x4xf64>, tensor<{{nbones}}x4x4xf64>) outs(%transforms_init: tensor<{{nbones}}x4x4xf64>) -> tensor<{{nbones}}x4x4xf64>
-  // %transforms = linalg.batch_matmul ins(%inverse_base_absolutes, %relatives : tensor<{{nbones}}x4x4xf64>, tensor<{{nbones}}x4x4xf64>) outs(%transforms_init: tensor<{{nbones}}x4x4xf64>) -> tensor<{{nbones}}x4x4xf64>
 
   %positions_init = arith.constant dense<0.0> : tensor<{{nverts}}x3xf64>
   %zero = arith.constant 0.0 : f64
@@ -491,6 +490,7 @@ func @mlir_hand_objective(
     %0 = arith.addf %arg0, %arg1 : f64
     linalg.yield %0 : f64
   } -> tensor<{{nverts}}x3xf64>
+  // return %vertex_positions : tensor<{{nverts}}x3xf64>
   // End inline apply_global_transform
   // End inline get_skinned_vertex_positions
 
@@ -532,7 +532,7 @@ func @lagrad_hand_objective(
     tensor<{{nverts}}x{{nbones}}xf64>,
     tensor<{{npts}}xi32>,
     tensor<{{npts}}x3xf64>
-  ) -> tensor<{{npts}}x3xf64>
+  ) -> tensor<{{primal_shape}}xf64>
   %df = standalone.grad %f {of = [0], grad_signal = true} : (
     tensor<{{ntheta}}xf64>,
     tensor<{{nbones}}xi32>,
@@ -542,7 +542,7 @@ func @lagrad_hand_objective(
     tensor<{{nverts}}x{{nbones}}xf64>,
     tensor<{{npts}}xi32>,
     tensor<{{npts}}x3xf64>
-  ) -> tensor<{{npts}}x3xf64>, (
+  ) -> tensor<{{primal_shape}}xf64>, (
     tensor<{{ntheta}}xf64>,
     tensor<{{nbones}}xi32>,
     tensor<{{nbones}}x4x4xf64>,

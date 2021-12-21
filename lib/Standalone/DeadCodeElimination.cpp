@@ -20,6 +20,51 @@
 using namespace mlir;
 
 namespace {
+bool isFloatOrFloatTensor(Type typ) {
+  return typ.isa<FloatType>() ||
+         (typ.isa<RankedTensorType>() &&
+          typ.dyn_cast<RankedTensorType>().getElementType().isa<FloatType>());
+}
+
+/* Collect ops in the body of the for loop*/
+void BFS(ValueRange start, llvm::SmallDenseSet<Value> &liveValues) {
+  SmallVector<Value> frontier{start};
+  while (!frontier.empty()) {
+    Value val = frontier.pop_back_val();
+    if (!liveValues.contains(val)) {
+      liveValues.insert(val);
+      auto definingOp = val.getDefiningOp();
+      if (definingOp) {
+        for (auto &region : definingOp->getRegions()) {
+          for (auto &block : region.getBlocks()) {
+            BFS(block.getTerminator()->getOperands(), liveValues);
+          }
+        }
+        for (auto operand : definingOp->getOperands()) {
+          frontier.push_back(operand);
+        }
+      }
+    }
+  }
+}
+
+void populateLiveBodyArgs(scf::ForOp forOp,
+                          llvm::SmallDenseSet<Value> &liveValues) {
+  auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  for (auto it : llvm::zip(yieldOp.results(), forOp.getResults())) {
+    auto yieldResult = std::get<0>(it);
+    auto result = std::get<1>(it);
+    if (!result.use_empty()) {
+      BFS(yieldResult, liveValues);
+    }
+  }
+  // llvm::errs() << "***LIVE VALUES***:\n";
+  // for (auto val : liveValues) {
+  //   llvm::errs() << val << "\n";
+  // }
+  // llvm::errs() << "***END LIVE VALUES***\n";
+}
+
 class EliminateUnusedSCFForOpResults : public OpRewritePattern<scf::ForOp> {
 public:
   EliminateUnusedSCFForOpResults(MLIRContext *context)
@@ -36,6 +81,8 @@ public:
     Block &block = forOp.region().front();
     auto yieldOp = cast<scf::YieldOp>(block.getTerminator());
 
+    llvm::SmallDenseSet<Value> liveSet;
+    populateLiveBodyArgs(forOp, liveSet);
     // An internal flat vector of block transfer
     // arguments `newBlockTransferArgs` keeps the 1-1 mapping of original to
     // transformed block argument mappings. This plays the role of a
@@ -56,13 +103,10 @@ public:
                              yieldOp.getOperands()      // iter yield
                              )) {
       auto result = std::get<2>(it);
-      bool forwarded =
-          result.use_empty() && (result.getType().isa<FloatType>() ||
-                                 (result.getType().isa<RankedTensorType>() &&
-                                  result.getType()
-                                      .dyn_cast<RankedTensorType>()
-                                      .getElementType()
-                                      .isa<FloatType>()));
+      auto regionArg = std::get<1>(it);
+      bool forwarded = result.use_empty() &&
+                       isFloatOrFloatTensor(result.getType()) &&
+                       !liveSet.contains(regionArg);
       keepMask.push_back(!forwarded);
       canonicalize |= forwarded;
       if (forwarded) {

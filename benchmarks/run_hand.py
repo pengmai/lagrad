@@ -23,14 +23,18 @@ def main(args):
     # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
     enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
-    # lagrad_template = mlir_env.get_template("hand.mlir")
-    lagrad_template = mlir_env.get_template("hand_inlined.mlir")
+    lagrad_template = mlir_env.get_template("hand.mlir")
+    # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
 
+    nbones = 22
+    nverts = 544
+    npts = 100
     config = {
-        "nbones": 22,
+        "nbones": nbones,
         "ntheta": 26,
-        "nverts": 544,
-        "npts": 2,
+        "nverts": nverts,
+        "npts": npts,
+        "primal_shape": f"{npts}x3",
     }
 
     if args.print:
@@ -58,7 +62,31 @@ def main(args):
         "hand_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
-    print(stdout)
+
+    try:
+        lines = stdout.splitlines()
+        keys = [
+            "lagrad_jacobian",
+            "enzyme_jacobian",
+        ]
+        assert len(keys) == len(
+            lines
+        ), f"expected # of apps to match {len(keys)} vs {len(lines)}"
+        results = pd.DataFrame.from_dict(
+            {key: json.loads(line) for key, line in zip(keys, lines)}
+        )
+        print(results[1:].mean())
+
+        # TODO: Meant to serialize the output results to a file.
+        # if outfile:
+        #     serialized_config = config.copy()
+        #     # results_dict = {"config": serialized_config, "results": results.to_dict()}
+        #     # with open(outfile, "w") as f:
+        #     #     json.dump(results_dict, f)
+        return results
+    except (json.JSONDecodeError, Exception):
+        print("Failed to parse output")
+        print(stdout)
 
 
 if __name__ == "__main__":
