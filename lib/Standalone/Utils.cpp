@@ -144,7 +144,9 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
       if (!returnValue[i]) {
         // Int tensors aren't being filtered out for some reason. This is a
         // temporary bandaid.
-        returnValue[i] = region->getArgument(argIndex);
+        auto argument = region->getArgument(argIndex);
+        returnValue[i] =
+            getZero(argument.getLoc(), argument, rewriter, /*init=*/false);
       }
     }
   } else {
@@ -327,6 +329,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
   }
   if (opName == "scf.if") {
     auto ifOp = dyn_cast<scf::IfOp>(op);
+    if (ifOp.getNumResults() == 0) {
+      return;
+    }
     assert(ifOp.getNumResults() == 1 &&
            "if ops with num results != 1 not yet supported");
     auto vjp_value = env[ifOp.getResult(0)];
@@ -504,11 +509,22 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       env[insertOp.dest()] = env[insertOp.result()];
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
-      auto space = env[operand] ? env[operand]
+      auto resultType =
+          extractSliceOp.getResult().getType().cast<RankedTensorType>();
+      bool requires_add = env[operand] != nullptr;
+      auto space = requires_add ? env[operand]
                                 : getZero(operand.getLoc(), operand, rewriter,
                                           /*init=*/true);
+      Value new_value = vjp_value;
+      if (requires_add) {
+        auto before = rewriter.create<tensor::ExtractSliceOp>(
+            op->getLoc(), resultType, space, extractSliceOp.getMixedOffsets(),
+            extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
+        new_value =
+            rewriter.create<arith::AddFOp>(op->getLoc(), before, vjp_value);
+      }
       env[operand] = rewriter.create<tensor::InsertSliceOp>(
-          operand.getLoc(), operand.getType(), vjp_value, space,
+          operand.getLoc(), operand.getType(), new_value, space,
           extractSliceOp.offsets(), extractSliceOp.sizes(),
           extractSliceOp.strides(), extractSliceOp.static_offsets(),
           extractSliceOp.static_sizes(), extractSliceOp.static_strides());
