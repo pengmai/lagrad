@@ -66,6 +66,7 @@ LOWER_TO_LLVM = [
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
+    "-convert-math-to-libm",
     "-convert-std-to-llvm",
     "-reconcile-unrealized-casts",
     "-llvm-legalize-for-export",
@@ -220,10 +221,9 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
         #     f.write(llvm_ir.decode("utf-8"))
     else:
         warnings.warn("pre-Enzyme optimization disabled")
-    # warnings.warn("Using hand-modified post_O2 hand tracking")
-    # with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
-    #     llvm_ir = f.read().encode("utf-8")
-
+    warnings.warn("Using hand-modified post_O2 hand tracking")
+    with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
+        llvm_ir = f.read().encode("utf-8")
     postenzyme = run_safe(
         [
             OPT_12,

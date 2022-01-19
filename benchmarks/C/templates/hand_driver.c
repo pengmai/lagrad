@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <sys/time.h>
 
+#define NUM_RUNS 2
+
 double *deadbeef = (double *)0xdeadbeef;
-extern void aapointer(double const *, double *);
-extern void daapointer(double const *, double *, double *, double *);
 
 extern void
 hand_objective(double const *__restrict theta, int bone_count,
@@ -249,13 +249,15 @@ unsigned long enzyme_hand_simple(HandInput *input, double *J, double *ref_J) {
   gettimeofday(&start, NULL);
   enzyme_jacobian_simple(input, J);
   gettimeofday(&stop, NULL);
+  // serialize_hand_results("benchmarks/results/hand1_t26_c100.txt", J, 3 *
+  // input->n_pts, input->n_theta);
   verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta,
                       "Enzyme/MLIR");
   return timediff(start, stop);
 }
 
 int main() {
-  // /* Preamble */
+  /* Preamble */
   HandInput input = read_hand_data(false, true);
 
   Matrix *base_relatives =
@@ -275,130 +277,20 @@ int main() {
   //                                     .points = &points};
   int J_rows = 3 * input.n_pts;
   double *ref_J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
-  parse_hand_results("benchmarks/results/hand_test.txt", ref_J, J_rows,
+  parse_hand_results("benchmarks/results/hand1_t26_c100.txt", ref_J, J_rows,
                      input.n_theta);
   double *J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
 
-  // unsigned long lgtook = lagrad_hand_simple(&input, &converted, J, ref_J);
-  // printf("LAGrad jacobian took: %lu\n", lgtook);
-  // unsigned long entook =
-  //     enzyme_colmaj_hand_simple(&input, &converted, J, ref_J);
-
-  // printf("Enzyme jacobian took: %lu\n", entook);
-
-  struct timeval start, stop;
-  gettimeofday(&start, NULL);
-  double errb[6] = {1, 1, 1, 1, 1, 1};
-  F64Descriptor1D dtheta = lagrad_hand_objective(
-      /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
-      /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
-      input.model.n_bones, 1,
-      /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
-      input.model.n_bones, 4, 4, 16, 4, 1,
-      /*inverse_base_absolutes=*/deadbeef, input.model.inverse_base_absolutes,
-      0, input.model.n_bones, 4, 4, 16, 4, 1,
-      /*base_positions=*/deadbeef, input.model.base_positions, 0,
-      input.model.n_vertices, 4, 4, 1,
-      /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
-      input.model.n_bones, input.model.n_bones, 1,
-      /*correspondences=*/(int32_t *)deadbeef, input.correspondences, 0,
-      input.n_pts, 1,
-      /*points=*/deadbeef, input.points, 0, input.n_pts, 3, 3, 1,
-      /*g=*/deadbeef, errb, 0, input.n_pts, 3, 3, 1);
-  gettimeofday(&stop, NULL);
-  printf("LAGrad took: %lu\n", timediff(start, stop));
-  print_d_arr(dtheta.aligned, dtheta.size);
-
-  double err[3 * input.n_pts];
-  for (size_t i = 0; i < 3 * input.n_pts; i++) {
-    err[i] = 0;
+  unsigned long *results_df =
+      (unsigned long *)malloc(NUM_RUNS * sizeof(unsigned long));
+  for (size_t run = 0; run < NUM_RUNS; run++) {
+    results_df[run] = lagrad_hand_simple(&input, J, ref_J);
   }
-
-  // double thetab[26] = {0};
-  // gettimeofday(&start, NULL);
-  // dhand_objective(input.theta, thetab, input.model.n_bones,
-  //                 input.model.bone_names, input.model.parents,
-  //                 base_relatives, inverse_base_absolutes, &base_positions,
-  //                 &weights, NULL, input.model.is_mirrored, input.n_pts,
-  //                 input.correspondences, &points, err, errb);
-  // gettimeofday(&stop, NULL);
-  // printf("Enzyme elementwise took: %lu\n", timediff(start, stop));
-  // printf("Enzyme:\n");
-  // print_d_arr(thetab, 26);
-
-  gettimeofday(&start, NULL);
-  F64Descriptor1D etheta = enzyme_hand_objective(
-      /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
-      /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
-      input.model.n_bones, 1,
-      /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
-      input.model.n_bones, 4, 4, 16, 4, 1,
-      /*inverse_base_absolutes=*/deadbeef, input.model.inverse_base_absolutes,
-      0, input.model.n_bones, 4, 4, 16, 4, 1,
-      /*base_positions=*/deadbeef, input.model.base_positions, 0,
-      input.model.n_vertices, 4, 4, 1,
-      /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
-      input.model.n_bones, input.model.n_bones, 1,
-      /*correspondences=*/(int32_t *)deadbeef, input.correspondences, 0,
-      input.n_pts, 1,
-      /*points=*/deadbeef, input.points, 0, input.n_pts, 3, 3, 1,
-      /*derr=*/deadbeef, errb, 0, input.n_pts, 3, 3, 1);
-  gettimeofday(&stop, NULL);
-  printf("MLIR Enzyme:\n");
-  print_d_arr(etheta.aligned, etheta.size);
-  printf("Enzyme/MLIR elementwise took: %lu\n", timediff(start, stop));
-  // print_d_arr(enzyme_mlir_res.aligned, enzyme_mlir_res.size);
-
-  // printf("LAGrad:\n");
-  // print_d_arr(dtheta.aligned, dtheta.size);
-  // print_d_arr(input.correspondences, 6);
-
-  /* Verify the MLIR Primal */
-  double errspace[6];
-  emlir_hand_objective(
-      /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
-      /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
-      input.model.n_bones, 1,
-      /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
-      input.model.n_bones, 4, 4, 16, 4, 1,
-      /*inverse_base_absolutes=*/deadbeef, input.model.inverse_base_absolutes,
-      0, input.model.n_bones, 4, 4, 16, 4, 1,
-      /*base_positions=*/deadbeef, input.model.base_positions, 0,
-      input.model.n_vertices, 4, 4, 1,
-      /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
-      input.model.n_bones, input.model.n_bones, 1,
-      /*correspondences=*/(int32_t *)deadbeef, input.correspondences, 0,
-      input.n_pts, 1,
-      /*points=*/deadbeef, input.points, 0, input.n_pts, 3, 3, 1, deadbeef,
-      errspace, 0, input.n_pts, 3, 3, 1);
-  // F64Descriptor2D mprimal = mlir_hand_objective(
-  //     /*theta=*/deadbeef, input.theta, 0, input.n_theta, 1,
-  //     /*parents=*/(int32_t *)deadbeef, input.model.parents, 0,
-  //     input.model.n_bones, 1,
-  //     /*base_relatives=*/deadbeef, input.model.base_relatives, 0,
-  //     input.model.n_bones, 4, 4, 16, 4, 1,
-  //     /*inverse_base_absolutes=*/deadbeef,
-  //     input.model.inverse_base_absolutes, 0, input.model.n_bones, 4, 4, 16,
-  //     4, 1,
-  //     /*base_positions=*/deadbeef, input.model.base_positions, 0,
-  //     input.model.n_vertices, 4, 4, 1,
-  //     /*weights=*/deadbeef, input.model.weights, 0, input.model.n_vertices,
-  //     input.model.n_bones, input.model.n_bones, 1,
-  //     /*correspondences=*/(int32_t *)deadbeef, input.correspondences, 0,
-  //     input.n_pts, 1,
-  //     /*points=*/deadbeef, input.points, 0, input.n_pts, 3, 3, 1);
-  double expected_primal[6] = {0.1652,  -0.1745, 0.1548,
-                               -0.1257, -0.0425, -0.1307};
-  double primerr = 0;
-  for (size_t i = 0; i < 6; i++) {
-    // primerr += fabs(mprimal.aligned[i] - expected_primal[i]);
-    primerr += fabs(errspace[i] - expected_primal[i]);
+  print_ul_arr(results_df, NUM_RUNS);
+  for (size_t run = 0; run < NUM_RUNS; run++) {
+    results_df[run] = enzyme_hand_simple(&input, J, ref_J);
   }
-  if (primerr > 2e-4) {
-    printf("Primal err: %f\n", primerr);
-  } else {
-    printf("Primal is OK\n");
-  }
+  print_ul_arr(results_df, NUM_RUNS);
 
   /* Cleanup */
   free_matrix_array(base_relatives, input.model.n_bones);
@@ -408,5 +300,6 @@ int main() {
   free(points.data);
   free(J);
   free(ref_J);
+  free(results_df);
   free_hand_input(&input);
 }

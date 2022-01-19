@@ -194,13 +194,16 @@ void apply_global_transform(const Matrix *pose_params, Matrix *positions) {
   int i, j;
   Matrix *R = get_new_matrix(3, 3);
   angle_axis_to_rotation_matrix(pose_params->data, R);
+  // nrows is 3, ncols is 544
 
+  // This just multiplies each entry by 1.
   for (i = 0; i < 3; i++) {
     for (j = 0; j < 3; j++) {
       R->data[j + i * R->nrows] *=
           pose_params->data[i + 1 * pose_params->nrows];
     }
   }
+  // R is unchanged
 
   Matrix *tmp = get_new_empty_matrix();
   mat_mult(R, positions, tmp);
@@ -473,7 +476,7 @@ void dhand_objective(double const *theta, double *dtheta, int bone_count,
   //     base_relatives, enzyme_const, inverse_base_absolutes, enzyme_const,
   //     base_positions, enzyme_const, weights, enzyme_const, triangles,
   //     enzyme_const, is_mirrored, enzyme_const, corresp_count, enzyme_const,
-  //     correspondences, enzyme_const, points, enzyme_dupnoneed, err, derr);
+  //     correspondences, enzyme_const, points, enzyme_dup, err, derr);
 }
 
 // void dhand_objective_complicated(double const *theta, double *dtheta,

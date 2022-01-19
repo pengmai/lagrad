@@ -436,6 +436,7 @@ func @mlir_hand_objective(
     } -> tensor<{{nverts}}x3xf64>
     scf.yield %positions_next : tensor<{{nverts}}x3xf64>
   }
+  // return %positions : tensor<{{nverts}}x3xf64>
 
   // Inlined apply_global_transform
   %angle_axis = tensor.extract_slice %pose_params[0, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
