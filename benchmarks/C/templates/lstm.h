@@ -51,3 +51,10 @@ void read_lstm_instance(LSTMInput *input) {
 
   fclose(fd);
 }
+
+void free_lstm_instance(LSTMInput *input) {
+  free(input->main_params);
+  free(input->extra_params);
+  free(input->state);
+  free(input->sequence);
+}

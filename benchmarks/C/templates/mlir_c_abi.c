@@ -8,6 +8,12 @@ unsigned long timediff(struct timeval start, struct timeval stop) {
   return (stop.tv_sec - start.tv_sec) * 1000000 + stop.tv_usec - start.tv_usec;
 }
 
+void init_range(double *arr, size_t size) {
+  for (size_t i = 0; i < size; i++) {
+    arr[i] = i;
+  }
+}
+
 void random_init(float *arr, size_t size) {
   for (size_t i = 0; i < size; ++i) {
     arr[i] = (float)rand() / (float)RAND_MAX;

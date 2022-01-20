@@ -70,6 +70,8 @@ typedef struct {
 
 unsigned long timediff(struct timeval start, struct timeval stop);
 
+void init_range(double *arr, size_t size);
+
 void random_init(float *arr, size_t size);
 
 void random_init_2d(float *arr, size_t m, size_t n);
