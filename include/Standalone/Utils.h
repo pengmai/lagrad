@@ -29,8 +29,9 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel);
 
-Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
-                       int op_index, ConversionPatternRewriter &rewriter);
+Value reverseGenericOp(linalg::GenericOp op, ModuleOp moduleOp, Value operand,
+                       Value vjp_value, int op_index,
+                       ConversionPatternRewriter &rewriter);
 
 Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
                   DenseMap<Value, Value> outer_env,

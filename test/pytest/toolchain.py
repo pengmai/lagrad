@@ -26,6 +26,7 @@ LOWERING = [
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
+    "-convert-math-to-libm",
     "-convert-linalg-to-llvm",
     "-convert-std-to-llvm",
     "-reconcile-unrealized-casts",

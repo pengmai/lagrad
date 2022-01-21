@@ -460,6 +460,20 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       auto sin = rewriter.create<math::SinOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), sin, vjp_value);
       vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
+    } else if (opName == "math.tanh") {
+      // There's no builtin hyperbolic cos in the math dialect, so we need to
+      // express the formula here.
+      auto exp = rewriter.create<math::ExpOp>(op->getLoc(), operand);
+      auto negexp = rewriter.create<math::ExpOp>(
+          op->getLoc(), rewriter.create<arith::NegFOp>(op->getLoc(), operand));
+      auto numerator =
+          rewriter.create<arith::AddFOp>(op->getLoc(), exp, negexp);
+      auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
+      auto cosh = rewriter.create<arith::MulFOp>(op->getLoc(), numerator, half);
+      auto coshsquared =
+          rewriter.create<arith::MulFOp>(op->getLoc(), cosh, cosh);
+      vjp_value =
+          rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, coshsquared);
     } else if (opName == "math.log") {
       vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                  op->getOperand(0));
@@ -561,8 +575,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
           }
           // Not totally sure if we can use the VJP value as-is, watch out
           // for bugs.
-          auto out =
-              reverseGenericOp(genericOp, freeOperand, vjp_value, -1, rewriter);
+          auto out = reverseGenericOp(genericOp, moduleOp, freeOperand,
+                                      vjp_value, -1, rewriter);
           auto result =
               rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
           if (!env[freeOperand]) {
@@ -576,8 +590,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value =
-          reverseGenericOp(genericOp, operand, vjp_value, op_index, rewriter);
+      vjp_value = reverseGenericOp(genericOp, moduleOp, operand, vjp_value,
+                                   op_index, rewriter);
     } else if (opName == "linalg.dot") {
       if (op_index > 1)
         continue;
@@ -788,8 +802,9 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
   }
 }
 
-Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
-                       int op_index, ConversionPatternRewriter &rewriter) {
+Value reverseGenericOp(linalg::GenericOp op, ModuleOp moduleOp, Value operand,
+                       Value vjp_value, int op_index,
+                       ConversionPatternRewriter &rewriter) {
   // Need to ensure:
   // if (op_index > (size_t)genericOp.getNumInputs() - 1)
   //   continue;
@@ -863,7 +878,7 @@ Value reverseGenericOp(linalg::GenericOp op, Value operand, Value vjp_value,
           } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
           } else {
-            populateVJP(rop, op->getParentOfType<ModuleOp>(), bbEnv, rewriter);
+            populateVJP(rop, moduleOp, bbEnv, rewriter);
           }
         }
 
@@ -1028,6 +1043,8 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
             rewriter.setInsertionPointAfter(op);
             rewriter.eraseOp(op);
           } else {
+            auto forModule = forOp->getParentOfType<ModuleOp>();
+            assert(forModule && "forModule was null");
             populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
           }
         }
@@ -1078,6 +1095,7 @@ Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
   std::stringstream gradFuncStream;
   gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
+  assert(moduleOp && "moduleOp was null");
   auto dFuncOp = dyn_cast_or_null<FuncOp>(moduleOp.lookupSymbol(gradFuncName));
   if (!dFuncOp) {
     auto primalFunc = dyn_cast<FuncOp>(moduleOp.lookupSymbol(op.calleeAttr()));
