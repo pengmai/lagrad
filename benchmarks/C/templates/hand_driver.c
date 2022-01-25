@@ -269,12 +269,12 @@ int main() {
   Matrix weights = ptr_to_matrix(input.model.weights, input.model.n_bones,
                                  input.model.n_vertices);
   Matrix points = ptr_to_matrix(input.points, 3, input.n_pts);
-  // struct MatrixConverted converted = {.base_relatives = base_relatives,
-  //                                     .inverse_base_absolutes =
-  //                                         inverse_base_absolutes,
-  //                                     .base_positions = &base_positions,
-  //                                     .weights = &weights,
-  //                                     .points = &points};
+  struct MatrixConverted converted = {.base_relatives = base_relatives,
+                                      .inverse_base_absolutes =
+                                          inverse_base_absolutes,
+                                      .base_positions = &base_positions,
+                                      .weights = &weights,
+                                      .points = &points};
   int J_rows = 3 * input.n_pts;
   double *ref_J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
   parse_hand_results("benchmarks/results/hand1_t26_c100.txt", ref_J, J_rows,
@@ -289,6 +289,10 @@ int main() {
   print_ul_arr(results_df, NUM_RUNS);
   for (size_t run = 0; run < NUM_RUNS; run++) {
     results_df[run] = enzyme_hand_simple(&input, J, ref_J);
+  }
+  print_ul_arr(results_df, NUM_RUNS);
+  for (size_t run = 0; run < NUM_RUNS; run++) {
+    results_df[run] = enzyme_colmaj_hand_simple(&input, &converted, J, ref_J);
   }
   print_ul_arr(results_df, NUM_RUNS);
 
