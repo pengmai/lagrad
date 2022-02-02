@@ -376,7 +376,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
     auto free_operand_vec = llvm::to_vector<4>(freeOperands);
-    auto vjp_values = reverseForOp(forOp, free_operand_vec, vjp_value,
+    auto vjp_values = reverseForOp(forOp, moduleOp, free_operand_vec, vjp_value,
                                    result_idx, env, rewriter);
     for (auto result_pair : llvm::zip(free_operand_vec, vjp_values)) {
       auto free_operand = std::get<0>(result_pair);
@@ -984,9 +984,9 @@ void populatePrimalCache(scf::ForOp forOp, ConversionPatternRewriter &rewriter,
   }
 }
 
-ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
-                        Value vjp_value, size_t result_idx,
-                        DenseMap<Value, Value> outer_env,
+ValueRange reverseForOp(scf::ForOp forOp, ModuleOp moduleOp,
+                        ValueRange free_operands, Value vjp_value,
+                        size_t result_idx, DenseMap<Value, Value> outer_env,
                         ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
@@ -1043,9 +1043,7 @@ ValueRange reverseForOp(scf::ForOp forOp, ValueRange free_operands,
             rewriter.setInsertionPointAfter(op);
             rewriter.eraseOp(op);
           } else {
-            auto forModule = forOp->getParentOfType<ModuleOp>();
-            assert(forModule && "forModule was null");
-            populateVJP(op, forOp->getParentOfType<ModuleOp>(), env, rewriter);
+            populateVJP(op, moduleOp, env, rewriter);
           }
         }
 
