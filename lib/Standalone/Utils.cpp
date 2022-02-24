@@ -75,11 +75,11 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
   return newOp;
 }
 
-FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
+FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
+                             ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel = false) {
   Region *region = funcOp.getCallableRegion();
-  auto moduleOp = funcOp->getParentOfType<ModuleOp>();
   if (!region) {
     funcOp->emitError("Function region cannot be null");
     return nullptr;
@@ -108,7 +108,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
     auto opName = op->getName().getStringRef();
     if (opName == "std.return") {
       // This is the exit point
-      runActivityAnalysis(op, funcOp.getArguments(), active);
+      // runActivityAnalysis(op, funcOp.getArguments(), active);
       rewriter.setInsertionPoint(op);
       assert(op->getNumOperands() == 1 &&
              "Expected function to return 1 value");
@@ -126,7 +126,7 @@ FuncOp differentiateFunction(FuncOp funcOp, ArrayAttr gradientsOf,
       // &&
       //   llvm::any_of(op->getResults(),
       //                [&](OpResult res) { return active.contains(res); })) {
-      populateVJP(op, moduleOp, env, rewriter);
+      populateVJP(op, ctx, env, rewriter);
     }
   }
 
@@ -314,7 +314,7 @@ Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
   return adjoint.getResult(0);
 }
 
-void populateVJP(Operation *op, ModuleOp moduleOp,
+void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
@@ -347,7 +347,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
 
     for (auto freeOperand : freeOperands) {
-      auto result = reverseIfOp(ifOp, freeOperand, vjp_value, env, rewriter);
+      auto result =
+          reverseIfOp(ifOp, ctx, freeOperand, vjp_value, env, rewriter);
       if (!env[freeOperand]) {
         env[freeOperand] = result;
       } else {
@@ -376,7 +377,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
     auto free_operand_vec = llvm::to_vector<4>(freeOperands);
-    auto vjp_values = reverseForOp(forOp, moduleOp, free_operand_vec, vjp_value,
+    auto vjp_values = reverseForOp(forOp, ctx, free_operand_vec, vjp_value,
                                    result_idx, env, rewriter);
     for (auto result_pair : llvm::zip(free_operand_vec, vjp_values)) {
       auto free_operand = std::get<0>(result_pair);
@@ -413,6 +414,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
     // essentially a huge switch statement on the operator name.
     if (op->getNumResults() == 0) {
       // op->emitError("op had zero results");
+      op->emitWarning() << "op had zero results";
       llvm_unreachable("op had zero results");
       return;
     }
@@ -487,8 +489,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseCallOp(dyn_cast<CallOp>(op), moduleOp, vjp_value,
-                                op_index, rewriter);
+      vjp_value = reverseCallOp(dyn_cast<CallOp>(op), ctx, vjp_value, op_index,
+                                rewriter);
     } else if (opName == "tensor.extract") {
       if (op_index > 0) {
         continue;
@@ -575,8 +577,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
           }
           // Not totally sure if we can use the VJP value as-is, watch out
           // for bugs.
-          auto out = reverseGenericOp(genericOp, moduleOp, freeOperand,
-                                      vjp_value, -1, rewriter);
+          auto out = reverseGenericOp(genericOp, ctx, freeOperand, vjp_value,
+                                      -1, rewriter);
           auto result =
               rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
           if (!env[freeOperand]) {
@@ -590,8 +592,8 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseGenericOp(genericOp, moduleOp, operand, vjp_value,
-                                   op_index, rewriter);
+      vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
+                                   rewriter);
     } else if (opName == "linalg.dot") {
       if (op_index > 1)
         continue;
@@ -802,7 +804,7 @@ void populateVJP(Operation *op, ModuleOp moduleOp,
   }
 }
 
-Value reverseGenericOp(linalg::GenericOp op, ModuleOp moduleOp, Value operand,
+Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
                        Value vjp_value, int op_index,
                        ConversionPatternRewriter &rewriter) {
   // Need to ensure:
@@ -878,7 +880,7 @@ Value reverseGenericOp(linalg::GenericOp op, ModuleOp moduleOp, Value operand,
           } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
           } else {
-            populateVJP(rop, moduleOp, bbEnv, rewriter);
+            populateVJP(rop, ctx, bbEnv, rewriter);
           }
         }
 
@@ -904,8 +906,8 @@ Value reverseGenericOp(linalg::GenericOp op, ModuleOp moduleOp, Value operand,
   return adjoint.getResult(0);
 }
 
-Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
-                  DenseMap<Value, Value> outer_env,
+Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
+                  Value vjp_value, DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter) {
   auto reverseIfBlock = [&](Region &ifRegion) {
     return [&](OpBuilder &builder, Location loc) {
@@ -923,7 +925,7 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
           rewriter.setInsertionPointAfter(op);
           rewriter.eraseOp(op);
         } else {
-          populateVJP(op, ifOp->getParentOfType<ModuleOp>(), env, rewriter);
+          populateVJP(op, ctx, env, rewriter);
         }
       }
       // The free operand might only appear in one block but not the other.
@@ -944,11 +946,17 @@ Value reverseIfOp(scf::IfOp ifOp, Value freeOperand, Value vjp_value,
 }
 
 // Augment the primal for loop to cache iteration values.
-void populatePrimalCache(scf::ForOp forOp, ConversionPatternRewriter &rewriter,
+void populatePrimalCache(scf::ForOp forOp,
+                         llvm::SmallDenseSet<Value> effectivelyUsed,
+                         ConversionPatternRewriter &rewriter,
                          DenseMap<Value, Value> &val_to_cached) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
 
-  // Determine which values to cache.
+  // This is the newer version to try to incorporate effective use analysis
+  // SmallVector<Value> valuesToCache{effectivelyUsed.begin(),
+  //                                  effectivelyUsed.end()};
+
+  // This is the older version. Determine which values to cache.
   SmallVector<Value> valuesToCache;
   for (auto iterOp : forOp.getRegionIterArgs()) {
     if (iterOp.getType().isIntOrIndexOrFloat()) {
@@ -974,25 +982,76 @@ void populatePrimalCache(scf::ForOp forOp, ConversionPatternRewriter &rewriter,
     caches.push_back(primalCache.getResult());
   }
 
+  // this line is older
   rewriter.setInsertionPoint(&forOp.getBody()->front());
   for (auto cpair : llvm::zip(caches, valuesToCache)) {
     auto ccache = std::get<0>(cpair);
     auto valToCache = std::get<1>(cpair);
+    // newer
+    // rewriter.setInsertionPointAfterValue(valToCache);
     rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
                                      forOp.getInductionVar());
     val_to_cached[valToCache] = ccache;
   }
 }
 
-ValueRange reverseForOp(scf::ForOp forOp, ModuleOp moduleOp,
+bool hasIntersection(llvm::SmallDenseSet<Value> A, OperandRange B) {
+  for (auto op : B) {
+    if (A.contains(op)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void runEffectiveUseAnalysis(scf::ForOp forOp, LAGradContext &ctx,
+                             ValueRange free_operands,
+                             llvm::SmallDenseSet<Value> &effectivelyUsed) {
+  // Which values are used in the adjoint?
+  llvm::SmallDenseSet<Value> adjointUsed;
+  llvm::SmallDenseSet<Value> mutableArgs;
+  mutableArgs.insert(forOp.getRegionIterArgs().begin(),
+                     forOp.getRegionIterArgs().end());
+  for (auto &bodyOp : forOp.getLoopBody().getOps()) {
+    if (hasIntersection(mutableArgs, bodyOp.getOperands())) {
+      mutableArgs.insert(bodyOp.getResults().begin(),
+                         bodyOp.getResults().end());
+    }
+
+    if (auto mulfOp = dyn_cast_or_null<arith::MulFOp>(&bodyOp)) {
+      if (ctx.activeValues.contains(mulfOp.lhs())) {
+        adjointUsed.insert(mulfOp.rhs());
+      }
+      if (ctx.activeValues.contains(mulfOp.rhs())) {
+        adjointUsed.insert(mulfOp.lhs());
+      }
+    }
+  }
+
+  // Set intersection of mutable values and adjoint used values.
+  for (auto mut : mutableArgs) {
+    if (adjointUsed.contains(mut)) {
+      effectivelyUsed.insert(mut);
+    }
+  }
+}
+
+ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
                         ValueRange free_operands, Value vjp_value,
                         size_t result_idx, DenseMap<Value, Value> outer_env,
                         ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
   auto primalOps = forOp.getLoopBody().getOps();
+  llvm::SmallDenseSet<Value> effectivelyUsed;
+  runEffectiveUseAnalysis(forOp, ctx, free_operands, effectivelyUsed);
   DenseMap<Value, Value> iterArgsToCached;
-  populatePrimalCache(forOp, rewriter, iterArgsToCached);
+  populatePrimalCache(forOp, effectivelyUsed, rewriter, iterArgsToCached);
+  // llvm::errs() << "effectively used:\n";
+  // for (auto eu : effectivelyUsed) {
+  //   llvm::errs() << "  " << eu << "\n";
+  // }
+  // llvm::errs() << "\n";
   SmallVector<Value> operandsWithIV{
       forOp.getInductionVar(),
       // This is only valid under certain conditions, i.e. if the result was
@@ -1017,10 +1076,19 @@ ValueRange reverseForOp(scf::ForOp forOp, ModuleOp moduleOp,
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         regionArgs.push_back(idx);
         regionArgs.push_back(forOp.getResult(result_idx));
+        Value vjp_op = nullptr;
         for (auto cpair : iterArgsToCached) {
           operandsWithIV.push_back(cpair.first);
           auto loaded = builder.create<memref::LoadOp>(cpair.second.getLoc(),
                                                        cpair.second, idx);
+
+          // This is to fix the case where the vjp value must be updated in the
+          // body of the adjoint loop. TODO: This might not work with vectors
+          if (cpair.first ==
+              forOp.getRegionIterArgForOpOperand(
+                  forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
+            vjp_op = loaded;
+          }
           regionArgs.push_back(loaded);
         }
         auto primalRegionOps = cloneBasicBlock(
@@ -1043,12 +1111,14 @@ ValueRange reverseForOp(scf::ForOp forOp, ModuleOp moduleOp,
             rewriter.setInsertionPointAfter(op);
             rewriter.eraseOp(op);
           } else {
-            populateVJP(op, moduleOp, env, rewriter);
+            populateVJP(op, ctx, env, rewriter);
           }
         }
 
         if (env[forOp.getResult(result_idx)]) {
           adjointResults.push_back(env[forOp.getResult(result_idx)]);
+        } else if (vjp_op && env[vjp_op]) {
+          adjointResults.push_back(env[vjp_op]);
         } else {
           // The primal result was unused in the primal loop body.
           adjointResults.push_back(iterArgs[0]);
@@ -1087,22 +1157,24 @@ Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
                                           op.indices());
 }
 
-Value reverseCallOp(CallOp op, ModuleOp moduleOp, Value vjp_value,
+Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter) {
   auto *context = op.getContext();
   std::stringstream gradFuncStream;
   gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
-  assert(moduleOp && "moduleOp was null");
-  auto dFuncOp = dyn_cast_or_null<FuncOp>(moduleOp.lookupSymbol(gradFuncName));
+  assert(ctx.moduleOp && "moduleOp was null");
+  auto dFuncOp =
+      dyn_cast_or_null<FuncOp>(ctx.moduleOp.lookupSymbol(gradFuncName));
   if (!dFuncOp) {
-    auto primalFunc = dyn_cast<FuncOp>(moduleOp.lookupSymbol(op.calleeAttr()));
+    auto primalFunc =
+        dyn_cast<FuncOp>(ctx.moduleOp.lookupSymbol(op.calleeAttr()));
     dFuncOp = copyFunctionDeclaration(primalFunc, gradFuncName, rewriter);
 
     auto innerGradsOf = ArrayAttr::get(
         context, {IntegerAttr::get(IntegerType::get(context, 64), op_index)});
 
-    dFuncOp = differentiateFunction(dFuncOp, innerGradsOf, rewriter);
+    dFuncOp = differentiateFunction(dFuncOp, ctx, innerGradsOf, rewriter);
   }
   llvm::SmallVector<Value> operands(op.getOperands());
   operands.push_back(vjp_value);

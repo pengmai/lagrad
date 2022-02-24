@@ -112,7 +112,9 @@ private:
     // to taking in the gradient signal as a parameter.
     FuncOp funcOp =
         copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
-    return differentiateFunction(funcOp, gradientsOf, rewriter,
+    LAGradContext lagradctx{moduleOp};
+    runActivityAnalysis(lagradctx, funcOp, gradientsOf);
+    return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,
                                  /*topLevel=*/!customGradSignal);
   }
 };
