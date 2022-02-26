@@ -1,5 +1,4 @@
-// Copied from gmm_tensor_compressed.mlir, then modified to have full L materialization.
-// This is meant to be fully compatible with LAGrad.
+// Meant for use with LAGrad. This is essentially an inlined gmm_tensor_compressed.mlir.
 
 #map0 = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0)>
@@ -19,11 +18,11 @@
 module  {
   // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-  func @mlir_gmm_opt_full(
+  func @mlir_gmm_opt_compressed(
     %alphas: tensor<{{k}}xf64>,
     %means: tensor<{{k}}x{{d}}xf64>,
     %Qs: tensor<{{k}}x{{d}}xf64>,
-    %Ls: tensor<{{k}}x{{d}}x{{d}}xf64>,
+    %Ls: tensor<{{k}}x{{tri_size}}xf64>,
     %x: tensor<{{n}}x{{d}}xf64>,
     %wishart_gamma: f64,
     %wishart_m: i64
@@ -78,14 +77,35 @@ module  {
         } -> tensor<{{d}}xf64>
 
         %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
-        %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64, "ltri">
+        %Ltri_slice = tensor.extract_slice %Ls[%ik, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
 
         // inlined Qtimesx
         // Elementwise multiplication
         %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
 
         // The triangular matrix-vector multiplication
-        %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        %trmv_init = linalg.fill(%zero, %trmv_space) : f64, tensor<{{d}}xf64> -> tensor<{{d}}xf64>
+        %out_1 = scf.for %iv = %c0 to %cd step %c1 iter_args(%out_iter_i = %trmv_init) -> tensor<{{d}}xf64> {
+          %Lidx_0 = arith.muli %c2, %cd : index
+          %Lidx_1 = arith.subi %Lidx_0, %iv : index
+          %Lidx_2 = arith.subi %Lidx_1, %c1 : index
+          %Lidx_3 = arith.muli %Lidx_2, %iv : index
+          %Lidx_4 = arith.divsi %Lidx_3, %c2 : index
+
+          %iv_plus_1 = arith.addi %iv, %c1 : index
+          %out_iter_i_next:2 = scf.for %jv = %iv_plus_1 to %cd step %c1 iter_args(%out_iter = %out_iter_i, %Lidx = %Lidx_4) -> (tensor<{{d}}xf64>, index) {
+            %0 = tensor.extract %Ltri_slice[%Lidx] : tensor<{{tri_size}}xf64>
+            %1 = tensor.extract %xcentered[%iv] : tensor<{{d}}xf64>
+            %2 = tensor.extract %out_iter[%jv] : tensor<{{d}}xf64>
+            %3 = arith.mulf %0, %1 : f64
+            %4 = arith.addf %3, %2 : f64
+            %out_next = tensor.insert %4 into %out_iter[%jv] : tensor<{{d}}xf64>
+
+            %Lidx_next = arith.addi %Lidx, %c1 : index
+            scf.yield %out_next, %Lidx_next : tensor<{{d}}xf64>, index
+          }
+          scf.yield %out_iter_i_next#0 : tensor<{{d}}xf64>
+        }
         %Qxcentered = arith.addf %out_0, %out_1 : tensor<{{d}}xf64>
 
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
@@ -95,6 +115,7 @@ module  {
           linalg.yield %1 : f64
         } -> tensor<f64>
         %msqnorm = tensor.extract %msqnorm_t[] : tensor<f64>
+        // %msqnorm = call @msqnorm(%Qxcentered) : (tensor<{{d}}xf64>) -> f64
         %hmsqnorm = arith.mulf %msqnorm, %half : f64
         %a_ik = tensor.extract %alphas[%ik] : tensor<{{k}}xf64>
         %q_ik = tensor.extract %sum_qs[%ik] : tensor<{{k}}xf64>
@@ -141,7 +162,6 @@ module  {
       %slse_next = arith.addf %slse_iv, %lse : f64
       scf.yield %slse_next : f64
     }
-    // return %slse : f64
 
     // inlined logsumexp alphas
     // find the max
@@ -199,9 +219,9 @@ module  {
       } -> tensor<f64>
       %frobenius_0 = tensor.extract %fro_0[] : tensor<f64>
 
-      %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64, "ltri">
+      %Ltri_slice = tensor.extract_slice %Ls[%ik, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
       // Inlined msqnorm_2d
-      %fro_1 = linalg.generic {indexing_maps = [#map0, #map14], iterator_types = ["reduction", "reduction"]} ins(%Ltri_slice : tensor<{{d}}x{{d}}xf64, "ltri">) outs(%zerod_tensor : tensor<f64>) {
+      %fro_1 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Ltri_slice : tensor<{{tri_size}}xf64>) outs(%zerod_tensor : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %0 = arith.mulf %arg0, %arg0 : f64
         %1 = arith.addf %0, %arg1 : f64
@@ -227,11 +247,11 @@ module  {
     return %final : f64
   }
 
-  func @lagrad_gmm_full(
+  func @lagrad_gmm_compressed(
     %arg0: tensor<{{k}}xf64>,
     %arg1: tensor<{{k}}x{{d}}xf64>,
     %arg2: tensor<{{k}}x{{d}}xf64>,
-    %arg3: tensor<{{k}}x{{d}}x{{d}}xf64>,
+    %arg3: tensor<{{k}}x{{tri_size}}xf64>,
     %arg4: tensor<{{n}}x{{d}}xf64>,
     %arg5: f64,
     %arg6: i64
@@ -239,16 +259,16 @@ module  {
     tensor<{{k}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
     tensor<{{k}}x{{d}}xf64>,
-    tensor<{{k}}x{{d}}x{{d}}xf64>
+    tensor<{{k}}x{{tri_size}}xf64>
   ) {
     %zero = arith.constant 0.0 : f64
 
-    %f = constant @mlir_gmm_opt_full : (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>, tensor<{{n}}x{{d}}xf64>, f64, i64) -> f64
+    %f = constant @mlir_gmm_opt_compressed : (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>, tensor<{{n}}x{{d}}xf64>, f64, i64) -> f64
     %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>,
       tensor<{{n}}x{{d}}xf64>,
       f64,
       i64
@@ -256,7 +276,7 @@ module  {
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>,
       tensor<{{n}}x{{d}}xf64>,
       f64,
       i64
@@ -264,14 +284,14 @@ module  {
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64>
+      tensor<{{k}}x{{tri_size}}xf64>
     )
 
     %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64>,
+      tensor<{{k}}x{{tri_size}}xf64>,
       tensor<{{n}}x{{d}}xf64>,
       f64,
       i64
@@ -279,8 +299,8 @@ module  {
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64>
+      tensor<{{k}}x{{tri_size}}xf64>
     )
-    return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>
+    return %res#0, %res#1, %res#2, %res#3 : tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>
   }
 }

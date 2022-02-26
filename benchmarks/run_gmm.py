@@ -27,10 +27,10 @@ def generate_gmm_results(config, outfile=None):
     )
     compile_enzyme(config["enzyme"].render(**config).encode("utf-8"), "gmm_enzyme.o")
     compile_mlir(config["mlir"].render(**config).encode("utf-8"), "gmm_kernel.o")
-    # compile_mlir(
-    #     config["mlir_compressed"].render(**config).encode("utf-8"),
-    #     "gmm_compressed_kernel.o",
-    # )
+    compile_mlir(
+        config["mlir_compressed"].render(**config).encode("utf-8"),
+        "gmm_compressed_kernel.o",
+    )
     compile_mlir_to_enzyme(
         config["mlir_enzyme"].render(**config).encode("utf-8"),
         output="gmm_mlir_enzyme.o",
@@ -43,7 +43,7 @@ def generate_gmm_results(config, outfile=None):
             "helpers.o",
             "gmm_enzyme.o",
             "gmm_kernel.o",
-            # "gmm_compressed_kernel.o",
+            "gmm_compressed_kernel.o",
             "gmm_mlir_enzyme.o",
         ],
         "gmm_driver.out",
@@ -92,6 +92,36 @@ def generate_gmm_results(config, outfile=None):
     except (json.JSONDecodeError, Exception):
         print("Failed to parse output")
         print(stdout)
+
+
+def adbench_main(args):
+    lagrad_templ = mlir_env.get_template("gmm_adbench_lagrad.mlir")
+    enzyme_templ = mlir_env.get_template("gmm_adbench_enzyme.mlir")
+    driver_templ = driver_env.get_template("gmm_adbench_driver.c")
+    helper_templ = driver_env.get_template("mlir_c_abi.c")
+    d, k = 128, 200
+    config = {
+        "k": k,
+        "n": 1000,
+        "d": d,
+    }
+    if args.print:
+        print(lagrad_templ.render(**config))
+        # print(enzyme_templ.render(**config))
+        return
+
+    compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "gmm_kernel.o")
+    compile_mlir_to_enzyme(
+        enzyme_templ.render(**config).encode("utf-8"), "gmm_enzyme.o", emit="obj"
+    )
+    compile_c(driver_templ.render(**config).encode("utf-8"), "gmm_driver.o")
+    compile_c(helper_templ.render(**config).encode("utf-8"), "mlir_c_abi.o")
+    stdout = link_and_run(
+        ["gmm_kernel.o", "gmm_enzyme.o", "gmm_driver.o", "mlir_c_abi.o"],
+        "gmm.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
 
 
 def main(args):
@@ -166,6 +196,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Print the program at the affine loop level",
     )
+    parser.add_argument(
+        "--adbench",
+        action="store_true",
+        help="Run the ADBench tensorized version of the program",
+    )
     parser.add_argument("--results_file", "-r")
     parser.add_argument("--results-dir", default="benchmarks/results")
     parser.add_argument(
@@ -175,4 +210,7 @@ if __name__ == "__main__":
         help="Print the program without any transformations.",
     )
     args = parser.parse_args()
-    main(args)
+    if args.adbench:
+        adbench_main(args)
+    else:
+        main(args)
