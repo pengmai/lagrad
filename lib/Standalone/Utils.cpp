@@ -1,8 +1,7 @@
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
@@ -90,7 +89,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
          "differentiating functions with more than one result not supported");
   if (!topLevel) {
     funcOp.insertArgument(funcOp.getNumArguments(),
-                          funcOp.getType().getResult(0), {});
+                          funcOp.getType().getResult(0), {}, funcOp.getLoc());
   }
 
   std::vector<Operation *> ops;
@@ -154,6 +153,13 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     returnType[0] = region->getArgument(0).getType();
     returnValue.resize(1);
     if (!env[region->getArgument(0)]) {
+      // llvm::errs() << "env:\n";
+      // llvm::errs() << env[region->getArgument(0)] << "\n";
+      // for (auto pair : env) {
+      //   llvm::errs() << "  first: " << pair.getFirst()
+      //                << " second: " << pair.getSecond() << "\n";
+      // }
+      // llvm::errs() << "end env\n";
       funcOp.emitError("Gradient of first argument not found");
       return nullptr;
     }
@@ -161,7 +167,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
   }
   funcOp.setType(
       FunctionType::get(funcOp.getContext(), fntyp.getInputs(), returnType));
-  rewriter.create<mlir::ReturnOp>(region->getLoc(), returnValue);
+  rewriter.create<func::ReturnOp>(region->getLoc(), returnValue);
   return funcOp;
 }
 
@@ -270,8 +276,8 @@ void collectFreeVars(Block *parentBlock, Region &region,
 // This is definitely a bandaid behind an explosion of complexity in the
 // autodiff method.
 void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter) {
-  moduleOp.walk([&](CallOp callOp) {
-    if (callOp.calleeAttr().getValue().startswith("__grad") &&
+  moduleOp.walk([&](func::CallOp callOp) {
+    if (callOp.getCalleeAttr().getValue().startswith("__grad") &&
         callOp.use_empty()) {
       // rewriter.eraseOp(callOp);
       // llvm::outs() << "saw callOp " << callOp.calleeAttr().getValue()
@@ -343,8 +349,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
 
     // Collect the free variables in the then block of the if op
     llvm::SmallDenseSet<Value> freeOperands;
-    collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion(), freeOperands);
-    collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
+    collectFreeVars(ifOp.thenBlock(), ifOp.getThenRegion(), freeOperands);
+    collectFreeVars(ifOp.elseBlock(), ifOp.getElseRegion(), freeOperands);
 
     for (auto freeOperand : freeOperands) {
       auto result =
@@ -489,8 +495,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseCallOp(dyn_cast<CallOp>(op), ctx, vjp_value, op_index,
-                                rewriter);
+      vjp_value = reverseCallOp(dyn_cast<func::CallOp>(op), ctx, vjp_value,
+                                op_index, rewriter);
     } else if (opName == "tensor.extract") {
       if (op_index > 0) {
         continue;
@@ -939,9 +945,9 @@ Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
 
   auto adjointIf = rewriter.create<scf::IfOp>(
       ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
-      /*cond=*/ifOp.condition(),
-      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
-      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+      /*cond=*/ifOp.getCondition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.getThenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.getElseRegion()));
   return adjointIf.getResult(0);
 }
 
@@ -968,8 +974,8 @@ void populatePrimalCache(scf::ForOp forOp,
   rewriter.setInsertionPoint(forOp);
   auto cacheSize =
       rewriter
-          .create<arith::SubIOp>(forOp.getLoc(), forOp.upperBound(),
-                                 forOp.lowerBound())
+          .create<arith::SubIOp>(forOp.getLoc(), forOp.getUpperBound(),
+                                 forOp.getLowerBound())
           .getResult();
 
   SmallVector<Value> caches;
@@ -1019,11 +1025,11 @@ void runEffectiveUseAnalysis(scf::ForOp forOp, LAGradContext &ctx,
     }
 
     if (auto mulfOp = dyn_cast_or_null<arith::MulFOp>(&bodyOp)) {
-      if (ctx.activeValues.contains(mulfOp.lhs())) {
-        adjointUsed.insert(mulfOp.rhs());
+      if (ctx.activeValues.contains(mulfOp.getLhs())) {
+        adjointUsed.insert(mulfOp.getRhs());
       }
-      if (ctx.activeValues.contains(mulfOp.rhs())) {
-        adjointUsed.insert(mulfOp.lhs());
+      if (ctx.activeValues.contains(mulfOp.getRhs())) {
+        adjointUsed.insert(mulfOp.getLhs());
       }
     }
   }
@@ -1067,11 +1073,12 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
     iterArgsInit.push_back(space);
   }
   auto adjointFor = rewriter.create<scf::ForOp>(
-      forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
-      iterArgsInit,
+      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+      forOp.getStep(), iterArgsInit,
       [&](OpBuilder &builder, Location loc, Value iv, ValueRange iterArgs) {
         SmallVector<Value> regionArgs;
-        Value idx = builder.create<arith::SubIOp>(loc, forOp.upperBound(), iv);
+        Value idx =
+            builder.create<arith::SubIOp>(loc, forOp.getUpperBound(), iv);
         Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         regionArgs.push_back(idx);
@@ -1085,8 +1092,8 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
           // This is to fix the case where the vjp value must be updated in the
           // body of the adjoint loop. TODO: This might not work with vectors
           if (cpair.first ==
-              forOp.getRegionIterArgForOpOperand(
-                  forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
+              forOp.getRegionIterArgForOpOperand(forOp.getOpOperandForResult(
+                  forOp.getResults()[result_idx]))) {
             vjp_op = loaded;
           }
           regionArgs.push_back(loaded);
@@ -1157,18 +1164,18 @@ Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
                                           op.indices());
 }
 
-Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
+Value reverseCallOp(func::CallOp op, LAGradContext &ctx, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter) {
   auto *context = op.getContext();
   std::stringstream gradFuncStream;
-  gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
+  gradFuncStream << "__grad_" << op.getCallee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
   assert(ctx.moduleOp && "moduleOp was null");
   auto dFuncOp =
       dyn_cast_or_null<FuncOp>(ctx.moduleOp.lookupSymbol(gradFuncName));
   if (!dFuncOp) {
     auto primalFunc =
-        dyn_cast<FuncOp>(ctx.moduleOp.lookupSymbol(op.calleeAttr()));
+        dyn_cast<FuncOp>(ctx.moduleOp.lookupSymbol(op.getCalleeAttr()));
     dFuncOp = copyFunctionDeclaration(primalFunc, gradFuncName, rewriter);
 
     auto innerGradsOf = ArrayAttr::get(
@@ -1179,7 +1186,7 @@ Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
   llvm::SmallVector<Value> operands(op.getOperands());
   operands.push_back(vjp_value);
   auto adjointCall =
-      rewriter.create<mlir::CallOp>(op.getLoc(), dFuncOp, operands);
+      rewriter.create<func::CallOp>(op.getLoc(), dFuncOp, operands);
   assert(adjointCall.getNumResults() == 1 &&
          "expected adjoint call to produce 1 result");
   return adjointCall.getResult(0);

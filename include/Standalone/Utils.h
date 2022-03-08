@@ -1,7 +1,7 @@
 #include "Standalone/StandaloneDialect.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
@@ -33,7 +33,8 @@ void populateVJP(Operation *op, LAGradContext &ctx, DenseMap<Value, Value> &env,
 FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
                                OpBuilder &rewriter);
 
-FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx, ArrayAttr gradientsOf,
+FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
+                             ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel);
 
@@ -53,6 +54,6 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
                              Value vjp_value, OpBuilder &builder);
 
-Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
+Value reverseCallOp(func::CallOp op, LAGradContext &ctx, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter);
 } // namespace mlir

@@ -2,17 +2,19 @@
  * A custom pass meant to fill gaps in bufferizing tensor ops.
  * Motivated by a lack of bufferization for the tensor.insert op.
  */
-#include "mlir/Transforms/Bufferize.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
 #include "Standalone/Passes.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/SmallBitVector.h"
 
 #include "llvm/Support/raw_ostream.h"
 
@@ -47,7 +49,7 @@ public:
     rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
                                      adaptor.dest(), adaptor.indices());
     auto loaded =
-        rewriter.create<memref::TensorLoadOp>(op.getLoc(), adaptor.dest());
+        rewriter.create<bufferization::ToTensorOp>(op.getLoc(), adaptor.dest());
     op.replaceAllUsesWith(loaded.getResult());
     rewriter.eraseOp(op);
     return success();
@@ -91,8 +93,8 @@ public:
     auto subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(), resultType, adaptor.source(), op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
-    rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
-                                                identityResultType);
+    rewriter.replaceOpWithNewOp<memref::CastOp>(op, identityResultType,
+                                                subview.getResult());
     return success();
   }
 };
@@ -125,7 +127,7 @@ public:
     auto subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
-    rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
+    rewriter.create<memref::CopyOp>(op.getLoc(), adaptor.source(), subview);
     rewriter.replaceOp(op, adaptor.dest());
     return success();
   }
@@ -145,21 +147,19 @@ struct StandaloneBufferizePass
   }
   void runOnOperation() final {
     auto *context = &getContext();
-    BufferizeTypeConverter typeConverter;
+    bufferization::BufferizeTypeConverter typeConverter;
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
 
     target.addLegalDialect<memref::MemRefDialect>();
-    target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
-                                      StandardOpsDialect>(
+    target.addDynamicallyLegalDialect<arith::ArithmeticDialect>(
         [&](Operation *op) { return typeConverter.isLegal(op); });
-    target.addLegalOp<CallOp>();
-    target.addLegalOp<ReturnOp>();
-    target.addLegalOp<linalg::CopyOp>();
+    target.addLegalOp<func::CallOp>();
+    target.addLegalOp<func::ReturnOp>();
+    target.addLegalOp<memref::CopyOp>();
     target.addLegalOp<linalg::YieldOp>();
     target.addIllegalOp<tensor::InsertOp>();
     target.addLegalDialect<scf::SCFDialect>();
-    populateBufferizeMaterializationLegality(target);
 
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
     patterns.add<BufferizeExtractSliceOp>(typeConverter, patterns.getContext());

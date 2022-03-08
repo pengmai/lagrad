@@ -6,12 +6,10 @@
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
-#include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
-#include "mlir/Dialect/Affine/IR/AffineOpsDialect.h.inc"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -75,7 +73,7 @@ public:
     LLVMTypeConverter typeConverter(op->getContext());
 
     for (auto it = result.use_begin(); it != result.use_end(); it++) {
-      auto user = dyn_cast_or_null<CallIndirectOp>(it.getUser());
+      auto user = dyn_cast_or_null<func::CallIndirectOp>(it.getUser());
       assert(user && "Expected user to be a CallIndirectOp");
       // Copy over the arguments for the op
       auto arguments = SmallVector<Value>();
@@ -160,8 +158,8 @@ public:
         arg_index++;
       }
 
-      rewriter.replaceOpWithNewOp<CallOp>(user, sym, primalType.getResults(),
-                                          arguments);
+      rewriter.replaceOpWithNewOp<func::CallOp>(
+          user, sym, primalType.getResults(), arguments);
     }
 
     return success();
@@ -237,8 +235,8 @@ void StandaloneToLLVMLoweringPass::runOnOperation() {
 
   LLVMTypeConverter typeConverter(&getContext());
 
-  OwningRewritePatternList patterns(&getContext());
-  populateLoopToStdConversionPatterns(patterns);
+  RewritePatternSet patterns(&getContext());
+  // populateLoopToStdConversionPatterns(patterns);
   populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
   arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);
   populateStdToLLVMConversionPatterns(typeConverter, patterns);

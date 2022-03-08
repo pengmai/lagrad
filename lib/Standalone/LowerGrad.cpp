@@ -3,9 +3,9 @@
 #include "Standalone/StandaloneOps.h"
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -28,7 +28,7 @@ public:
       return failure();
     }
 
-    auto funcVal = rewriter.create<mlir::ConstantOp>(
+    auto funcVal = rewriter.create<func::ConstantOp>(
         op->getLoc(), funcOp.getType(),
         SymbolRefAttr::get(funcOp.getContext(), funcOp.getName()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
@@ -123,7 +123,7 @@ private:
 namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
-    addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<mlir::func::FuncDialect>();
     addLegalDialect<mlir::arith::ArithmeticDialect>();
     addLegalDialect<mlir::math::MathDialect>();
     addLegalDialect<mlir::memref::MemRefDialect>();
@@ -153,7 +153,7 @@ void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp>();
 
-  OwningRewritePatternList patterns(&getContext());
+  RewritePatternSet patterns(&getContext());
   patterns.insert<GradOpLowering>(&getContext());
 
   auto mod = getOperation();

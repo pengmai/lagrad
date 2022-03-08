@@ -36,21 +36,3 @@ struct DiffTransform : public mlir::OpRewritePattern<DiffOp> {
     return success();
   }
 };
-
-struct FooBarSubstitute : public mlir::OpRewritePattern<FooOp> {
-  FooBarSubstitute(mlir::MLIRContext *context)
-      : OpRewritePattern<FooOp>(context, /*benefit=*/1) {}
-
-  mlir::LogicalResult
-  matchAndRewrite(FooOp op, mlir::PatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<FooOp>(op, op->getResult(0).getType(),
-                                       op->getOperand(0));
-    return success();
-  }
-};
-
-void FooOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
-                                        MLIRContext *context) {
-  results.insert<FooBarSubstitute>(context);
-  // results.insert<DiffTransform>(context);
-}

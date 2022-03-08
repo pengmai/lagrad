@@ -3,9 +3,9 @@
  */
 #include "Standalone/Passes.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -71,7 +71,7 @@ public:
           builder.create<mlir::AffineYieldOp>(loc);
         });
     Value result =
-        rewriter.create<mlir::memref::TensorLoadOp>(op->getLoc(), destination);
+        rewriter.create<bufferization::ToTensorOp>(op->getLoc(), destination);
 
     op->replaceAllUsesWith(llvm::makeArrayRef(result));
     rewriter.eraseOp(op);
@@ -98,7 +98,6 @@ private:
 
 struct AffineTarget : public ConversionTarget {
   AffineTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
-    addLegalDialect<mlir::StandardOpsDialect>();
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
     addLegalOp<FuncOp>();
@@ -118,7 +117,7 @@ struct ElementwiseToAffineConversionPass
   void runOnOperation() final {
     ConversionTarget target(getContext());
     // target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
-    OwningRewritePatternList patterns(&getContext());
+    RewritePatternSet patterns(&getContext());
     patterns.insert<ElementwiseToAffineLowering>(&getContext());
 
     target.markUnknownOpDynamicallyLegal([](Operation *op) {
