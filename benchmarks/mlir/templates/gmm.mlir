@@ -229,9 +229,13 @@ module  {
 
   func @lagrad_gmm_full(
     %arg0: tensor<{{k}}xf64>,
+    %darg0: tensor<{{k}}xf64>,
     %arg1: tensor<{{k}}x{{d}}xf64>,
+    %darg1: tensor<{{k}}x{{d}}xf64>,
     %arg2: tensor<{{k}}x{{d}}xf64>,
+    %darg2: tensor<{{k}}x{{d}}xf64>,
     %arg3: tensor<{{k}}x{{d}}x{{d}}xf64>,
+    %darg3: tensor<{{k}}x{{d}}x{{d}}xf64>,
     %arg4: tensor<{{n}}x{{d}}xf64>,
     %arg5: f64,
     %arg6: i64
@@ -244,7 +248,7 @@ module  {
     %zero = arith.constant 0.0 : f64
 
     %f = constant @mlir_gmm_opt_full : (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64>, tensor<{{n}}x{{d}}xf64>, f64, i64) -> f64
-    %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
+    %df = standalone.grad %f {of = [0, 1, 2, 3], dps = true} : (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
@@ -259,7 +263,11 @@ module  {
       tensor<{{k}}x{{d}}x{{d}}xf64>,
       tensor<{{n}}x{{d}}xf64>,
       f64,
-      i64
+      i64,
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}x{{d}}xf64>
     ) -> (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
@@ -267,14 +275,18 @@ module  {
       tensor<{{k}}x{{d}}x{{d}}xf64>
     )
 
-    %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (
+    %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6, %darg0, %darg1, %darg2, %darg3) : (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}x{{d}}xf64>,
       tensor<{{n}}x{{d}}xf64>,
       f64,
-      i64
+      i64,
+      tensor<{{k}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}xf64>,
+      tensor<{{k}}x{{d}}x{{d}}xf64>
     ) -> (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,

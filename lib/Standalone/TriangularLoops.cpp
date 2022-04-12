@@ -321,7 +321,8 @@ namespace {
 struct TriangularLoopsPass
     : public PassWrapper<TriangularLoopsPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<memref::MemRefDialect, scf::SCFDialect>();
+    registry.insert<memref::MemRefDialect, scf::SCFDialect,
+                    bufferization::BufferizationDialect>();
   }
   StringRef getArgument() const override {
     return "convert-linalg-triangular-to-loops";
@@ -336,6 +337,7 @@ struct TriangularLoopsPass
     RewritePatternSet patterns(context);
     target.addLegalDialect<arith::ArithmeticDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
+    target.addLegalDialect<bufferization::BufferizationDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
     target.addLegalOp<linalg::InitTensorOp>();

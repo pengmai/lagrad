@@ -77,7 +77,8 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
 FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
                              ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
-                             bool topLevel = false) {
+                             bool topLevel = false,
+                             bool destinationPassingStyle = false) {
   Region *region = funcOp.getCallableRegion();
   if (!region) {
     funcOp->emitError("Function region cannot be null");
@@ -87,6 +88,22 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
   // Need to double check the return type.
   assert(funcOp.getType().getNumResults() == 1 &&
          "differentiating functions with more than one result not supported");
+
+  // env maps values to their gradient signals. x -> x_bar
+  llvm::DenseMap<Value, Value> env;
+  if (destinationPassingStyle) {
+    assert(
+        gradientsOf &&
+        "Cannot have Destination-Passing Style without specifying 'of' attr");
+    for (auto argIdxAttr : gradientsOf) {
+      auto arg = funcOp.getArgument(
+          argIdxAttr.cast<IntegerAttr>().getValue().getSExtValue());
+      funcOp.insertArgument(funcOp.getNumArguments(), arg.getType(), {},
+                            funcOp.getLoc());
+      env[arg] = funcOp.getArgument(funcOp.getNumArguments() - 1);
+    }
+  }
+
   if (!topLevel) {
     funcOp.insertArgument(funcOp.getNumArguments(),
                           funcOp.getType().getResult(0), {}, funcOp.getLoc());
@@ -97,18 +114,16 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     ops.push_back(&op);
   }
 
-  // env maps values to their gradient signals. x -> x_bar
-  llvm::DenseMap<Value, Value> env;
   llvm::SmallDenseSet<Value> active;
 
   PatternRewriter::InsertionGuard insertGuard(rewriter);
   for (auto it = ops.rbegin(); it != ops.rend(); it++) {
     Operation *op = *it;
     auto opName = op->getName().getStringRef();
-    if (opName == "std.return") {
+    if (auto returnOp = dyn_cast_or_null<func::ReturnOp>(op)) {
       // This is the exit point
       // runActivityAnalysis(op, funcOp.getArguments(), active);
-      rewriter.setInsertionPoint(op);
+      rewriter.setInsertionPoint(returnOp);
       assert(op->getNumOperands() == 1 &&
              "Expected function to return 1 value");
       Value operand = op->getOperand(0);
@@ -320,6 +335,33 @@ Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
   return adjoint.getResult(0);
 }
 
+Value addInPlace(Value source, Value dest, OpBuilder &builder) {
+  if (source.getType().isa<FloatType>()) {
+    return builder.create<arith::AddFOp>(dest.getLoc(), source, dest);
+  }
+  assert(dest.getType().isa<RankedTensorType>() &&
+         "add in place expects a ranked tensor destination");
+  auto outputShape = dest.getType().dyn_cast<RankedTensorType>();
+  auto rank = outputShape.getRank();
+  SmallVector<AffineMap, 2> indexingMaps(2,
+                                         builder.getMultiDimIdentityMap(rank));
+  SmallVector<StringRef, 1> iteratorTypes(rank, getParallelIteratorTypeName());
+  auto addOp = builder.create<linalg::GenericOp>(
+      dest.getLoc(),
+      /*resultTensorType=*/outputShape,
+      /*inputs=*/source, /*outputs=*/dest,
+      /*indexing_maps=*/indexingMaps,
+      /*iterator_types=*/iteratorTypes,
+      /*doc=*/"Add in place",
+      /*library call=*/"",
+      [&](OpBuilder &bodyBuilder, Location loc, ValueRange regionArgs) {
+        auto added = bodyBuilder.create<arith::AddFOp>(loc, regionArgs[0],
+                                                       regionArgs[1]);
+        bodyBuilder.create<linalg::YieldOp>(loc, added.getResult());
+      });
+  return addOp.getResult(0);
+}
+
 void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
@@ -491,12 +533,11 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       // This is a bit of a math trick. Note the result is sqrt(operand)
       vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                  op->getResult(0));
-    } else if (opName == "std.call") {
+    } else if (auto callOp = dyn_cast_or_null<func::CallOp>(op)) {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseCallOp(dyn_cast<func::CallOp>(op), ctx, vjp_value,
-                                op_index, rewriter);
+      vjp_value = reverseCallOp(callOp, ctx, vjp_value, op_index, rewriter);
     } else if (opName == "tensor.extract") {
       if (op_index > 0) {
         continue;
@@ -803,8 +844,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     if (!env[operand]) {
       env[operand] = vjp_value;
     } else {
-      env[operand] =
-          rewriter.create<arith::AddFOp>(op->getLoc(), env[operand], vjp_value);
+      env[operand] = addInPlace(vjp_value, env[operand], rewriter);
     }
     op_index++;
   }

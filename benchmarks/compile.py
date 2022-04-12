@@ -17,6 +17,7 @@ ENZYME_DYLIB = osp.join(
 RUNNER_UTILS = osp.join(
     osp.expanduser("~"), ".local", "lib", "libmlir_runner_utils.dylib"
 )
+C_UTILS = osp.join(osp.expanduser("~"), ".local", "lib", "libmlir_c_runner_utils.dylib")
 
 SYSTEM_INCLUDES = osp.join(
     "/Applications",
@@ -42,7 +43,7 @@ LLC_12 = osp.join(LLVM_12_BIN, "llc")
 BIN = osp.join(osp.dirname(__file__), "..", "build", "bin")
 TMP = osp.join(osp.dirname(__file__), "tmp")
 BUFFERIZE = [
-    "-tensor-constant-bufferize",
+    "-arith-bufferize",
     "-tensor-bufferize",
     "-standalone-bufferize",
     "-linalg-bufferize",
@@ -63,7 +64,7 @@ LOWER_TO_LOOPS = [
 ]
 LOWER_TO_LIBRARY = ["-convert-linalg-to-std"]
 LOWER_TO_LLVM = [
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-math-to-libm",
@@ -73,7 +74,7 @@ LOWER_TO_LLVM = [
 ]
 
 LOWER_TO_LLVM_WITH_ENZYME = [
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-standalone-to-llvm",
@@ -104,7 +105,7 @@ def run_grad(contents):
     )
 
 
-def compile_mlir(contents, output, lower_type="loops"):
+def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=False):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
     # print(
     #     run_safe(
@@ -134,7 +135,11 @@ def compile_mlir(contents, output, lower_type="loops"):
             # "-linalg-fuse-elementwise-ops",
             "-canonicalize",
         ]
-        + BUFFERIZE
+        + (
+            ["-linalg-comprehensive-module-bufferize=allow-return-memref"]
+            if comprehensive_bufferize
+            else BUFFERIZE
+        )
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
         stdin=contents,
@@ -177,7 +182,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
     return output.decode("utf-8")
 
 
-def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
+def compile_mlir_to_enzyme(contents, output="", emit="llvm", write=False):
     assert emit in ["llvm", "jit", "obj"], "Invalid emit type"
     llvm_dialect = run_safe(
         [
@@ -221,9 +226,9 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
         #     f.write(llvm_ir.decode("utf-8"))
     else:
         warnings.warn("pre-Enzyme optimization disabled")
-    warnings.warn("Using hand-modified post_O2 hand tracking")
-    with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
-        llvm_ir = f.read().encode("utf-8")
+    # warnings.warn("Using hand-modified post_O2 hand tracking")
+    # with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
+    #     llvm_ir = f.read().encode("utf-8")
     postenzyme = run_safe(
         [
             OPT_12,
@@ -235,6 +240,10 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
         ],
         stdin=llvm_ir,
     )
+    # if write:
+    #     warnings.warn("Writing post-enzyme IR to file")
+    #     with open("DELETEME_ba_without_xcsin.ll", "w") as f:
+    #         f.write(postenzyme.decode("utf-8"))
 
     if emit == "llvm":
         return postenzyme.decode("utf-8")
@@ -269,7 +278,7 @@ def compile_enzyme(contents, output, emit="object"):
         suppress_stderr=True,
     )
     postenzyme = run_safe(
-        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
+        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme"], stdin=preenzyme
     )
     with open("DELETEME_ba_postenzyme.ll", "w") as f:
         f.write(postenzyme.decode("utf-8"))
@@ -283,9 +292,7 @@ def compile_c(contents, output):
     includes = [f"-I{DRIVER_INCLUDES}", f"-I{OPENBLAS_INCLUDES}"]
     # The dash tells gcc to read from stdin
     run_safe(
-        ["gcc", "-O3", "-Wall"]
-        + includes
-        + ["-xc", "-c", "-", "-o", f"{TMP}/{output}"],
+        ["gcc", "-Wall"] + includes + ["-xc", "-c", "-", "-o", f"{TMP}/{output}"],
         stdin=contents,
     )
 
@@ -294,7 +301,7 @@ def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
     objects = (
         [f"{TMP}/{obj}" for obj in objects]
         + ([OPENBLAS_OBJ] if link_openblas else [])
-        + ([RUNNER_UTILS] if link_runner_utils else [])
+        + ([RUNNER_UTILS, C_UTILS] if link_runner_utils else [])
     )
     run_safe(
         ["gcc"]

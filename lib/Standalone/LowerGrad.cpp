@@ -104,6 +104,8 @@ private:
     auto gradSignalAttr =
         gradOp->getAttr("grad_signal").dyn_cast_or_null<BoolAttr>();
     auto customGradSignal = gradSignalAttr && gradSignalAttr.getValue();
+    auto dpsAttr = gradOp->getAttr("dps").dyn_cast_or_null<BoolAttr>();
+    auto destinationPassingStyle = dpsAttr && dpsAttr.getValue();
 
     std::string adjointFuncName("__grad_");
     adjointFuncName += originalFuncOp.getName();
@@ -115,7 +117,7 @@ private:
     LAGradContext lagradctx{moduleOp};
     runActivityAnalysis(lagradctx, funcOp, gradientsOf);
     return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,
-                                 /*topLevel=*/!customGradSignal);
+                                 /*topLevel=*/!customGradSignal, /*dps=*/destinationPassingStyle);
   }
 };
 } // end anonymous namespace

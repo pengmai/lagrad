@@ -129,11 +129,10 @@ def main(args):
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
     mlir_compressed_template = mlir_env.get_template("gmm_compressed.mlir")
-    mlir_enzyme_full_template = mlir_env.get_template("gmm_buf_optimized.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_compressed.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_bufferized_opt.mlir")
 
-    mlir_enzyme_template = mlir_env.get_template("gmm_buf_compressed.mlir")
+    mlir_enzyme_template = mlir_env.get_template("gmm_enzyme.mlir")
     # This is crashing Enzyme for some reason.
     # mlir_enzyme_template = mlir_env.get_template("gmm_buf.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
@@ -143,15 +142,6 @@ def main(args):
         "n": 1000,
         "d": d,
         "tri_size": int(d * (d - 1) / 2),
-        "method": "enzyme_mlir_compressed",
-        "application": "gmm",
-        "driver": driver_template,
-        "helpers": helpers_template,
-        "mlir": mlir_template,
-        "mlir_compressed": mlir_compressed_template,
-        "mlir_enzyme": mlir_enzyme_template,
-        "mlir_enzyme_full": mlir_enzyme_full_template,
-        "enzyme": enzyme_template,
     }
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     outfile = osp.join(
@@ -160,26 +150,66 @@ def main(args):
     )
 
     if args.print:
-        print(mlir_compressed_template.render(**config))
-        # print(mlir_template.render(**config))
+        # print(mlir_compressed_template.render(**config))
+        # print(mlir_enzyme_template.render(**config))
+        print(mlir_template.render(**config))
+        return
+    compile_c(
+        driver_template.render(**config).encode("utf-8"),
+        "gmm_driver.o",
+    )
+    compile_c(
+        helpers_template.render(**config).encode("utf-8"),
+        "helpers.o",
+    )
+    # compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "gmm_enzyme.o")
+    compile_mlir(
+        mlir_template.render(**config).encode("utf-8"),
+        "gmm_kernel.o",
+        comprehensive_bufferize=True,
+    )
+    # compile_mlir(
+    #     mlir_compressed_template.render(**config).encode("utf-8"),
+    #     "gmm_compressed_kernel.o",
+    # )
+    # compile_mlir_to_enzyme(
+    #     mlir_enzyme_template.render(**config).encode("utf-8"),
+    #     output="gmm_mlir_enzyme.o",
+    #     emit="obj",
+    # )
+
+    stdout = link_and_run(
+        [
+            "gmm_driver.o",
+            "helpers.o",
+            "gmm_enzyme.o",
+            "gmm_kernel.o",
+            "gmm_compressed_kernel.o",
+            "gmm_mlir_enzyme.o",
+        ],
+        "gmm_driver.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
+    return
+
+    if args.results_file:
+        with open(args.results_file) as f:
+            results = pd.DataFrame.from_dict(json.load(f)["results"])
     else:
-        if args.results_file:
-            with open(args.results_file) as f:
-                results = pd.DataFrame.from_dict(json.load(f)["results"])
-        else:
-            results = generate_gmm_results(config, outfile)
-        if results is not None:
-            # primals = results[[col for col in results.columns if "primal" in col]]
-            # adjoints = results[[col for col in results.columns if "adjoint" in col]]
-            # print(primals[1:].mean())
-            print(results.mean())
-            # adjoint_means = adjoints[1:].mean()
-            # print(adjoint_means)
-            # print(
-            #     "LAGrad tri adjoint vs enzyme comp adjoint:",
-            #     adjoint_means["lagrad_tri_adjoint"]
-            #     / adjoint_means["enzyme_comp_adjoint"],
-            # )
+        results = generate_gmm_results(config, outfile)
+    if results is not None:
+        # primals = results[[col for col in results.columns if "primal" in col]]
+        # adjoints = results[[col for col in results.columns if "adjoint" in col]]
+        # print(primals[1:].mean())
+        print(results.mean())
+        # adjoint_means = adjoints[1:].mean()
+        # print(adjoint_means)
+        # print(
+        #     "LAGrad tri adjoint vs enzyme comp adjoint:",
+        #     adjoint_means["lagrad_tri_adjoint"]
+        #     / adjoint_means["enzyme_comp_adjoint"],
+        # )
 
     # compile_mlir(mlir_template.render(**config).encode("utf-8"), "gmm_kernel.o")
     # rendered = gmm_template.render(
