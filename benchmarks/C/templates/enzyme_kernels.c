@@ -1,11 +1,73 @@
 #include "shared_types.h"
-#include <stdint.h>
+// #include <stdint.h>
 // #include <stdlib.h>
 
 extern void *malloc(unsigned long);
 extern void free(void *);
 extern float __enzyme_autodiff(void *, ...);
+typedef long long int64_t;
 int enzyme_const;
+int enzyme_dupnoneed;
+
+// {% if application == "trimatvec" %}
+void enzyme_trimatvec_dense_primal(double *M, double *x, double *out,
+                                   int64_t N) {
+  for (int i = 0; i < N; i++) {
+    out[i] = 0;
+  }
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+      out[i] += M[i * N + j] * x[j];
+    }
+  }
+}
+
+void enzyme_trimatvec_tri_primal(double *M, double *x, double *out, int64_t N) {
+  for (int i = 0; i < N; i++) {
+    out[i] = 0;
+  }
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < i; j++) {
+      out[i] += M[i * N + j] * x[j];
+    }
+  }
+}
+
+void enzyme_trimatvec_compressed_primal(double *icf, double *x, double *out,
+                                        int64_t N) {
+  for (int i = 0; i < N; i++) {
+    out[i] = 0;
+  }
+  int icf_idx = 0;
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < i; j++) {
+      out[i] += icf[icf_idx] * x[j];
+      icf_idx++;
+    }
+  }
+}
+
+void enzyme_trimatvec_dense_adjoint(double *M, double *dM, double *x,
+                                    double *dx, double *out, double *dout,
+                                    int64_t N) {
+  __enzyme_autodiff(enzyme_trimatvec_dense_primal, M, dM, x, dx,
+                    enzyme_dupnoneed, out, dout, N);
+}
+
+void enzyme_trimatvec_tri_adjoint(double *M, double *dM, double *x, double *dx,
+                                  double *out, double *dout, int64_t N) {
+  __enzyme_autodiff(enzyme_trimatvec_tri_primal, M, dM, x, dx, enzyme_dupnoneed,
+                    out, dout, N);
+}
+
+void enzyme_trimatvec_compressed_adjoint(double *icf, double *dicf, double *x,
+                                  double *dx, double *out, double *dout,
+                                  int64_t N) {
+  __enzyme_autodiff(enzyme_trimatvec_compressed_primal, icf, dicf, x, dx,
+                    enzyme_dupnoneed, out, dout, N);
+}
+
+// {% else %}
 
 // {% if application == "dot" %}
 float dot_primal(float *a, float *b, int64_t size) {
@@ -150,3 +212,5 @@ float *enzyme_vecmat_first(float *x, float *A, int64_t M, int64_t N) {
   __enzyme_autodiff(vecmat_primal, x, dx, enzyme_const, A, M, N);
   return dx;
 }
+
+// {% endif %} # application matvec

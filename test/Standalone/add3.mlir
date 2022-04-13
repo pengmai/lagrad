@@ -12,7 +12,7 @@ func @main() {
   %cst = arith.constant 2.1 : f32
 
   %f = constant @add3 : (f32) -> f32
-  %df = standalone.grad %f : (f32) -> f32, (f32) -> f32
+  %df = standalone.grad %f {of = [0]} : (f32) -> f32, (f32) -> f32
 
   %dval = call_indirect %df(%cst) : (f32) -> f32
 

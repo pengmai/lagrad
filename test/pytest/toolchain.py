@@ -12,7 +12,7 @@ BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
-    "-tensor-constant-bufferize",
+    "-arith-bufferize",
     "-tensor-bufferize",
     "-standalone-bufferize",
     "-linalg-bufferize",
@@ -23,7 +23,8 @@ BUFFERIZE = [
 LOWERING = [
     "-convert-linalg-to-loops",
     "-lower-affine",
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
+    # "-convert-cf-to-llvm",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-math-to-libm",
@@ -34,7 +35,7 @@ LOWERING = [
 ]
 LOWERING_ENZYME = [
     "-convert-linalg-to-loops",
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-standalone-to-llvm",
@@ -54,7 +55,9 @@ ENZYME_DYLIB = osp.join(
     "LLVMEnzyme-12.dylib",
 )
 LIB = osp.expanduser(osp.join("~", ".local", "lib"))
-LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
+RUNNER_UTILS = osp.join(LIB, "libmlir_runner_utils.dylib")
+C_UTILS = osp.join(LIB, "libmlir_c_runner_utils.dylib")
+LIBS = f"{RUNNER_UTILS},{C_UTILS}"
 
 # Can't run tests in parallel
 TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
@@ -150,7 +153,10 @@ def compile_benchmark(name: str, high_level_ir: bytes):
 def jit_llvm(llvm_ir: bytes):
     try:
         jit = subprocess.run(
-            ["lli", "-load", LIBS], input=llvm_ir, check=True, capture_output=True
+            ["lli", "-load", RUNNER_UTILS, "-load", C_UTILS],
+            input=llvm_ir,
+            check=True,
+            capture_output=True,
         )
         return jit.stdout
     except subprocess.CalledProcessError as e:
@@ -187,13 +193,19 @@ def compile_pipeline(filename, mode: Literal["enzyme", "grad"] = "enzyme"):
     return exe_p.stdout
 
 
-def jit_file(filename: str, debug=False) -> str:
+def jit_file(filename: str, debug=False, **kwargs) -> str:
     with open(filename, "rb") as f:
         contents = f.read()
-    return jit(contents, debug=debug)
+    return jit(contents, debug=debug, **kwargs)
 
 
-def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str:
+def jit(
+    contents: bytes,
+    args=None,
+    debug=False,
+    linalg_generalize=False,
+    comprehensive_bufferize=False,
+) -> str:
     """
     Execute the given MLIR file through MLIR's JIT.
     """
@@ -216,7 +228,11 @@ def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str
             "-standalone-dce",
             "-convert-elementwise-to-linalg",
         ]
-        + BUFFERIZE
+        + (
+            ["-linalg-comprehensive-module-bufferize"]
+            if comprehensive_bufferize
+            else BUFFERIZE
+        )
         + LOWERING,
     )
     try:

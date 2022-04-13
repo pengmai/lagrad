@@ -49,9 +49,9 @@ func private @print_memref_f32(memref<*xf32>) attributes {llvm.emit_c_interface}
 
 func @matvec(%arg0: memref<3x4xf32>, %arg1: memref<4xf32>, %arg2: memref<3xf32>) -> f32 {
   %0 = memref.alloc() : memref<3xf32>
-  linalg.copy(%arg2, %0) : memref<3xf32>, memref<3xf32>
+  memref.copy %arg2, %0 : memref<3xf32> to memref<3xf32>
   linalg.matvec ins(%arg0, %arg1 : memref<3x4xf32>, memref<4xf32>) outs(%0 : memref<3xf32>)
-  linalg.copy(%0, %arg2) : memref<3xf32>, memref<3xf32>
+  memref.copy %0, %arg2 : memref<3xf32> to memref<3xf32>
   %cst = arith.constant 0.000000e+00 : f32
   return %cst : f32
 }

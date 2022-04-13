@@ -26,7 +26,7 @@ func @main() -> i64 {
     [3.2, 9.0, 9.0, -9.5],
     [3.4, 7.8, 10.2, -11.2]
   ]> : tensor<4x4xf32>
-  %A = memref.buffer_cast %cA : memref<4x4xf32>
+  %A = bufferization.to_memref %cA : memref<4x4xf32>
   %dA = memref.alloca() : memref<4x4xf32>
   %0 = arith.constant 0.0 : f32
   linalg.fill(%0, %dA) : f32, memref<4x4xf32>

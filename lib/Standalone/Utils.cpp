@@ -583,6 +583,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
         auto before = rewriter.create<tensor::ExtractSliceOp>(
             op->getLoc(), resultType, space, extractSliceOp.getMixedOffsets(),
             extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
+        // new_value = addInPlace(vjp_value, before, rewriter);
         new_value =
             rewriter.create<arith::AddFOp>(op->getLoc(), before, vjp_value);
       }

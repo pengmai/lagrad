@@ -22,6 +22,9 @@ commit = repo.head.object.hexsha
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
+microbench_env = Environment(
+    loader=PackageLoader("microbench"), autoescape=select_autoescape()
+)
 
 
 def generate_trimatvec_data(args, config):
@@ -95,6 +98,51 @@ def generate_trimatvec_data(args, config):
         print(output)
 
 
+def hand_err_main(args):
+    driver_templ = microbench_env.get_template("hand_err.c")
+    enzyme_templ = microbench_env.get_template("hand_err_enzyme.mlir")
+    lagrad_templ = microbench_env.get_template("hand_err.mlir")
+    helpers_templ = driver_env.get_template("mlir_c_abi.c")
+
+    if args.print:
+        print(lagrad_templ.render())
+        return
+
+    compile_c(driver_templ.render().encode("utf-8"), "hand_err_driver.o")
+    compile_c(helpers_templ.render().encode("utf-8"), "helpers.o")
+    compile_mlir_to_enzyme(
+        enzyme_templ.render().encode("utf-8"), "hand_err_enzyme.o", emit="obj"
+    )
+    compile_mlir(lagrad_templ.render().encode("utf-8"), "hand_err_lagrad.o")
+    stdout = link_and_run(
+        ["hand_err_driver.o", "helpers.o", "hand_err_lagrad.o", "hand_err_enzyme.o"],
+        "hand_err.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
+
+
+def hand_positions_main(args):
+    driver_templ = microbench_env.get_template("hand_positions.c")
+    lagrad_templ = microbench_env.get_template("hand_positions.mlir")
+    helpers_templ = driver_env.get_template("mlir_c_abi.c")
+    enzyme_templ = microbench_env.get_template("hand_positions_enzyme.mlir")
+    if args.print:
+        return
+    compile_c(driver_templ.render().encode("utf-8"), "hand_pos_driver.o")
+    compile_c(helpers_templ.render().encode("utf-8"), "helpers.o")
+    compile_mlir(lagrad_templ.render().encode("utf-8"), "hand_pos_lagrad.o")
+    compile_mlir_to_enzyme(
+        enzyme_templ.render().encode("utf-8"), "hand_pos_enzyme.o", emit="obj"
+    )
+    stdout = link_and_run(
+        ["hand_pos_driver.o", "helpers.o", "hand_pos_lagrad.o", "hand_pos_enzyme.o"],
+        "hand_pos.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
+
+
 def cache_main(args):
     mlir_templ = mlir_env.get_template("cache_loop.mlir")
     # mlir_templ = mlir_env.get_template("DELETEME_cache_loop_bufferized.mlir")
@@ -137,6 +185,33 @@ def cache_main(args):
         print("Failed to parse output")
 
 
+def main_term_main(args):
+    driver_templ = driver_env.get_template("main_term_driver.c")
+    helpers_templ = driver_env.get_template("mlir_c_abi.c")
+    lagrad_templ = mlir_env.get_template("main_term.mlir")
+    # enzyme_templ = mlir_env.get_template("main_term_enzyme.mlir")
+    enzyme_c_templ = driver_env.get_template("main_term_kernel.c")
+    config = {"application": "loop", "commit": commit, "n": 1000, "k": 200, "d": 128}
+    if args.print:
+        # print(enzyme_templ.render(**config))
+        print(lagrad_templ.render(**config))
+        return
+
+    compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "main_term_lagrad.o")
+    # compile_mlir_to_enzyme(
+    #     enzyme_templ.render(**config).encode("utf-8"), "main_term_enzyme.o", emit="obj"
+    # )
+    compile_enzyme(enzyme_c_templ.render(**config).encode("utf-8"), "main_term_c.o")
+    compile_c(driver_templ.render(**config).encode("utf-8"), "main_term_driver.o")
+    compile_c(helpers_templ.render(**config).encode("utf-8"), "helpers.o")
+    stdout = link_and_run(
+        ["main_term_driver.o", "helpers.o", "main_term_lagrad.o", "main_term_c.o"],
+        "main_term.out",
+        link_runner_utils=True,
+    ).decode("utf-8")
+    print(stdout)
+
+
 def loop_main(args):
     driver_templ = driver_env.get_template("loop_driver.c")
     helpers_templ = driver_env.get_template("mlir_c_abi.c")
@@ -144,7 +219,7 @@ def loop_main(args):
     # mlir_templ = mlir_env.get_template("DELETEME_nested_loop_buf.mlir")
     mlir_templ = mlir_env.get_template("nested_loop_lagrad.mlir")
 
-    config = {"application": "loop", "commit": commit, "n": 1024, "k": 512, "d": 512}
+    config = {"application": "loop", "commit": commit, "n": 256, "k": 64, "d": 64}
     if args.print:
         print(mlir_templ.render(**config))
         return
@@ -231,4 +306,7 @@ if __name__ == "__main__":
 
     # trimatvec_main(args)
     # loop_main(args)
-    cache_main(args)
+    # cache_main(args)
+    # hand_err_main(args)
+    # hand_positions_main(args)
+    main_term_main(args)

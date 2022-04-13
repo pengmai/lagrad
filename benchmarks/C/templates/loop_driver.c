@@ -7,6 +7,7 @@
 // #define N {{n}}
 // #define K {{k}}
 // #define D {{d}}
+#define NUM_RUNS 5
 #define N 1000
 #define K 25
 #define D 10
@@ -167,12 +168,20 @@ int main() {
   random_init_d_2d(A, N, D);
   random_init_d_2d(B, K, D);
 
-  unsigned long time = mlir_primal(A, B);
-  unsigned long etime = enzyme_nested_adjoint(A, dA, B);
-  unsigned long ltime = lagrad_nested_adjoint(A, dA, B);
-  // unsigned long etime = enzyme_main_term_adjoint(A, dA, B);
-  // unsigned long ltime = lagrad_main_term_adjoint(A, dA, B);
-  printf("Took: %lu vs %lu vs %lu\n", time, ltime, etime);
+  unsigned long df[NUM_RUNS];
+
+  for (size_t run = 0; run < NUM_RUNS; run++) {
+    df[run] = enzyme_nested_adjoint(A, dA, B);
+  }
+  printf("Enzyme:\n");
+  print_ul_arr(df, NUM_RUNS);
+
+  for (size_t run = 0; run < NUM_RUNS; run++) {
+    df[run] = lagrad_nested_adjoint(A, dA, B);
+  }
+
+  printf("LAGrad:\n");
+  print_ul_arr(df, NUM_RUNS);
 
   free(A);
   free(dA);

@@ -25,7 +25,7 @@ func @main() {
     %5 = arith.index_cast %4 : index to i64
     %6 = arith.sitofp %5 : i64 to f64
     %7 = arith.negf %6 : f64
-    %8 = select %p, %7, %6 : f64
+    %8 = arith.select %p, %7, %6 : f64
     tensor.yield %8 : f64
   } : tensor<4x5x3xf64>
 

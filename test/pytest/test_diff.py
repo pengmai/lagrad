@@ -61,3 +61,8 @@ def test_matvec():
 def test_const_memref():
     output = compile_pipeline(f"{MLIR_FILES}/diff/const_memref.mlir")
     assert extract_1d(output.decode("utf-8")) == [4.3, 4.3]
+
+
+# def test_for_slice():
+#     output = compile_pipeline(f"{MLIR_FILES}/diff/forslice.mlir")
+#     print(output)

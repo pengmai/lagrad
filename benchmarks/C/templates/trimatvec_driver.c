@@ -4,10 +4,11 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 100
+#define NUM_RUNS 50
 #define NUM_WARMUPS 0
-#define N 1024
-#define TRI_SIZE N *(N - 1) / 2
+#define N {{n}}
+// #define N 1024
+#define TRI_SIZE (N * (N - 1) / 2)
 
 double *deadbeef = (double *)0xdeadbeef;
 
@@ -21,24 +22,6 @@ typedef struct _f64matveccompgrad {
   F64Descriptor1D dx;
 } F64MatVecCompressedGradient;
 
-// C -> Enzyme
-extern void enzyme_trimatvec_dense_primal(double *M, double *x, double *out,
-                                          int64_t n);
-extern void enzyme_trimatvec_tri_primal(double *M, double *x, double *out,
-                                        int64_t n);
-extern void enzyme_trimatvec_compressed_primal(double *icf, double *x,
-                                               double *out, int64_t n);
-extern void enzyme_trimatvec_dense_adjoint(double *M, double *dM, double *x,
-                                           double *dx, double *out,
-                                           double *dout, int64_t n);
-extern void enzyme_trimatvec_tri_adjoint(double *M, double *dM, double *x,
-                                         double *dx, double *out, double *dout,
-                                         int64_t n);
-extern void enzyme_trimatvec_compressed_adjoint(double *icf, double *dicf,
-                                                double *x, double *dx,
-                                                double *out, double *dout,
-                                                int64_t n);
-
 // MLIR -> Enzyme
 extern double mlir_enzyme_trimatvec_dense_primal(
     /*M=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -46,6 +29,11 @@ extern double mlir_enzyme_trimatvec_dense_primal(
     /*out=*/double *, double *, int64_t, int64_t, int64_t);
 
 extern F64MatVecGradient mlir_enzyme_trimatvec_dense_adjoint(
+    /*M=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*x=*/double *, double *, int64_t, int64_t, int64_t,
+    /*out=*/double *, double *, int64_t, int64_t, int64_t);
+
+extern double mlir_enzyme_trimatvec_tri_primal(
     /*M=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*x=*/double *, double *, int64_t, int64_t, int64_t,
     /*out=*/double *, double *, int64_t, int64_t, int64_t);
@@ -158,67 +146,6 @@ typedef unsigned long (*bodyFunc)(double *M, double *dM, double *icf,
                                   double *out, double *dout);
 
 /* Implementations */
-// unsigned long enzyme_dense_primal(double *M, double *dM, double *icf,
-//                                   double *dicf, double *x, double *dx,
-//                                   double *out, double *dout) {
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   enzyme_trimatvec_dense_primal(M, x, out, N);
-//   gettimeofday(&stop, NULL);
-
-//   check_matvec_primal(M, x, out, "enzyme full dense");
-//   return timediff(start, stop);
-// }
-
-// unsigned long enzyme_dense_adjoint(double *M, double *dM, double *icf,
-//                                    double *dicf, double *x, double *dx,
-//                                    double *out, double *dout) {
-//   struct timeval start, stop;
-//   size_t M_size = N * N;
-//   gettimeofday(&start, NULL);
-//   for (size_t i = 0; i < M_size; i++) {
-//     dM[i] = 0;
-//   }
-//   for (size_t i = 0; i < N; i++) {
-//     dx[i] = 0;
-//   }
-//   enzyme_trimatvec_dense_adjoint(M, dM, x, dx, out, dout, N);
-//   gettimeofday(&stop, NULL);
-
-//   check_matvec_adjoint(M, dM, x, dx, dout, "enzyme full dense");
-//   return timediff(start, stop);
-// }
-
-// unsigned long enzyme_tri_primal(double *M, double *dM, double *icf,
-//                                 double *dicf, double *x, double *dx,
-//                                 double *out, double *dout) {
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   enzyme_trimatvec_tri_primal(M, x, out, N);
-//   gettimeofday(&stop, NULL);
-
-//   check_matvec_primal(M, x, out, "enzyme full tri");
-//   return timediff(start, stop);
-// }
-
-// unsigned long enzyme_tri_adjoint(double *M, double *dM, double *icf,
-//                                  double *dicf, double *x, double *dx,
-//                                  double *out, double *dout) {
-//   struct timeval start, stop;
-//   size_t M_size = N * N;
-//   gettimeofday(&start, NULL);
-//   for (size_t i = 0; i < M_size; i++) {
-//     dM[i] = 0;
-//   }
-//   for (size_t i = 0; i < N; i++) {
-//     dx[i] = 0;
-//   }
-//   enzyme_trimatvec_tri_adjoint(M, dM, x, dx, out, dout, N);
-//   gettimeofday(&stop, NULL);
-//   check_matvec_adjoint(M, dM, x, dx, dout, "enzyme full tri");
-//   return timediff(start, stop);
-// }
-
 // unsigned long enzyme_compressed_primal(double *M, double *dM, double *icf,
 //                                        double *dicf, double *x, double *dx,
 //                                        double *out, double *dout) {
@@ -248,43 +175,58 @@ typedef unsigned long (*bodyFunc)(double *M, double *dM, double *icf,
 //   return timediff(start, stop);
 // }
 
-// unsigned long mlir_enzyme_dense_primal(double *M, double *dM, double *icf,
-//                                        double *dicf, double *x, double *dx,
-//                                        double *out, double *dout) {
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   for (size_t i = 0; i < N; i++) {
-//     out[i] = 0;
-//   }
+// {% if method == "full" %}
+unsigned long mlir_enzyme_dense_primal(double *M, double *dM, double *icf,
+                                       double *dicf, double *x, double *dx,
+                                       double *out, double *dout) {
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  for (size_t i = 0; i < N; i++) {
+    out[i] = 0;
+  }
 
-//   mlir_enzyme_trimatvec_dense_primal(deadbeef, M, 0, N, N, N, 1, deadbeef, x,
-//   0,
-//                                      N, 1, deadbeef, out, 0, N, 1);
-//   gettimeofday(&stop, NULL);
-//   check_matvec_primal(M, x, out, "MLIR-Enzyme full dense");
-//   return timediff(start, stop);
-// }
+  mlir_enzyme_trimatvec_dense_primal(deadbeef, M, 0, N, N, N, 1, deadbeef, x, 0,
+                                     N, 1, deadbeef, out, 0, N, 1);
+  gettimeofday(&stop, NULL);
+  check_matvec_primal(M, x, out, "MLIR-Enzyme full dense");
+  return timediff(start, stop);
+}
 
-// unsigned long mlir_enzyme_dense_adjoint(double *M, double *dM, double *icf,
-//                                         double *dicf, double *x, double *dx,
-//                                         double *out, double *dout) {
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   for (size_t i = 0; i < N; i++) {
-//     out[i] = 0;
-//   }
+unsigned long mlir_enzyme_dense_adjoint(double *M, double *dM, double *icf,
+                                        double *dicf, double *x, double *dx,
+                                        double *out, double *dout) {
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  for (size_t i = 0; i < N; i++) {
+    out[i] = 0;
+  }
 
-//   F64MatVecGradient ans = mlir_enzyme_trimatvec_dense_adjoint(
-//       deadbeef, M, 0, N, N, N, 1, deadbeef, x, 0, N, 1, deadbeef, out, 0, N,
-//       1);
-//   gettimeofday(&stop, NULL);
+  F64MatVecGradient ans = mlir_enzyme_trimatvec_dense_adjoint(
+      deadbeef, M, 0, N, N, N, 1, deadbeef, x, 0, N, 1, deadbeef, out, 0, N, 1);
+  gettimeofday(&stop, NULL);
 
-//   check_matvec_adjoint(M, ans.dM.aligned, x, ans.dx.aligned, dout,
-//                        "MLIR-Enzyme full dense");
-//   free(ans.dM.aligned);
-//   free(ans.dx.aligned);
-//   return timediff(start, stop);
-// }
+  check_matvec_adjoint(M, ans.dM.aligned, x, ans.dx.aligned, dout,
+                       "MLIR-Enzyme full dense");
+  free(ans.dM.aligned);
+  free(ans.dx.aligned);
+  return timediff(start, stop);
+}
+
+// {% elif method == "tri" %}
+unsigned long mlir_enzyme_tri_primal(double *M, double *dM, double *icf,
+                                     double *dicf, double *x, double *dx,
+                                     double *out, double *dout) {
+  struct timeval start, stop;
+  gettimeofday(&start, NULL);
+  for (size_t i = 0; i < N; i++) {
+    out[i] = 0;
+  }
+  mlir_enzyme_trimatvec_tri_primal(deadbeef, M, 0, N, N, N, 1, deadbeef, x, 0,
+                                   N, 1, deadbeef, out, 0, N, 1);
+  gettimeofday(&stop, NULL);
+  check_matvec_primal(M, x, out, "MLIR-Enzyme full dense");
+  return timediff(start, stop);
+}
 
 unsigned long mlir_enzyme_tri_adjoint(double *M, double *dM, double *icf,
                                       double *dicf, double *x, double *dx,
@@ -305,6 +247,8 @@ unsigned long mlir_enzyme_tri_adjoint(double *M, double *dM, double *icf,
   free(ans.dx.aligned);
   return timediff(start, stop);
 }
+
+// {% endif %}
 
 unsigned long mlir_dense_primal(double *M, double *dM, double *icf,
                                 double *dicf, double *x, double *dx,
@@ -429,11 +373,13 @@ int main() {
       // enzyme_dense_primal, enzyme_dense_adjoint,     enzyme_tri_primal,
       // enzyme_tri_adjoint,  enzyme_compressed_primal,
       // enzyme_compressed_adjoint,
-      // mlir_enzyme_dense_primal,
-      // mlir_enzyme_dense_adjoint,
-      mlir_enzyme_tri_adjoint
-      // mlir_dense_primal, mlir_dense_adjoint,
-      // mlir_tri_primal,           mlir_tri_adjoint,  mlir_compressed_primal,
+      // {% if method == "full" %}
+      mlir_enzyme_dense_primal, mlir_enzyme_dense_adjoint, mlir_dense_primal,
+      mlir_dense_adjoint,
+      // {% elif method == "tri" %}
+      mlir_enzyme_tri_primal, mlir_enzyme_tri_adjoint, mlir_tri_primal,
+      mlir_tri_adjoint,
+      // {% endif %}
       // mlir_compressed_adjoint
   };
   int num_apps = sizeof(funcs) / sizeof(funcs[0]);
@@ -452,7 +398,7 @@ int main() {
       results_df[app * NUM_RUNS + run] =
           (*funcs[app])(M, dM, icf, dicf, x, dx, out, dout);
     }
-    print_ul_arr(results_df + app * NUM_RUNS, NUM_RUNS);
+    print_ul_arr(&results_df[app * NUM_RUNS], NUM_RUNS);
   }
 
   free(M);
@@ -463,4 +409,5 @@ int main() {
   free(dx);
   free(out);
   free(dout);
+  free(results_df);
 }

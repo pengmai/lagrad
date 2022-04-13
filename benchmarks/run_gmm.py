@@ -127,7 +127,8 @@ def adbench_main(args):
 def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
-    mlir_template = mlir_env.get_template("gmm.mlir")
+    # mlir_template = mlir_env.get_template("gmm.mlir")
+    mlir_template = mlir_env.get_template("lagrad_gmm_temp.mlir")
     mlir_compressed_template = mlir_env.get_template("gmm_compressed.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_compressed.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_bufferized_opt.mlir")
@@ -162,7 +163,7 @@ def main(args):
         helpers_template.render(**config).encode("utf-8"),
         "helpers.o",
     )
-    # compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "gmm_enzyme.o")
+    compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "gmm_enzyme.o")
     compile_mlir(
         mlir_template.render(**config).encode("utf-8"),
         "gmm_kernel.o",
@@ -172,11 +173,11 @@ def main(args):
     #     mlir_compressed_template.render(**config).encode("utf-8"),
     #     "gmm_compressed_kernel.o",
     # )
-    # compile_mlir_to_enzyme(
-    #     mlir_enzyme_template.render(**config).encode("utf-8"),
-    #     output="gmm_mlir_enzyme.o",
-    #     emit="obj",
-    # )
+    compile_mlir_to_enzyme(
+        mlir_enzyme_template.render(**config).encode("utf-8"),
+        output="gmm_mlir_enzyme.o",
+        emit="obj",
+    )
 
     stdout = link_and_run(
         [

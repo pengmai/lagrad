@@ -5,10 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define BA_DATA_FILE "benchmarks/data/ba_test.txt"
 // #define BA_DATA_FILE "benchmarks/data/ba1_n49_m7776_p31843.txt"
-// #define RESULTS_FILE "benchmarks/results/basparsemat.txt"
-#define BA_DATA_FILE "benchmarks/data/ba10_n1197_m126327_p563734.txt"
-#define RESULTS_FILE "benchmarks/results/basparsemat_10.txt"
+#define RESULTS_FILE "benchmarks/results/basparsemat.txt"
+// #define BA_DATA_FILE "benchmarks/data/ba10_n1197_m126327_p563734.txt"
+// #define RESULTS_FILE "benchmarks/results/basparsemat_10.txt"
 #define BA_NCAMPARAMS 11
 
 typedef struct _BAInput {

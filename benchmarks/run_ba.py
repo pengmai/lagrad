@@ -33,38 +33,49 @@ def main(args):
         "rad_idx": 9,
     }
     mlir_template = mlir_env.get_template("ba.mlir")
-    # mlir_template = mlir_env.get_template("DELETEME_ba_bufferized.mlir")
+    # This version is hand modified to use comprehensive bufferize
+    # mlir_template = mlir_env.get_template("DELETEME_ba_differentiated.mlir")
+    enzyme_c_template = c_env.get_template("enzyme_ba.c")
     enzyme_template = mlir_env.get_template("ba_enzyme_reproj.mlir")
     enzyme_w_template = mlir_env.get_template("ba_enzyme_w.mlir")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
     if args.print:
         print(mlir_template.render(**config))
+        # print(enzyme_template.render(**config))
         return
 
-    compile_mlir(mlir_template.render(**config).encode("utf-8"), "ba_mlir.o")
+    compile_mlir(
+        mlir_template.render(**config).encode("utf-8"),
+        "ba_mlir.o",
+        comprehensive_bufferize=True,
+    )
     compile_mlir_to_enzyme(
         enzyme_template.render(**config).encode("utf-8"),
         "enzyme_ba_reproj.o",
         emit="obj",
+        write=True,
     )
     compile_mlir_to_enzyme(
         enzyme_w_template.render(**config).encode("utf-8"), "enzyme_ba_w.o", emit="obj"
     )
     compile_c(driver_template.render(**config).encode("utf-8"), "ba_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
+    compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "enzyme_ba_c.o")
     stdout = link_and_run(
         [
             "ba_mlir.o",
             "enzyme_ba_reproj.o",
             "enzyme_ba_w.o",
+            "enzyme_ba_c.o",
             "ba_driver.o",
             "mlir_c_abi.o",
         ],
         "ba_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
-    # print(stdout)
+    print(stdout)
+    return
     outfile = None
     try:
         lines = stdout.splitlines()

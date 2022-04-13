@@ -80,6 +80,8 @@ void random_init_d_2d(double *arr, size_t m, size_t n);
 
 void uniform_init(float val, float *arr, size_t size);
 
+void uniform_init_d(double val, double *arr, size_t size);
+
 void uniform_init_2d(float val, float *arr, size_t m, size_t n);
 
 void print_ul_arr(unsigned long *arr, size_t n);

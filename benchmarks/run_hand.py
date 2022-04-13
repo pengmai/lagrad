@@ -68,6 +68,7 @@ def main(args):
         keys = [
             "lagrad_jacobian",
             "enzyme_jacobian",
+            "enzyme_c",
         ]
         assert len(keys) == len(
             lines

@@ -20,7 +20,7 @@ func @main() -> i64 {
   %source_A = arith.constant dense<3.2> : tensor<f32>
   %zero = arith.constant 0.0 : f32
 
-  %A = memref.buffer_cast %source_A : memref<f32>
+  %A = bufferization.to_memref %source_A : memref<f32>
   %dA = memref.alloca() : memref<f32>
   linalg.fill(%zero, %dA) : f32, memref<f32>
 

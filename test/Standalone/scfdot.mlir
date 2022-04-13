@@ -25,10 +25,10 @@ func @scfdot(%A : memref<4xf32>, %B : memref<4xf32>) -> f32 {
 
 func @main() -> i64 {
   %cA = arith.constant dense<[-0.3, 1.4, 2.2, -3.0]> : tensor<4xf32>
-  %A = memref.buffer_cast %cA : memref<4xf32>
+  %A = bufferization.to_memref %cA : memref<4xf32>
   %dA = memref.alloca() : memref<4xf32>
   %cB = arith.constant dense<[-5.0, 3.4, -10.2, 3.33]> : tensor<4xf32>
-  %B = memref.buffer_cast %cB : memref<4xf32>
+  %B = bufferization.to_memref %cB : memref<4xf32>
   %dB = memref.alloca() : memref<4xf32>
 
   // Always remember to zero out the allocated array gradient!

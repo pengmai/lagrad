@@ -1,3 +1,6 @@
+// This is an experiment to see if I can optimize the bufferization emitted by LAGrad
+// by hand. Honestly it looks a bit too daunting of a task.
+
 #map0 = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d0)>
 #map2 = affine_map<(d0, d1, d2) -> (d0, d2)>

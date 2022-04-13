@@ -33,12 +33,12 @@ def main(args):
         print(lagrad_templ.render(**config))
         return
 
-    compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
+    # compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
     compile_c(driver_templ.render(**config).encode("utf-8"), "lstm_driver.o")
     compile_c(helpers_templ.render(**config).encode("utf-8"), "mlir_c_abi.o")
     compile_enzyme(enzyme_c_templ.render(**config).encode("utf-8"), "lstm_enzyme_c.o")
     stdout = link_and_run(
-        ["lstm_driver.o", "mlir_c_abi.o", "lstm_lagrad.o", "lstm_enzyme_c.o"],
+        ["lstm_driver.o", "mlir_c_abi.o", "lstm_enzyme_c.o"],
         "lstm_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")

@@ -167,15 +167,16 @@ def test_logsumexp_1d():
 
 
 def test_cross():
-    assert extract_1d(jit_file(f"{MLIR_FILES}/cross_product.mlir")) == [-1, 2, -1]
+    assert extract_1d(
+        jit_file(f"{MLIR_FILES}/cross_product.mlir", comprehensive_bufferize=True)
+    ) == [-1, 2, -1]
 
 
 def test_batch_matmul():
-    A = np.random.rand(4, 3, 5)
     B = np.reshape(np.arange(60).astype(np.float64) + 1, (4, 5, 3))
     B = np.where(B % 7 == 0, -B, B)
     g = np.ones((3, 3))
-    expected = np.stack([g @ B[i].T for i in range(len(A))]).tolist()
+    expected = np.stack([g @ B[i].T for i in range(len(B))]).tolist()
     assert extract_3d(jit_file(f"{MLIR_FILES}/batch_matmul.mlir")) == expected
 
 
@@ -186,7 +187,11 @@ def test_extract_scalar():
 
 
 def test_extract_slice():
-    assert extract_2d(jit_file(f"{MLIR_FILES}/tensor_extract_slice.mlir")) == [
+    assert extract_2d(
+        jit_file(
+            f"{MLIR_FILES}/tensor_extract_slice.mlir", comprehensive_bufferize=True
+        )
+    ) == [
         [1, 2],
         [1, 2],
     ]

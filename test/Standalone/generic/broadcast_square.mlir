@@ -1,5 +1,6 @@
 func @broadcast_square(%a: tensor<f32>, %b: tensor<4xf32>) -> tensor<4xf32> {
-  %out_init = arith.constant dense<0.0> : tensor<4xf32>
+  // %out_init = arith.constant dense<0.0> : tensor<4xf32>
+  %out_init = linalg.init_tensor [4] : tensor<4xf32>
   %out = linalg.generic
     {
       indexing_maps = [affine_map<(d0) -> ()>, affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>],

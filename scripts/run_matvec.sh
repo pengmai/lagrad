@@ -7,9 +7,9 @@ TMP="$SCRIPT_DIR/../build/tmp"
 BIN="$SCRIPT_DIR/../build/bin"
 
 BUFFERIZE="-tensor-constant-bufferize -linalg-bufferize -tensor-bufferize -func-bufferize"
-AFFINE_OPTS="-convert-linalg-to-affine-loops -affine-loop-unroll"
+AFFINE_OPTS="-convert-linalg-to-affine-loops -affine-loop-unroll -lower-affine"
 # AFFINE_OPTS="-convert-linalg-to-affine-loops"
-LOWERING="-finalizing-bufferize -buffer-deallocation -convert-scf-to-std -convert-linalg-to-llvm"
+LOWERING="-finalizing-bufferize -buffer-deallocation -convert-scf-to-std -convert-memref-to-llvm -convert-math-to-llvm -convert-linalg-to-llvm -convert-std-to-llvm -reconcile-unrealized-casts"
 EXPORT="mlir-translate -mlir-to-llvmir"
 COMPILE="llc -filetype=obj"
 

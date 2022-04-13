@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 2
+#define NUM_RUNS 10
 
 double *deadbeef = (double *)0xdeadbeef;
 

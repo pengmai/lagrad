@@ -87,6 +87,7 @@ double log_wishart_prior(int p, int k, double wishart_gamma, int wishart_m,
                     sum_qs[ik];
   }
 
+  // return out;
   return out - k * C;
 }
 
@@ -156,26 +157,6 @@ void Qtimesx(int d, double const *Qdiag,
       Lparamsidx++;
     }
   }
-}
-
-void __print_d_arr(double *arr, size_t n) {
-  printf("[");
-  for (size_t i = 0; i < n; i++) {
-    printf("%.4f", arr[i]);
-    if (i != n - 1) {
-      printf(", ");
-    }
-  }
-  printf("]\n");
-}
-
-void __print_d_arr_2d(double *arr, size_t m, size_t n) {
-  printf("[\n");
-  for (size_t i = 0; i < m; i++) {
-    printf("  ");
-    __print_d_arr(arr + i * n, n);
-  }
-  printf("]\n");
 }
 
 void QtimesXFullL(int d, double *Qdiag, double *L, double *x, double *out) {
@@ -267,9 +248,6 @@ void enzyme_gmm_objective(int d, int k, int n, double const *__restrict alphas,
       subtract(d, &x[ix * d], &means[ik * d], &xcentered[0]);
       Qtimesx(d, &Qdiags[ik * d], &icf[ik * icf_sz + d], &xcentered[0],
               &Qxcentered[0]);
-      // if (ix == n - 1 && ik == 0) {
-      //   __print_d_arr(&Qxcentered[0], d);
-      // }
       // two caches for qxcentered at idx 0 and at arbitrary index
       main_term[ik] = alphas[ik] + sum_qs[ik] - 0.5 * sqnorm(d, &Qxcentered[0]);
     }
@@ -286,6 +264,13 @@ void enzyme_gmm_objective(int d, int k, int n, double const *__restrict alphas,
   *err = CONSTANT + slse - n * lse_alphas +
          log_wishart_prior(d, k, wishart_gamma, wishart_m, &sum_qs[0],
                            &Qdiags[0], icf);
+  // // printf("lwishpri: %f\n", log_wishart_prior(d, k, wishart_gamma,
+  // wishart_m,
+  // //                                            sum_qs, Qdiags, icf));
+  // printf("enzyme primal result: %f\n",
+  //        slse - n * lse_alphas +
+  //            log_wishart_prior(d, k, wishart_gamma, wishart_m, &sum_qs[0],
+  //                              &Qdiags[0], icf));
 
   free(Qdiags);
   free(sum_qs);

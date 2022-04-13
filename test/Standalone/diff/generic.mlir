@@ -37,13 +37,13 @@ func @main() -> i64 {
   %source_C = arith.constant dense<1.0> : tensor<4x4xf64>
   %zero = arith.constant 0.0 : f64
 
-  %A = memref.buffer_cast %source_A : memref<4x4xf64>
+  %A = bufferization.to_memref %source_A : memref<4x4xf64>
   %dA = memref.alloca() : memref<4x4xf64>
   linalg.fill(%zero, %dA) : f64, memref<4x4xf64>
-  %B = memref.buffer_cast %source_B : memref<4x4xf64>
+  %B = bufferization.to_memref %source_B : memref<4x4xf64>
   %dB = memref.alloca() : memref<4x4xf64>
   linalg.fill(%zero, %dB) : f64, memref<4x4xf64>
-  %C = memref.buffer_cast %source_C : memref<4x4xf64>
+  %C = bufferization.to_memref %source_C : memref<4x4xf64>
 
   %f = constant @generic_matmul : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
   %df = standalone.diff %f : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64, (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64

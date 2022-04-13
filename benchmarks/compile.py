@@ -107,6 +107,8 @@ def run_grad(contents):
 
 def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=False):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
+    if not comprehensive_bufferize:
+        warnings.warn("Comprehensive bufferization disabled")
     # print(
     #     run_safe(
     #         [
@@ -136,7 +138,7 @@ def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=F
             "-canonicalize",
         ]
         + (
-            ["-linalg-comprehensive-module-bufferize=allow-return-memref"]
+            ["-linalg-comprehensive-module-bufferize=allow-return-memref", "-canonicalize"]
             if comprehensive_bufferize
             else BUFFERIZE
         )
@@ -145,7 +147,7 @@ def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=F
         stdin=contents,
     )
     llvm_ir = run_safe(["mlir-translate", "-mlir-to-llvmir"], stdin=llvm_dialect)
-    llvm_ir = run_safe(["opt", "-O3"], stdin=llvm_ir)
+    # llvm_ir = run_safe(["opt", "-O3"], stdin=llvm_ir)
     obj = run_safe(["llc", "-filetype=obj"], stdin=llvm_ir)
     with open(f"{TMP}/{output}", "wb") as f:
         f.write(obj)
@@ -278,7 +280,7 @@ def compile_enzyme(contents, output, emit="object"):
         suppress_stderr=True,
     )
     postenzyme = run_safe(
-        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme"], stdin=preenzyme
+        [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
     )
     with open("DELETEME_ba_postenzyme.ll", "w") as f:
         f.write(postenzyme.decode("utf-8"))

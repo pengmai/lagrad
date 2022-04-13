@@ -1,5 +1,5 @@
 func @matvec(%M : tensor<512x1024xf32>, %x : tensor<1024xf32>) -> tensor<512xf32> {
-  %dummy = constant dense<0.0> : tensor<512xf32>
+  %dummy = arith.constant dense<0.0> : tensor<512xf32>
   %res = linalg.matvec ins(%M, %x : tensor<512x1024xf32>, tensor<1024xf32>) outs(%dummy : tensor<512xf32>) -> tensor<512xf32>
   return %res : tensor<512xf32>
 }
@@ -101,7 +101,7 @@ func @matvec(%M : tensor<512x1024xf32>, %x : tensor<1024xf32>) -> tensor<512xf32
 // Take the gradient of only the second argument.
 func @grad_matvec(%M : tensor<512x1024xf32>, %x : tensor<1024xf32>) -> tensor<1024xf32> {
   %f = constant @matvec : (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<512xf32>
-  %df = standalone.grad %f {of=[1]}: (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<512xf32>, (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<1024xf32>
+  %df = standalone.grad %f {of = [1]}: (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<512xf32>, (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<1024xf32>
   %res = call_indirect %df(%M, %x) : (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<1024xf32>
   // %res = call @__grad_matvec(%M, %x) : (tensor<512x1024xf32>, tensor<1024xf32>) -> tensor<1024xf32>
   return %res : tensor<1024xf32>
