@@ -1,7 +1,7 @@
 #include "ba.h"
 #include "mlir_c_abi.h"
 
-#define NUM_RUNS 10
+#define NUM_RUNS 6
 
 double *deadbeef = (double *)0xdeadbeef;
 
@@ -171,12 +171,27 @@ unsigned long lagrad_compute_jacobian(BAInput input, BASparseMat *mat,
   return timediff(start, stop);
 }
 
+int generate_main() {
+  BAInput ba_input = read_ba_data("{{data_file}}");
+  int n = ba_input.n, m = ba_input.m, p = ba_input.p;
+  BASparseMat mat = initBASparseMat(n, m, p);
+
+  clearBASparseMat(&mat);
+  lagrad_calculate_reproj_jacobian(ba_input, &mat);
+  lagrad_calculate_w_jacobian(ba_input, &mat);
+  serialize_sparse_mat("{{results_file}}", &mat);
+
+  free_ba_data(ba_input);
+  freeBASparseMat(&mat);
+  return 0;
+}
+
 int main() {
-  BAInput ba_input = read_ba_data();
+  BAInput ba_input = read_ba_data("{{data_file}}");
   int n = ba_input.n, m = ba_input.m, p = ba_input.p;
   BASparseMat mat = initBASparseMat(n, m, p);
   BASparseMat ref = initBASparseMat(n, m, p);
-  read_ba_results(&ref);
+  read_ba_results("{{results_file}}", &ref);
 
   bodyFunc funcs[] = {lagrad_compute_jacobian, enzyme_compute_jacobian};
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
@@ -193,4 +208,5 @@ int main() {
   freeBASparseMat(&mat);
   freeBASparseMat(&ref);
   free(results_df);
+  return 0;
 }

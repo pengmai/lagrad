@@ -159,10 +159,10 @@ void clearBASparseMat(BASparseMat *mat) {
 //   rows.push_back(0);
 // }
 
-BAInput read_ba_data() {
-  FILE *fp = fopen(BA_DATA_FILE, "r");
+BAInput read_ba_data(const char *data_file) {
+  FILE *fp = fopen(data_file, "r");
   if (!fp) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", BA_DATA_FILE);
+    fprintf(stderr, "Failed to open file \"%s\"\n", data_file);
     exit(EXIT_FAILURE);
   }
 
@@ -221,15 +221,15 @@ BAInput read_ba_data() {
   return ba_input;
 }
 
-void read_ba_results(BASparseMat *mat) {
+void read_ba_results(const char *ffile, BASparseMat *mat) {
   int p = mat->p;
   int nrows = 2 * p + p;
   int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
   int row_size = nrows + 1;
 
-  FILE *fp = fopen(RESULTS_FILE, "r");
+  FILE *fp = fopen(ffile, "r");
   if (fp == NULL) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", RESULTS_FILE);
+    fprintf(stderr, "Failed to open file \"%s\"\n", ffile);
     exit(EXIT_FAILURE);
   }
 
