@@ -4,6 +4,5 @@ build/
 test/pytest/tmp
 .DS_Store
 benchmarks/tmp
-benchmarks/results/*.json
-benchmarks/results/basparsemat_10.txt
+benchmarks/results
 

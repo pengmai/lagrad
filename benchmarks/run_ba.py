@@ -114,6 +114,8 @@ def main(args):
         "ba_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
+    print(stdout)
+    return
     outfile = None
     try:
         lines = stdout.splitlines()
@@ -155,17 +157,18 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # main(args)
+    main(args)
     # generate_results_main(args)
-    n_runs = 3
-    n_methods = 2
-    datasets = [ds for ds in ["A", "B", "C"] for _ in range(n_methods)]
-    methods = ["LAGrad", "Enzyme"] * 3
-    run_labels = ["run1", "run2", "run3"]
-    data = np.arange(3 * 2 * 3).reshape(3, 6)
-    columns = pd.MultiIndex.from_tuples(zip(datasets, methods))
-    df = pd.DataFrame(data=data, columns=columns, index=run_labels)
-    print(df)
+
+    # n_runs = 3
+    # n_methods = 2
+    # datasets = [ds for ds in ["A", "B", "C"] for _ in range(n_methods)]
+    # methods = ["LAGrad", "Enzyme"] * 3
+    # run_labels = ["run1", "run2", "run3"]
+    # data = np.arange(3 * 2 * 3).reshape(3, 6)
+    # columns = pd.MultiIndex.from_tuples(zip(datasets, methods))
+    # df = pd.DataFrame(data=data, columns=columns, index=run_labels)
+    # print(df)
 
     # This is the code snippet to read the multindex that we want.
     # pd.read_csv('test.csv', header=[0,1], index_col=0)
