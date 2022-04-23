@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define HAND_MODEL_PATH "benchmarks/data/hand_model"
 // #define HAND_DATA_FILE "benchmarks/data/test.txt"
 #define HAND_DATA_FILE "benchmarks/data/hand1_t26_c100.txt"
 
@@ -79,13 +78,13 @@ void free_matrix_array(Matrix *matrices, size_t num_matrices) {
   free(matrices);
 }
 
-HandModel read_hand_model(bool transpose) {
+HandModel read_hand_model(const char *model_path, bool transpose) {
   const char DELIMITER = ':';
   char filename[80];
   char *currentline = (char *)malloc(100 * sizeof(char));
   FILE *fp;
 
-  strcpy(filename, HAND_MODEL_PATH);
+  strcpy(filename, model_path);
   strcat(filename, "/bones.txt");
   fp = fopen(filename, "r");
   if (!fp) {
@@ -134,7 +133,7 @@ HandModel read_hand_model(bool transpose) {
 
   fclose(fp);
   filename[0] = '\0';
-  strcpy(filename, HAND_MODEL_PATH);
+  strcpy(filename, model_path);
   strcat(filename, "/vertices.txt");
   fp = fopen(filename, "r");
   if (!fp) {
@@ -198,7 +197,7 @@ HandModel read_hand_model(bool transpose) {
 
   fclose(fp);
   filename[0] = '\0';
-  strcpy(filename, HAND_MODEL_PATH);
+  strcpy(filename, model_path);
   strcat(filename, "/triangles.txt");
 
   fp = fopen(filename, "r");
@@ -253,11 +252,12 @@ void free_hand_model(HandModel *model) {
   free(model->triangles);
 }
 
-HandInput read_hand_data(bool complicated, bool transpose) {
-  HandModel model = read_hand_model(transpose);
-  FILE *fp = fopen(HAND_DATA_FILE, "r");
+HandInput read_hand_data(const char *model_path, const char *data_file,
+                         bool complicated, bool transpose) {
+  HandModel model = read_hand_model(model_path, transpose);
+  FILE *fp = fopen(data_file, "r");
   if (!fp) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", HAND_DATA_FILE);
+    fprintf(stderr, "Failed to open file \"%s\"\n", data_file);
     exit(EXIT_FAILURE);
   }
 
@@ -362,19 +362,3 @@ void serialize_hand_results(const char *ffile, double *J, size_t m, size_t n) {
 
   fclose(fp);
 }
-// TODO: Currently incomplete.
-// void enzyme_calculate_jacobian_simple(HandInput *input) {
-//   double *theta_d = (double *)malloc(input->n_theta * sizeof(double));
-//   for (size_t i = 0; i < input->n_theta; i++) {
-//     theta_d[i] = 0;
-//   }
-
-//   for (size_t i = 0; i < input->n_theta; i++) {
-//     if (i > 0) {
-//       theta_d[i - 1] = 0.0;
-//     }
-//     theta_d[i] = 1.0;
-
-//     free(theta_d);
-//   }
-// }

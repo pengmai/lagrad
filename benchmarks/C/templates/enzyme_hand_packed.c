@@ -72,7 +72,7 @@ void cto_pose_params(double *theta, double *pose_params) {
   }
 }
 
-void ceuler_angles_to_rotation_matrix(double *xzy, double *R, int print) {
+void ceuler_angles_to_rotation_matrix(double *xzy, double *R) {
   double tx = xzy[0];
   double ty = xzy[2];
   double tz = xzy[1];
@@ -85,11 +85,6 @@ void ceuler_angles_to_rotation_matrix(double *xzy, double *R, int print) {
   Rx[2 * 3 + 1] = -Rx[1 * 3 + 2];
   Rx[2 * 3 + 2] = Rx[1 * 3 + 1];
   Rx[0 * 3 + 0] = 1;
-
-  if (print) {
-    // printf("Rx:\n");
-    // print_d_arr_2d(Rx, 3, 3);
-  }
 
   double Ry[9];
   for (int i = 0; i < 9; i++) {
@@ -125,10 +120,7 @@ void cget_posed_relatives(double *base_relatives, double *pose_params,
 
   double R[9];
   for (int i = 0; i < N_BONES; i++) {
-    ceuler_angles_to_rotation_matrix(&pose_params[(i + 3) * 3], R, i == 6);
-    // if (i == 6) {
-    //   print_d_arr_2d(R, 3, 3);
-    // }
+    ceuler_angles_to_rotation_matrix(&pose_params[(i + 3) * 3], R);
     for (int j = 0; j < 3; j++) {
       for (int k = 0; k < 3; k++) {
         tr_space[j * 4 + k] = R[j * 3 + k];
@@ -198,14 +190,6 @@ void capply_global_transforms(double *pose_params, double *positions) {
   double *R = malloc(3 * 3 * sizeof(double));
   cangle_axis_to_rotation_matrix(pose_params, R);
 
-  // printf("colmaj R:\n");
-  // print_d_arr_2d(R, 3, 3);
-  // for (int i = 0; i < 3; i++) {
-  //   for (int j = 0; j < 3; j++) {
-  //     R[i * 3 + j] *= pose_params[1 * 3 + i];
-  //   }
-  // }
-
   double *tmp = malloc(N_VERTS * 3 * sizeof(double));
   colmaj_matmul(3, N_VERTS, 3, R, positions, tmp);
 
@@ -268,13 +252,29 @@ void c_packed_hand_objective(int npts, double const *__restrict theta,
     }
   }
 
-  printf("err:\n");
-  print_d_arr_2d(&err[0], 10, 3);
-
   free(pose_params);
   free(relatives);
   free(absolutes);
   free(transforms);
   free(curr_positions);
   free(positions);
+}
+
+extern int enzyme_const;
+extern int enzyme_dup;
+extern int enzyme_dupnoneed;
+extern void __enzyme_autodiff(void *, ...);
+
+void enzyme_c_packed_hand_objective(
+    int npts, double const *__restrict theta, double *dtheta, int32_t *parents,
+    double const *__restrict base_relatives,
+    double const *__restrict inverse_base_absolutes,
+    double const *__restrict base_positions, double const *__restrict weights,
+    int32_t *correspondences, double *points, double *err, double *derr) {
+  __enzyme_autodiff(c_packed_hand_objective, enzyme_const, npts, enzyme_dup,
+                    theta, dtheta, enzyme_const, parents, enzyme_const,
+                    base_relatives, enzyme_const, inverse_base_absolutes,
+                    enzyme_const, base_positions, enzyme_const, weights,
+                    enzyme_const, correspondences, enzyme_const, points,
+                    enzyme_dupnoneed, err, derr);
 }
