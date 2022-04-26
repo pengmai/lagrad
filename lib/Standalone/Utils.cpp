@@ -314,6 +314,33 @@ Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
   return adjoint.getResult(0);
 }
 
+Value addInPlace(Value source, Value dest, OpBuilder &builder) {
+  if (source.getType().isa<FloatType>()) {
+    return builder.create<arith::AddFOp>(dest.getLoc(), source, dest);
+  }
+  assert(dest.getType().isa<RankedTensorType>() &&
+         "add in place expects a ranked tensor destination");
+  auto outputShape = dest.getType().dyn_cast<RankedTensorType>();
+  auto rank = outputShape.getRank();
+  SmallVector<AffineMap, 2> indexingMaps(2,
+                                         builder.getMultiDimIdentityMap(rank));
+  SmallVector<StringRef, 1> iteratorTypes(rank, getParallelIteratorTypeName());
+  auto addOp = builder.create<linalg::GenericOp>(
+      dest.getLoc(),
+      /*resultTensorType=*/outputShape,
+      /*inputs=*/source, /*outputs=*/dest,
+      /*indexing_maps=*/indexingMaps,
+      /*iterator_types=*/iteratorTypes,
+      /*doc=*/"Add in place",
+      /*library call=*/"",
+      [&](OpBuilder &bodyBuilder, Location loc, ValueRange regionArgs) {
+        auto added = bodyBuilder.create<arith::AddFOp>(loc, regionArgs[0],
+                                                       regionArgs[1]);
+        bodyBuilder.create<linalg::YieldOp>(loc, added.getResult());
+      });
+  return addOp.getResult(0);
+}
+
 void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
@@ -797,8 +824,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     if (!env[operand]) {
       env[operand] = vjp_value;
     } else {
-      env[operand] =
-          rewriter.create<arith::AddFOp>(op->getLoc(), env[operand], vjp_value);
+      env[operand] = addInPlace(vjp_value, env[operand], rewriter);
     }
     op_index++;
   }
