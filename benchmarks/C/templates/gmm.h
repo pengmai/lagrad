@@ -5,17 +5,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define FILENAME "benchmarks/data/gmm_d10_K25.txt"
-#define GRAD_FILENAME "benchmarks/data/gmm_results.txt"
+// #define FILENAME "benchmarks/data/gmm_d10_K25.txt"
+// #define GRAD_FILENAME "benchmarks/data/gmm_results.txt"
 // #define FILENAME "benchmarks/data/gmm_d128_K200.txt"
 // #define GRAD_FILENAME "benchmarks/data/gmm_d128_K200_results.txt"
 
-GMMInput read_gmm_data() {
+GMMInput read_gmm_data(const char*data_file) {
   FILE *fp;
   GMMInput gmm_input;
-  fp = fopen(FILENAME, "r");
+  fp = fopen(data_file, "r");
   if (fp == NULL) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", FILENAME);
+    fprintf(stderr, "Failed to open file \"%s\"\n", data_file);
     exit(EXIT_FAILURE);
   }
 
@@ -87,11 +87,11 @@ GMMInput read_gmm_data() {
   return gmm_input;
 }
 
-void read_gmm_grads(size_t d, size_t k, size_t n, double *dalphas,
+void read_gmm_grads(const char *grad_file, size_t d, size_t k, size_t n, double *dalphas,
                     double *dmeans, double *dicf) {
-  FILE *fp = fopen(GRAD_FILENAME, "r");
+  FILE *fp = fopen(grad_file, "r");
   if (fp == NULL) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", GRAD_FILENAME);
+    fprintf(stderr, "Failed to open file \"%s\"\n", grad_file);
     exit(EXIT_FAILURE);
   }
 
@@ -111,12 +111,12 @@ void read_gmm_grads(size_t d, size_t k, size_t n, double *dalphas,
   fclose(fp);
 }
 
-void serialize_gmm_grads(size_t d, size_t k, size_t n, double *dalphas,
+void serialize_gmm_grads(const char* grad_file, size_t d, size_t k, size_t n, double *dalphas,
                          double *dmeans, double *dicf) {
   FILE *fp;
-  fp = fopen(GRAD_FILENAME, "w");
+  fp = fopen(grad_file, "w");
   if (fp == NULL) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", GRAD_FILENAME);
+    fprintf(stderr, "Failed to open file \"%s\"\n", grad_file);
     exit(EXIT_FAILURE);
   }
 

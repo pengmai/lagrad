@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 3
+#define NUM_RUNS 6
 
 typedef struct {
   double *data;
@@ -342,7 +342,6 @@ unsigned long enzyme_gmm_compressed_primal(GMMInput gmm_input,
   return timediff(start, stop);
 }
 
-// {% if method == 'enzyme_c' %}
 unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
                                             double *ref_alphas,
                                             double *ref_means, double *ref_icf,
@@ -369,13 +368,12 @@ unsigned long enzyme_gmm_compressed_adjoint(GMMInput gmm_input,
   gettimeofday(&stop, NULL);
 
   check_gmm_err(d, k, n, alphasb, ref_alphas, meansb, ref_means, icfb, ref_icf,
-                "Enzyme Compressed");
+                "Enzyme Compressed/C");
   free(alphasb);
   free(meansb);
   free(icfb);
   return timediff(start, stop);
 }
-// {% endif %}
 
 unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
                                      double *ref_means, double *ref_icf,
@@ -493,8 +491,8 @@ unsigned long lagrad_gmm_full_adjoint(GMMInput gmm_input, double *ref_alphas,
 
 unsigned long lagrad_gmm_compressed_adjoint(GMMInput gmm_input,
                                             double *ref_alphas,
-                                            double *ref_means, double
-                                            *ref_icf, double *temp_icf) {
+                                            double *ref_means, double *ref_icf,
+                                            double *temp_icf) {
   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
   int icf_size = d * (d + 1) / 2;
   int tri_size = d * (d - 1) / 2;
@@ -508,8 +506,8 @@ unsigned long lagrad_gmm_compressed_adjoint(GMMInput gmm_input,
   gettimeofday(&start, NULL);
   GMMCompressedGrad ans = lagrad_gmm_compressed(
       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-      d, 1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+      gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d, d,
+      1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
       /*wishart_gamma=*/gmm_input.wishart_gamma,
       /*wishart_m=*/gmm_input.wishart_m);
@@ -544,14 +542,14 @@ void serialize_reference(GMMInput gmm_input) {
     icfb[i] = 0;
   }
   dgmm_objective(&gmm_input, alphasb, meansb, icfb, &err, &errb);
-  serialize_gmm_grads(d, k, n, alphasb, meansb, icfb);
+  serialize_gmm_grads("{{results_file}}", d, k, n, alphasb, meansb, icfb);
   free(alphasb);
   free(meansb);
   free(icfb);
 }
 
 int main() {
-  GMMInput gmm_input = read_gmm_data();
+  GMMInput gmm_input = read_gmm_data("{{data_file}}");
   int d = gmm_input.d;
   int k = gmm_input.k;
   int n = gmm_input.n;
@@ -562,28 +560,21 @@ int main() {
       // enzyme_gmm_full_adjoint,
       // enzyme_gmm_compressed_primal,
 
-      // {% if method == 'enzyme_c' %}
-      // enzyme_gmm_compressed_adjoint,
-      // {% endif %}
+      enzyme_gmm_compressed_adjoint,
 
       // enzyme_mlir_gmm_full_adjoint,
       // mlir_optimized_full_primal,
-
-      // {% if method == 'enzyme_mlir' %}
       // mlir_optimized_full_adjoint,
-      // {% endif %}
 
-      // {% if method == 'enzyme_mlir_compressed' %}
-      mlir_optimized_compressed_primal,
+      // mlir_optimized_compressed_primal,
       // mlir_optimized_compressed_adjoint,
-      // {% endif %}
 
-      lagrad_gmm_full_primal,
-      // lagrad_gmm_full_adjoint,
+      // lagrad_gmm_full_primal,
+      lagrad_gmm_full_adjoint,
       // lagrad_gmm_tri_primal,
       // lagrad_gmm_tri_adjoint,
       // lagrad_gmm_compressed_primal,
-      lagrad_gmm_compressed_adjoint,
+      // lagrad_gmm_compressed_adjoint,
   };
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
 
@@ -599,7 +590,7 @@ int main() {
   // serialize_reference(gmm_input);
   // return 0;
 
-  read_gmm_grads(d, k, n, ref_alphas, ref_means, ref_icf);
+  read_gmm_grads("{{results_file}}", d, k, n, ref_alphas, ref_means, ref_icf);
 
   for (size_t app = 0; app < num_apps; app++) {
     for (size_t run = 0; run < NUM_RUNS; run++) {

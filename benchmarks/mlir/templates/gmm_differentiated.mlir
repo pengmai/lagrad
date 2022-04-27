@@ -10,6 +10,10 @@ module  {
     %cst = arith.constant 0.000000e+00 : f64
     return %cst : f64
   }
+
+  func private @print_memref_f64(memref<*xf64>) -> () attributes {llvm.emit_c_interface}
+  func private @dmatvec(memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>, memref<{{d}}xf64>) attributes {llvm.emit_c_interface}
+
   func @__grad_mlir_gmm_opt_full(%arg0: memref<{{k}}xf64>, %arg1: memref<{{k}}x{{d}}xf64>, %arg2: memref<{{k}}x{{d}}xf64>, %arg3: memref<{{k}}x{{d}}x{{d}}xf64>, %arg4: memref<{{n}}x{{d}}xf64>, %arg5: f64, %arg6: i64) -> (memref<{{k}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}x{{d}}xf64>) {
     %c999 = arith.constant {{n - 1}} : index
     %cst = arith.constant 0.000000e+00 : f64
@@ -172,9 +176,7 @@ module  {
     %34 = memref.alloc() : memref<{{k}}x{{d}}xf64>
     linalg.fill(%cst, %34) : f64, memref<{{k}}x{{d}}xf64> 
     %35 = memref.alloc() : memref<{{d}}xf64>
-    %36 = memref.alloc() : memref<{{d}}xf64>
-    %37 = memref.alloc() : memref<{{d}}xf64>
-    %38 = memref.alloc() : memref<{{d}}xf64>
+    %37 = memref.alloc() : memref<{{d}}xf64> // don't think I can get rid of this
     %39 = memref.alloca() : memref<f64>
     %40 = memref.alloca() : memref<f64>
     %41 = memref.alloca() : memref<f64>
@@ -183,18 +185,11 @@ module  {
     %44 = memref.alloc() : memref<{{k}}xf64>
     %45 = memref.alloca() : memref<f64>
     %46 = memref.alloc() : memref<{{k}}xf64>
-    %47 = memref.alloc() : memref<{{k}}xf64>
     %48 = memref.alloc() : memref<{{d}}xf64>
     %49 = memref.alloc() : memref<{{d}}xf64>
     %50 = memref.alloc() : memref<{{d}}xf64>
-    %51 = memref.alloc() : memref<{{d}}xf64>
     %52 = memref.alloca() : memref<f64>
-    %53 = memref.alloc() : memref<{{d}}xf64>
     %54 = memref.alloc() : memref<{{d}}x{{d}}xf64>
-    %55 = memref.alloc() : memref<{{d}}xf64>
-    %56 = memref.alloc() : memref<{{d}}xf64>
-    %57 = memref.alloc() : memref<{{d}}xf64>
-    %58 = memref.alloc() : memref<{{d}}xf64>
     scf.for %arg7 = %c0 to %c1000 step %c1 {
       %64 = arith.subi %c999, %arg7 : index
       scf.for %arg8 = %c0 to %c25 step %c1 {
@@ -211,24 +206,29 @@ module  {
         %79 = memref.cast %78 : memref<{{d}}xf64, #map4> to memref<{{d}}xf64>
         %80 = memref.subview %arg3[%arg8, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : memref<{{k}}x{{d}}x{{d}}xf64> to memref<{{d}}x{{d}}xf64, #map5>
         %81 = memref.cast %80 : memref<{{d}}x{{d}}xf64, #map5> to memref<{{d}}x{{d}}xf64>
-        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%79, %35 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%36 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
-          %88 = arith.mulf %arg9, %arg10 : f64
-          linalg.yield %88 : f64
-        }
         linalg.fill(%cst, %37) : f64, memref<{{d}}xf64>
-        linalg.matvec ins(%81, %35 : memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>) outs(%37 : memref<{{d}}xf64>)
-        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%36, %37 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%38 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
-          %88 = arith.addf %arg9, %arg10 : f64
-          linalg.yield %88 : f64
+        scf.for %iv = %c0 to %c10 step %c1 {
+          scf.for %jv = %c0 to %iv step %c1 {
+            %b0 = memref.load %81[%iv, %jv] : memref<{{d}}x{{d}}xf64>
+            %b1 = memref.load %35[%jv] : memref<{{d}}xf64>
+            %b2 = memref.load %37[%iv] : memref<{{d}}xf64>
+            %b3 = arith.mulf %b0, %b1 : f64
+            %b4 = arith.addf %b3, %b2 : f64
+            memref.store %b4, %37[%iv] : memref<{{d}}xf64>
+          }
         }
-        linalg.copy(%1, %39) : memref<f64>, memref<f64> 
-        linalg.generic {indexing_maps = [#map2, #map3], iterator_types = ["reduction"]} ins(%38 : memref<{{d}}xf64>) outs(%39 : memref<f64>) {
-        ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
-          %88 = arith.mulf %arg9, %arg9 : f64
-          %89 = arith.addf %88, %arg10 : f64
-          linalg.yield %89 : f64
+        // call @dmatvec(%81, %35, %37) : (memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>, memref<{{d}}xf64>) -> ()
+        // linalg.matvec ins(%81, %35 : memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>) outs(%37 : memref<{{d}}xf64>)
+        // %U = memref.cast %37 : memref<{{d}}xf64> to memref<*xf64>
+        // call @print_memref_f64(%U) : (memref<*xf64>) -> ()
+        linalg.fill(%cst, %39) : f64, memref<f64>
+        linalg.generic {indexing_maps = [#map2, #map2, #map2, #map3], iterator_types = ["parallel"]} ins(%78, %35, %37 : memref<{{d}}xf64, #map4>, memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%39 : memref<f64>) {
+        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64, %arg12: f64):  // no predecessors
+          %88 = arith.mulf %arg9, %arg10 : f64
+          %89 = arith.addf %88, %arg11 : f64
+          %90 = arith.mulf %89, %89 : f64
+          %91 = arith.addf %90, %arg12 : f64
+          linalg.yield %91 : f64
         }
         %82 = memref.load %39[] : memref<f64>
         %83 = arith.mulf %82, %cst_2 : f64
@@ -288,16 +288,16 @@ module  {
         %75 = select %74, %arg9, %cst : f64
         linalg.yield %75 : f64
       }
-      linalg.copy(%44, %47) : memref<{{k}}xf64>, memref<{{k}}xf64> 
-      linalg.generic {doc = "Add in place", indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%46 : memref<{{k}}xf64>) outs(%47 : memref<{{k}}xf64>) {
+      // linalg.copy(%44, %47) : memref<{{k}}xf64>, memref<{{k}}xf64> 
+      linalg.generic {doc = "Add in place", indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%46 : memref<{{k}}xf64>) outs(%44 : memref<{{k}}xf64>) {
       ^bb0(%arg8: f64, %arg9: f64):  // no predecessors
         %74 = arith.addf %arg8, %arg9 : f64
         linalg.yield %74 : f64
       }
       %71 = memref.load %45[] : memref<f64>
-      %72 = memref.load %47[%c0] : memref<{{k}}xf64>
+      %72 = memref.load %44[%c0] : memref<{{k}}xf64>
       %73 = arith.addf %72, %71 : f64
-      memref.store %73, %47[%c0] : memref<{{k}}xf64>
+      memref.store %73, %44[%c0] : memref<{{k}}xf64>
       scf.for %arg8 = %c0 to %c25 step %c1 {
         %74 = arith.subi %c24, %arg8 : index
         %75 = memref.subview %arg4[%64, 0] [1, {{d}}] [1, 1] : memref<{{n}}x{{d}}xf64> to memref<{{d}}xf64, #map4>
@@ -319,13 +319,23 @@ module  {
           linalg.yield %96 : f64
         }
         linalg.fill(%cst, %50) : f64, memref<{{d}}xf64>
-        linalg.matvec ins(%82, %48 : memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>) outs(%50 : memref<{{d}}xf64>)
-        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%49, %50 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%51 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
+        scf.for %iv = %c0 to %c10 step %c1 {
+          scf.for %jv = %c0 to %iv step %c1 {
+            %b0 = memref.load %82[%iv, %jv] : memref<{{d}}x{{d}}xf64>
+            %b1 = memref.load %48[%jv] : memref<{{d}}xf64>
+            %b2 = memref.load %50[%iv] : memref<{{d}}xf64>
+            %b3 = arith.mulf %b0, %b1 : f64
+            %b4 = arith.addf %b3, %b2 : f64
+            memref.store %b4, %50[%iv] : memref<{{d}}xf64>
+          }
+        }
+        // linalg.matvec ins(%82, %48 : memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>) outs(%50 : memref<{{d}}xf64>)
+        linalg.generic {indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%50 : memref<{{d}}xf64>) outs(%49 : memref<{{d}}xf64>) {
+        ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
           %96 = arith.addf %arg9, %arg10 : f64
           linalg.yield %96 : f64
         }
-        %83 = memref.load %47[%74] : memref<{{k}}xf64>
+        %83 = memref.load %44[%74] : memref<{{k}}xf64>
         %84 = arith.negf %83 : f64
         %85 = memref.load %13[%74] : memref<{{k}}xf64>
         %86 = arith.addf %85, %83 : f64
@@ -336,8 +346,8 @@ module  {
         %89 = arith.mulf %84, %cst_2 : f64
         linalg.fill(%cst, %52) : f64, memref<f64> 
         memref.store %89, %52[] : memref<f64>
-        linalg.generic {indexing_maps = [#map2, #map3, #map2], iterator_types = ["parallel"]} ins(%51, %52 : memref<{{d}}xf64>, memref<f64>) outs(%53 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
+        linalg.generic {indexing_maps = [#map3, #map2], iterator_types = ["parallel"]} ins(%52 : memref<f64>) outs(%49 : memref<{{d}}xf64>) {
+        ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
           %96 = arith.mulf %arg10, %arg9 : f64
           %97 = arith.mulf %arg10, %arg9 : f64
           %98 = arith.addf %97, %96 : f64
@@ -345,38 +355,28 @@ module  {
         }
         scf.for %arg9 = %c0 to %c10 step %c1 {
           scf.for %arg10 = %c0 to %arg9 step %c1 {
-            %96 = memref.load %53[%arg9] : memref<{{d}}xf64>
+            %96 = memref.load %49[%arg9] : memref<{{d}}xf64>
             %97 = memref.load %48[%arg10] : memref<{{d}}xf64>
             %98 = arith.mulf %96, %97 : f64
             memref.store %98, %54[%arg9, %arg10] : memref<{{d}}x{{d}}xf64>
           }
         }
-        linalg.fill(%cst, %55) : f64, memref<{{d}}xf64> 
+        linalg.fill(%cst, %50) : f64, memref<{{d}}xf64>
         scf.for %arg9 = %c0 to %c10 step %c1 {
           scf.for %arg10 = %c0 to %arg9 step %c1 {
-            %96 = memref.load %53[%arg9] : memref<{{d}}xf64>
+            %96 = memref.load %49[%arg9] : memref<{{d}}xf64>
             %97 = memref.load %81[%arg9, %arg10] : memref<{{d}}x{{d}}xf64, #map5>
-            %98 = memref.load %55[%arg10] : memref<{{d}}xf64>
+            %98 = memref.load %50[%arg10] : memref<{{d}}xf64>
             %99 = arith.mulf %96, %97 : f64
             %100 = arith.addf %99, %98 : f64
-            memref.store %100, %55[%arg10] : memref<{{d}}xf64>
+            memref.store %100, %50[%arg10] : memref<{{d}}xf64>
           }
         }
-        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%53, %48 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%56 : memref<{{d}}xf64>) {
+        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%49, %80 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%50 : memref<{{d}}xf64>) {
         ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
           %96 = arith.mulf %arg9, %arg10 : f64
-          linalg.yield %96 : f64
-        }
-        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%53, %80 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%57 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
-          %96 = arith.mulf %arg9, %arg10 : f64
-          linalg.yield %96 : f64
-        }
-        linalg.copy(%55, %58) : memref<{{d}}xf64>, memref<{{d}}xf64> 
-        linalg.generic {doc = "Add in place", indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%57 : memref<{{d}}xf64>) outs(%58 : memref<{{d}}xf64>) {
-        ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
-          %96 = arith.addf %arg9, %arg10 : f64
-          linalg.yield %96 : f64
+          %97 = arith.addf %96, %arg11 : f64
+          linalg.yield %97 : f64
         }
         %90 = memref.subview %15[%74, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : memref<{{k}}x{{d}}x{{d}}xf64> to memref<{{d}}x{{d}}xf64, #map5>
         scf.for %arg9 = %c0 to %c10 step %c1 {
@@ -388,13 +388,14 @@ module  {
           }
         }
         %92 = memref.subview %14[%74, 0] [1, {{d}}] [1, 1] : memref<{{k}}x{{d}}xf64> to memref<{{d}}xf64, #map4>
-        linalg.generic {doc = "Add in place", indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%56 : memref<{{d}}xf64>) outs(%92 : memref<{{d}}xf64, #map4>) {
-        ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
-          %96 = arith.addf %arg9, %arg10 : f64
-          linalg.yield %96 : f64
+        linalg.generic {indexing_maps = [#map2, #map2, #map2], iterator_types = ["parallel"]} ins(%49, %48 : memref<{{d}}xf64>, memref<{{d}}xf64>) outs(%92 : memref<{{d}}xf64, #map4>) {
+        ^bb0(%arg9: f64, %arg10: f64, %arg11: f64):  // no predecessors
+          %96 = arith.mulf %arg9, %arg10 : f64
+          %97 = arith.addf %96, %arg11 : f64
+          linalg.yield %97 : f64
         }
         %95 = memref.subview %34[%74, 0] [1, {{d}}] [1, 1] : memref<{{k}}x{{d}}xf64> to memref<{{d}}xf64, #map4>
-        linalg.generic {indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%58 : memref<{{d}}xf64>) outs(%95 : memref<{{d}}xf64, #map4>) {
+        linalg.generic {indexing_maps = [#map2, #map2], iterator_types = ["parallel"]} ins(%50 : memref<{{d}}xf64>) outs(%95 : memref<{{d}}xf64, #map4>) {
         ^bb0(%arg9: f64, %arg10: f64):  // no predecessors
           %96 = arith.negf %arg9 : f64
           %97 = arith.addf %96, %arg10 : f64
