@@ -4,6 +4,7 @@
  */
 #include "mlir/Transforms/Bufferize.h"
 #include "Standalone/Passes.h"
+#include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -19,23 +20,6 @@
 using namespace mlir;
 
 namespace {
-AffineMap getRankReduceSubviewLayout(int64_t resultRank,
-                                     ConversionPatternRewriter &rewriter) {
-  AffineExpr expr;
-  for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
-    if (exprIdx == resultRank - 1) {
-      expr = rewriter.getAffineDimExpr(exprIdx) *
-                 rewriter.getAffineSymbolExpr(resultRank) +
-             rewriter.getAffineSymbolExpr(exprIdx);
-    } else {
-      expr = rewriter.getAffineDimExpr(exprIdx) *
-                 rewriter.getAffineSymbolExpr(exprIdx) +
-             expr;
-    }
-  }
-  return AffineMap::get(resultRank, resultRank + 1, expr);
-}
-
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
 public:
   using OpConversionPattern::OpConversionPattern;

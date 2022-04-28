@@ -13,6 +13,9 @@ public:
   llvm::SmallDenseSet<Value> activeValues;
 };
 
+AffineMap getRankReduceSubviewLayout(int64_t resultRank,
+                                     ConversionPatternRewriter &rewriter);
+
 void runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
                          ArrayAttr gradientsOf);
 
@@ -33,7 +36,8 @@ void populateVJP(Operation *op, LAGradContext &ctx, DenseMap<Value, Value> &env,
 FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
                                OpBuilder &rewriter);
 
-FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx, ArrayAttr gradientsOf,
+FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
+                             ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
                              bool topLevel);
 

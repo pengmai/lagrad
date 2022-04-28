@@ -20,6 +20,23 @@ bool isIntOrIntTensor(Type typ) {
           typ.dyn_cast<RankedTensorType>().getElementType().isIntOrIndex());
 }
 
+AffineMap getRankReduceSubviewLayout(int64_t resultRank,
+                                     ConversionPatternRewriter &rewriter) {
+  AffineExpr expr;
+  for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
+    if (exprIdx == resultRank - 1) {
+      expr = rewriter.getAffineDimExpr(exprIdx) *
+                 rewriter.getAffineSymbolExpr(resultRank) +
+             rewriter.getAffineSymbolExpr(exprIdx);
+    } else {
+      expr = rewriter.getAffineDimExpr(exprIdx) *
+                 rewriter.getAffineSymbolExpr(exprIdx) +
+             expr;
+    }
+  }
+  return AffineMap::get(resultRank, resultRank + 1, expr);
+}
+
 SmallVector<mlir::Operation *>
 cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 OpBuilder &builder, ValueRange regionArgs,
@@ -352,6 +369,10 @@ void populateVJP(Operation *op, LAGradContext &ctx,
   if (opName == "linalg.fill") {
     // We ignore fill ops for now because we assume they don't propagate
     // gradient signal.
+    return;
+  }
+  if (opName == "memref.store") {
+    // Store ops are unsupported, so we ignore them for now.
     return;
   }
   if (opName == "scf.if") {
@@ -988,6 +1009,13 @@ void populatePrimalCache(scf::ForOp forOp,
     if (iterOp.getType().isIntOrIndexOrFloat()) {
       valuesToCache.push_back(iterOp);
     }
+    // We naïvely cache all 1d tensor values here.
+    if (auto rankedType =
+            iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
+      if (rankedType.getRank() == 1) {
+        valuesToCache.push_back(iterOp);
+      }
+    }
   }
   // As a bit of a hack, cache the values using a MemRef because it's easier
   // than modifying the iter arguments to properly use tensors.
@@ -1000,12 +1028,24 @@ void populatePrimalCache(scf::ForOp forOp,
 
   SmallVector<Value> caches;
   for (auto cacheVal : valuesToCache) {
-    assert(cacheVal.getType().isIntOrIndexOrFloat() &&
-           "Caching non-scalars not yet supported");
-    auto primalCache = rewriter.create<memref::AllocOp>(
-        cacheVal.getLoc(),
-        MemRefType::get({/*dynamic size*/ -1}, cacheVal.getType()), cacheSize);
-    caches.push_back(primalCache.getResult());
+    if (auto rankedType =
+            cacheVal.getType().dyn_cast_or_null<RankedTensorType>()) {
+      SmallVector<int64_t> shape;
+      shape.reserve(rankedType.getRank() + 1);
+      shape.push_back(-1);                       // dynamic size
+      shape.push_back(rankedType.getShape()[0]); // assume the tensor is 1d.
+      auto primalCache = rewriter.create<memref::AllocOp>(
+          cacheVal.getLoc(),
+          MemRefType::get(shape, rankedType.getElementType()), cacheSize);
+      caches.push_back(primalCache.getResult());
+    } else {
+      // Allocate space for storing scalars.
+      auto primalCache = rewriter.create<memref::AllocOp>(
+          cacheVal.getLoc(),
+          MemRefType::get({/*dynamic size*/ -1}, cacheVal.getType()),
+          cacheSize);
+      caches.push_back(primalCache.getResult());
+    }
   }
 
   // this line is older
@@ -1015,8 +1055,12 @@ void populatePrimalCache(scf::ForOp forOp,
     auto valToCache = std::get<1>(cpair);
     // newer
     // rewriter.setInsertionPointAfterValue(valToCache);
-    rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
-                                     forOp.getInductionVar());
+    if (valToCache.getType().isIntOrIndexOrFloat()) {
+      rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
+                                       forOp.getInductionVar());
+    } else {
+      // Assume it's a 1d tensor
+    }
     val_to_cached[valToCache] = ccache;
   }
 }
@@ -1105,8 +1149,46 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         Value vjp_op = nullptr;
         for (auto cpair : iterArgsToCached) {
           operandsWithIV.push_back(cpair.first);
-          auto loaded = builder.create<memref::LoadOp>(cpair.second.getLoc(),
-                                                       cpair.second, idx);
+          Value loaded;
+          if (auto tensorType =
+                  cpair.first.getType().dyn_cast_or_null<RankedTensorType>()) {
+            auto slice_layout =
+                getRankReduceSubviewLayout(tensorType.getRank(), rewriter);
+            auto resultType =
+                MemRefType::get(tensorType.getShape(),
+                                tensorType.getElementType(), slice_layout);
+            auto intToAttr = [&](int64_t i) {
+              return IntegerAttr::get(
+                  IntegerType::get(builder.getContext(), 64), i);
+            };
+            auto staticOffset = ArrayAttr::get(
+                builder.getContext(),
+                {IntegerAttr::get(
+                     IntegerType::get(builder.getContext(), 64),
+                     -9223372036854775808ULL), // This is a weird magic number
+                                               // that means "no static offset"
+                 intToAttr(0)});
+            auto staticSize = ArrayAttr::get(
+                builder.getContext(),
+                {intToAttr(1), intToAttr(tensorType.getDimSize(0))});
+            auto staticStride = ArrayAttr::get(builder.getContext(),
+                                               {intToAttr(1), intToAttr(1)});
+
+            auto view = builder.create<memref::SubViewOp>(
+                cpair.second.getLoc(), resultType, cpair.second,
+                /*dynamic shapes=*/ValueRange(idx), ValueRange(), ValueRange(),
+                /*staticShapes=*/staticOffset, staticSize, staticStride);
+            // I don't know that this is always safe
+            auto casted = builder.create<memref::CastOp>(
+                cpair.second.getLoc(), view.getResult(),
+                MemRefType::get(tensorType.getShape(),
+                                tensorType.getElementType()));
+            loaded = builder.create<memref::TensorLoadOp>(cpair.second.getLoc(),
+                                                          casted.getResult());
+          } else {
+            loaded = builder.create<memref::LoadOp>(cpair.second.getLoc(),
+                                                    cpair.second, idx);
+          }
 
           // This is to fix the case where the vjp value must be updated in the
           // body of the adjoint loop. TODO: This might not work with vectors
