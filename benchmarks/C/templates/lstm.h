@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LSTM_DATA_FILE "benchmarks/data/lstm_l2_c1024.txt"
+#define LSTM_DATA_FILE "benchmarks/data/lstm/lstm_l2_c1024.txt"
 
 typedef struct {
   int l, c, b, main_sz, extra_sz, state_sz, seq_sz;

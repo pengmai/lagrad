@@ -343,6 +343,9 @@ def test_nested_with_slice():
         < 1e-4
     )
 
+def test_pow_tensor():
+    expected = 4 * np.array([1.3, 1.4, 1.5, 1.6]) ** 3
+    assert np.sum(np.abs(extract_1d(jit_file(f"{MLIR_FILES}/cache/pow_tensor.mlir")) - expected)) < 1e5
 
 def disabled_test_if_else():
     print("if-else", jit_file(f"{MLIR_FILES}/select.mlir"))

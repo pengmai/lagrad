@@ -2,6 +2,10 @@
 #include "mlir_c_abi.h"
 #include <math.h>
 
+typedef struct {
+  F64Descriptor1D dmain_params, dextra_params;
+} LSTMGrad;
+
 extern void
 lstm_objective(int l, int c, int b, double const *__restrict main_params,
                double const *__restrict extra_params, double *__restrict state,
@@ -16,18 +20,27 @@ mlstm_objective(/*main_params=*/double *, double *, int64_t, int64_t, int64_t,
                 /*extra_params=*/double *, double *, int64_t, int64_t, int64_t,
                 /*state=*/double *, double *, int64_t, int64_t, int64_t,
                 /*sequence=*/double *, double *, int64_t, int64_t, int64_t);
+
+extern LSTMGrad
+lagrad_lstm(/*main_params=*/double *, double *, int64_t, int64_t, int64_t,
+            /*extra_params=*/double *, double *, int64_t, int64_t, int64_t,
+            /*state=*/double *, double *, int64_t, int64_t, int64_t,
+            /*sequence=*/double *, double *, int64_t, int64_t, int64_t);
+
 double *deadbeef = (double *)0xdeadbeef;
 int main() {
   LSTMInput input;
   read_lstm_instance(&input);
-  printf("%d %d %d\n", input.l, input.c, input.b);
 
-  // printf("Reference tanh: %f\n", tanh(0.5));
+  double *state = malloc(input.state_sz * sizeof(double));
+  for (size_t i = 0; i < input.state_sz; i++) {
+    state[i] = input.state[i];
+  }
 
   double loss = 0.0;
   lstm_objective(input.l, input.c, input.b, input.main_params,
-                 input.extra_params, input.state, input.sequence, &loss);
-  printf("C Primal: %f\n", loss);
+                 input.extra_params, state, input.sequence, &loss);
+  printf("C Primal: %.8e\n", loss);
 
   // loss = 0.0;
   // double dloss = 1.0;
@@ -44,10 +57,21 @@ int main() {
   //                         dmain_params, input.extra_params, dextra_params,
   //                         input.state, input.sequence, &loss, &dloss);
   // print_d_arr(dmain_params, 10);
+  for (size_t i = 0; i < input.state_sz; i++) {
+    state[i] = input.state[i];
+  }
   double mlir_p = mlstm_objective(
       deadbeef, input.main_params, 0, input.main_sz, 1, deadbeef,
-      input.extra_params, 0, input.extra_sz, 1, deadbeef, input.state, 0,
+      input.extra_params, 0, input.extra_sz, 1, deadbeef, state, 0,
       input.state_sz, 1, deadbeef, input.sequence, 0, input.seq_sz, 1);
-  printf("MLIR Primal: %f\n", mlir_p);
+  printf("MLIR Primal: %.8e\n", mlir_p);
+
+  LSTMGrad res = lagrad_lstm(deadbeef, input.main_params, 0, input.main_sz, 1,
+                             deadbeef, input.extra_params, 0, input.extra_sz, 1,
+                             deadbeef, input.state, 0, input.state_sz, 1,
+                             deadbeef, input.sequence, 0, input.seq_sz, 1);
+  print_d_arr(res.dmain_params.aligned, 10);
+  free(res.dmain_params.aligned);
+  free(res.dextra_params.aligned);
   // free_lstm_instance(&input);
 }

@@ -1030,6 +1030,7 @@ void populatePrimalCache(scf::ForOp forOp,
   for (auto cacheVal : valuesToCache) {
     if (auto rankedType =
             cacheVal.getType().dyn_cast_or_null<RankedTensorType>()) {
+      // fully cache every 1d iter arg.
       SmallVector<int64_t> shape;
       shape.reserve(rankedType.getRank() + 1);
       shape.push_back(-1);                       // dynamic size
@@ -1055,11 +1056,40 @@ void populatePrimalCache(scf::ForOp forOp,
     auto valToCache = std::get<1>(cpair);
     // newer
     // rewriter.setInsertionPointAfterValue(valToCache);
-    if (valToCache.getType().isIntOrIndexOrFloat()) {
+    if (auto tensorType =
+            valToCache.getType().dyn_cast_or_null<RankedTensorType>()) {
+      // Assume it's a 1d tensor type
+      auto slice_layout =
+          getRankReduceSubviewLayout(tensorType.getRank(), rewriter);
+      auto resultType = MemRefType::get(
+          tensorType.getShape(), tensorType.getElementType(), slice_layout);
+      auto ctx = rewriter.getContext();
+      auto intToAttr = [&](int64_t i) {
+        return IntegerAttr::get(IntegerType::get(ctx, 64), i);
+      };
+      auto staticOffset = ArrayAttr::get(
+          ctx, {IntegerAttr::get(
+                    IntegerType::get(ctx, 64),
+                    -9223372036854775808ULL), // This is a weird magic number
+                                              // that means "no static offset"
+                intToAttr(0)});
+      auto staticSize = ArrayAttr::get(
+          ctx, {intToAttr(1), intToAttr(tensorType.getDimSize(0))});
+      auto staticStride = ArrayAttr::get(ctx, {intToAttr(1), intToAttr(1)});
+
+      auto view = rewriter.create<memref::SubViewOp>(
+          valToCache.getLoc(), resultType, ccache,
+          /*dynamic shapes=*/ValueRange(forOp.getInductionVar()), ValueRange(),
+          ValueRange(),
+          /*staticShapes=*/staticOffset, staticSize, staticStride);
+      auto memref = rewriter.create<memref::BufferCastOp>(
+          valToCache.getLoc(),
+          MemRefType::get(tensorType.getShape(), tensorType.getElementType()),
+          valToCache);
+      rewriter.create<linalg::CopyOp>(valToCache.getLoc(), memref, view);
+    } else {
       rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
                                        forOp.getInductionVar());
-    } else {
-      // Assume it's a 1d tensor
     }
     val_to_cached[valToCache] = ccache;
   }

@@ -2,6 +2,17 @@
 #include <math.h>
 #include <stdlib.h>
 
+void eprint_d_arr(const double *arr, size_t n) {
+  printf("[");
+  for (size_t i = 0; i < n; i++) {
+    printf("%.6f", arr[i]);
+    if (i != n - 1) {
+      printf(", ");
+    }
+  }
+  printf("]\n");
+}
+
 double sigmoid(double x) { return 1.0 / (1.0 + exp(-x)); }
 
 // log(sum(exp(x), 2))
@@ -21,7 +32,8 @@ double logsumexp(double const *vect, int sz) {
 // The LSTM model
 void lstm_model(int hsize, double const *__restrict weight,
                 double const *__restrict bias, double *__restrict hidden,
-                double *__restrict cell, double const *__restrict input, int first_iter) {
+                double *__restrict cell, double const *__restrict input,
+                int first_iter) {
   // TODO NOTE THIS
   //__builtin_assume(hsize > 0);
 
@@ -39,28 +51,22 @@ void lstm_model(int hsize, double const *__restrict weight,
     ingate[i] = sigmoid(hidden[i] * weight[hsize + i] + bias[hsize + i]);
     outgate[i] =
         sigmoid(input[i] * weight[2 * hsize + i] + bias[2 * hsize + i]);
-    // change[i] = tanh(hidden[i] * weight[3 * hsize + i] + bias[3 * hsize + i]);
-    change[i] = sigmoid(hidden[i] * weight[3 * hsize + i] + bias[3 * hsize + i]);
+    change[i] = tanh(hidden[i] * weight[3 * hsize + i] + bias[3 * hsize + i]);
+    // change[i] = sigmoid(hidden[i] * weight[3 * hsize + i] + bias[3 * hsize +
+    // i]);
   }
 
-  if (first_iter) {
-    printf("C intermediate:\n[");
-    for (i = 0; i < hsize; i++) {
-      printf("%f", ingate[i]);
-      if (i != hsize - 1) {
-        printf(", ");
-      }
-    }
-    printf("]\n");
-  }
   // caching cell (needed)
   for (i = 0; i < hsize; i++) {
     cell[i] = cell[i] * forget[i] + ingate[i] * change[i];
   }
 
+  if (first_iter) {
+    printf("hidden:\n");
+    eprint_d_arr(&hidden[0], hsize);
+  }
   for (i = 0; i < hsize; i++) {
-    // hidden[i] = outgate[i] * tanh(cell[i]);
-    hidden[i] = outgate[i] * sigmoid(cell[i]);
+    hidden[i] = outgate[i] * tanh(cell[i]);
   }
 
   free(gates);
@@ -69,15 +75,23 @@ void lstm_model(int hsize, double const *__restrict weight,
 // Predict LSTM output given an input
 void lstm_predict(int l, int b, double const *__restrict w,
                   double const *__restrict w2, double *__restrict s,
-                  double const *__restrict x, double *__restrict x2, int first_iter) {
+                  double const *__restrict x, double *__restrict x2, int t) {
   int i;
   for (i = 0; i < b; i++) {
     x2[i] = x[i] * w2[i];
   }
+  // if (t == 10 * b) {
+  //   eprint_d_arr(x2, b);
+  // }
 
   double *xp = x2;
   for (i = 0; i <= 2 * l * b - 1; i += 2 * b) {
-    lstm_model(b, &(w[i * 4]), &(w[(i + b) * 4]), &(s[i]), &(s[i + b]), xp, first_iter && i == 0);
+    // if (t == b) {
+    //   printf("i = %d\n", i);
+    //   eprint_d_arr(xp, b);
+    // }
+    lstm_model(b, /*weight=*/&(w[i * 4]), /*bias=*/&(w[(i + b) * 4]),
+               /*hidden=*/&(s[i]), /*cell=*/&(s[i + b]), /*input=*/xp, t == b);
     xp = &(s[i]);
   }
 
@@ -102,7 +116,7 @@ void lstm_objective(int l, int c, int b, double const *__restrict main_params,
 
   // __builtin_assume(b > 0);
   for (t = 0; t <= (c - 1) * b - 1; t += b) {
-    lstm_predict(l, b, main_params, extra_params, state, input, ypred, t == 0);
+    lstm_predict(l, b, main_params, extra_params, state, input, ypred, t);
 
     lse = logsumexp(ypred, b);
     for (i = 0; i < b; i++) {
@@ -118,8 +132,7 @@ void lstm_objective(int l, int c, int b, double const *__restrict main_params,
     input = ygold;
   }
 
-  // *loss = -total / count;
-  *loss = -total;
+  *loss = -total / count;
 
   free(ypred);
   free(ynorm);
