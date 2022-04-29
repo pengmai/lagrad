@@ -48,7 +48,7 @@ func @mlstm_objective(
   %twob = arith.muli %cb, %c2 : index
   %twob_l = arith.muli %twob, %cl : index
   %cc_minus_one = arith.subi %cc, %c1 : index
-  %ub = arith.muli %cc_minus_one, %cb : index // The original C implementation uses a leq here when checking loop bounds
+  // %ub = arith.muli %cc_minus_one, %cb : index // The original C implementation uses a leq here when checking loop bounds
   %zero = arith.constant 0.0 : f64
   %zerod_t = arith.constant dense<0.0> : tensor<f64>
   %zero_b = arith.constant dense<0.0> : tensor<{{b}}xf64>
@@ -57,7 +57,9 @@ func @mlstm_objective(
   // %outgate_space = linalg.init_tensor [{{b}}] : tensor<{{b}}xf64>
   // %change_space = linalg.init_tensor [{{b}}] : tensor<{{b}}xf64>
   // %ynorm_space = linalg.init_tensor [{{b}}] : tensor<{{b}}xf64>
-  %res:3 = scf.for %t = %c0 to %ub step %cb iter_args(%total = %zero, %count = %c0, %state_outer = %state_init) -> (f64, index, tensor<{{state_sz}}xf64>) {
+  %res:3 = scf.for %raw_t = %c0 to %cc_minus_one step %c1 iter_args(%total = %zero, %count = %c0, %state_outer = %state_init) -> (f64, index, tensor<{{state_sz}}xf64>) {
+    // Workaround because we assume the loop step sizes are equal to 1
+    %t = arith.muli %raw_t, %cb : index
     // inlined lstm predict
     %x = tensor.extract_slice %sequence[%t] [{{b}}] [1] : tensor<{{seq_sz}}xf64> to tensor<{{b}}xf64>
     %w2 = tensor.extract_slice %extra_params[0] [{{b}}] [1] : tensor<{{extra_sz}}xf64> to tensor<{{b}}xf64>
@@ -69,16 +71,16 @@ func @mlstm_objective(
     //   %U = tensor.cast %x2 : tensor<{{b}}xf64> to tensor<*xf64>
     //   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
     // }
-    %xp:2 = scf.for %iv = %c0 to %twob_l step %twob iter_args(%input = %x2, %state = %state_outer) -> (tensor<{{b}}xf64>, tensor<{{state_sz}}xf64>) {
-      // In the second iteration, %input is incorrect.
-      %first_outer_iter = arith.cmpi eq, %t, %cb : index
+    %xp:2 = scf.for %raw_iv = %c0 to %cl step %c1 iter_args(%input = %x2, %state = %state_outer) -> (tensor<{{b}}xf64>, tensor<{{state_sz}}xf64>) {
+      %iv = arith.muli %raw_iv, %twob : index
+      // %first_outer_iter = arith.cmpi eq, %t, %cb : index
 
       %hidden = tensor.extract_slice %state[%iv] [{{b}}] [1] : tensor<{{state_sz}}xf64> to tensor<{{b}}xf64>
 
-      scf.if %first_outer_iter {
-        %U = tensor.cast %hidden : tensor<{{b}}xf64> to tensor<*xf64>
-        call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-      }
+      // scf.if %first_outer_iter {
+      //   %U = tensor.cast %hidden : tensor<{{b}}xf64> to tensor<*xf64>
+      //   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+      // }
       %w_idx = arith.muli %iv, %c4 : index
       %weights = tensor.extract_slice %main_params[%w_idx] [{{b}}] [1] : tensor<{{main_sz}}xf64> to tensor<{{b}}xf64>
       %iv_b = arith.addi %iv, %cb : index

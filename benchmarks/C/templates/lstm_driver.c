@@ -37,10 +37,10 @@ int main() {
     state[i] = input.state[i];
   }
 
-  double loss = 0.0;
-  lstm_objective(input.l, input.c, input.b, input.main_params,
-                 input.extra_params, state, input.sequence, &loss);
-  printf("C Primal: %.8e\n", loss);
+  // double loss = 0.0;
+  // lstm_objective(input.l, input.c, input.b, input.main_params,
+  //                input.extra_params, state, input.sequence, &loss);
+  // printf("C Primal: %.8e\n", loss);
 
   // loss = 0.0;
   // double dloss = 1.0;
@@ -52,24 +52,29 @@ int main() {
   // for (size_t i = 0; i < input.extra_sz; i++) {
   //   dextra_params[i] = 0;
   // }
+  // for (size_t i = 0; i < input.state_sz; i++) {
+  //   state[i] = input.state[i];
+  // }
 
   // enzyme_c_lstm_objective(input.l, input.c, input.b, input.main_params,
   //                         dmain_params, input.extra_params, dextra_params,
-  //                         input.state, input.sequence, &loss, &dloss);
-  // print_d_arr(dmain_params, 10);
+  //                         state, input.sequence, &loss, &dloss);
+
+  // printf("Didn't segfault\n");
+  // print_d_arr(dextra_params, 10);
   for (size_t i = 0; i < input.state_sz; i++) {
     state[i] = input.state[i];
   }
-  double mlir_p = mlstm_objective(
-      deadbeef, input.main_params, 0, input.main_sz, 1, deadbeef,
-      input.extra_params, 0, input.extra_sz, 1, deadbeef, state, 0,
-      input.state_sz, 1, deadbeef, input.sequence, 0, input.seq_sz, 1);
-  printf("MLIR Primal: %.8e\n", mlir_p);
+  // double mlir_p = mlstm_objective(
+  //     deadbeef, input.main_params, 0, input.main_sz, 1, deadbeef,
+  //     input.extra_params, 0, input.extra_sz, 1, deadbeef, state, 0,
+  //     input.state_sz, 1, deadbeef, input.sequence, 0, input.seq_sz, 1);
+  // printf("MLIR Primal: %.8e\n", mlir_p);
 
   LSTMGrad res = lagrad_lstm(deadbeef, input.main_params, 0, input.main_sz, 1,
                              deadbeef, input.extra_params, 0, input.extra_sz, 1,
-                             deadbeef, input.state, 0, input.state_sz, 1,
-                             deadbeef, input.sequence, 0, input.seq_sz, 1);
+                             deadbeef, state, 0, input.state_sz, 1, deadbeef,
+                             input.sequence, 0, input.seq_sz, 1);
   print_d_arr(res.dmain_params.aligned, 10);
   free(res.dmain_params.aligned);
   free(res.dextra_params.aligned);

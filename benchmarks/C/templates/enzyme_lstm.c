@@ -35,7 +35,7 @@ void lstm_model(int hsize, double const *__restrict weight,
                 double *__restrict cell, double const *__restrict input,
                 int first_iter) {
   // TODO NOTE THIS
-  //__builtin_assume(hsize > 0);
+  // __builtin_assume(hsize > 0);
 
   double *gates = (double *)malloc(4 * hsize * sizeof(double));
   double *forget = &(gates[0]);
@@ -61,10 +61,10 @@ void lstm_model(int hsize, double const *__restrict weight,
     cell[i] = cell[i] * forget[i] + ingate[i] * change[i];
   }
 
-  if (first_iter) {
-    printf("hidden:\n");
-    eprint_d_arr(&hidden[0], hsize);
-  }
+  // if (first_iter) {
+  //   printf("hidden:\n");
+  //   eprint_d_arr(&hidden[0], hsize);
+  // }
   for (i = 0; i < hsize; i++) {
     hidden[i] = outgate[i] * tanh(cell[i]);
   }
@@ -80,9 +80,9 @@ void lstm_predict(int l, int b, double const *__restrict w,
   for (i = 0; i < b; i++) {
     x2[i] = x[i] * w2[i];
   }
-  // if (t == 10 * b) {
-  //   eprint_d_arr(x2, b);
-  // }
+  if (t == 10 * b) {
+    eprint_d_arr(x2, b);
+  }
 
   double *xp = x2;
   for (i = 0; i <= 2 * l * b - 1; i += 2 * b) {
@@ -148,9 +148,9 @@ void enzyme_c_lstm_objective(int l, int c, int b, double const *main_params,
                              double *dextra_params, double *state,
                              double const *sequence, double *loss,
                              double *dloss) {
-  // __enzyme_autodiff(lstm_objective, enzyme_const, l, enzyme_const, c,
-  //                   enzyme_const, b, enzyme_dup, main_params, dmain_params,
-  //                   enzyme_dup, extra_params, dextra_params, enzyme_const,
-  //                   state, enzyme_const, sequence, enzyme_dupnoneed, loss,
-  //                   dloss);
+  __enzyme_autodiff(lstm_objective, enzyme_const, l, enzyme_const, c,
+                    enzyme_const, b, enzyme_dup, main_params, dmain_params,
+                    enzyme_dup, extra_params, dextra_params, enzyme_const,
+                    state, enzyme_const, sequence, enzyme_dupnoneed, loss,
+                    dloss);
 }
