@@ -85,7 +85,20 @@ module  {
         %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
 
         // The triangular matrix-vector multiplication
-        %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        %out_1 = linalg.generic
+          {
+            indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>, affine_map<(d0, d1) -> (d0)>],
+            iterator_types = ["parallel", "reduction"]
+          }
+          ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>)
+          outs(%len_d_zero : tensor<{{d}}xf64>) {
+        ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+          %0 = arith.mulf %arg0, %arg1 : f64
+          %1 = arith.addf %0, %arg2 : f64
+          linalg.yield %1 : f64
+        } -> tensor<{{d}}xf64>
+
+        // %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
         %Qxcentered = arith.addf %out_0, %out_1 : tensor<{{d}}xf64>
 
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
