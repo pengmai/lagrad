@@ -103,7 +103,7 @@ void ecompute_zach_weight_error(double const *w, double *err) {
   *err = 1 - (*w) * (*w);
 }
 
-void enzyme_compute_reproj_error(double const *cam, double *dcam,
+void dcompute_reproj_error(double const *cam, double *dcam,
                                  double const *X, double *dX, double const *w,
                                  double *wb, double const *feat, double *err,
                                  double *derr) {
@@ -112,7 +112,7 @@ void enzyme_compute_reproj_error(double const *cam, double *dcam,
                     err, derr);
 }
 
-void enzyme_compute_w_error(double const *w, double *wb, double *err,
+void dcompute_w_error(double const *w, double *wb, double *err,
                             double *derr) {
   __enzyme_autodiff(ecompute_zach_weight_error, enzyme_dup, w, wb,
                     enzyme_dupnoneed, err, derr);
