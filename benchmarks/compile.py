@@ -128,6 +128,7 @@ def compile_mlir(contents, output, lower_type="loops"):
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
+            # "-inline",
             "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
@@ -178,6 +179,9 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
 
 
 def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
+    def hand_opt_replace(str):
+        pass
+
     assert emit in ["llvm", "jit", "obj"], "Invalid emit type"
     llvm_dialect = run_safe(
         [
@@ -248,6 +252,20 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
 
 
 def compile_enzyme(contents, output, emit="object"):
+    def replace_hand_optimization(lines: str):
+        warnings.warn("Running hand tracking memset_pattern replacement for Enzyme/C")
+        memset_pattern = "@.memset_pattern = private unnamed_addr constant [3 x double] [double 1.000000e+00, double 1.000000e+00, double 1.000000e+00], align 16"
+        memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %0, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
+
+        def process_line(line: str):
+            if line.lstrip().startswith("call void @memset_pattern16"):
+                return memset_call
+            elif line.startswith("@.memset_pattern ="):
+                return memset_pattern
+            return line
+
+        return "\n".join([process_line(line) for line in lines.splitlines()])
+
     assert emit in ["object", "llvm"], "emit must be one of 'object' and 'llvm'"
     includes = [f"-I{DRIVER_INCLUDES}", f"-I{SYSTEM_INCLUDES}"]
     preenzyme = run_safe(
@@ -268,11 +286,10 @@ def compile_enzyme(contents, output, emit="object"):
         stdin=contents,
         suppress_stderr=True,
     )
+    preenzyme = replace_hand_optimization(preenzyme.decode("utf-8")).encode("utf-8")
     postenzyme = run_safe(
         [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
     )
-    with open("DELETEME_ba_postenzyme.ll", "w") as f:
-        f.write(postenzyme.decode("utf-8"))
     if emit == "object":
         run_safe([LLC_12, "-filetype=obj", "-o", f"{TMP}/{output}"], stdin=postenzyme)
     elif emit == "llvm":
