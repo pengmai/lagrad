@@ -1010,12 +1010,12 @@ void populatePrimalCache(scf::ForOp forOp,
       valuesToCache.push_back(iterOp);
     }
     // We naïvely cache all 1d tensor values here.
-    if (auto rankedType =
-            iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
-      if (rankedType.getRank() == 1) {
-        valuesToCache.push_back(iterOp);
-      }
-    }
+    // if (auto rankedType =
+    //         iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
+    //   if (rankedType.getRank() == 1) {
+    //     valuesToCache.push_back(iterOp);
+    //   }
+    // }
   }
   // As a bit of a hack, cache the values using a MemRef because it's easier
   // than modifying the iter arguments to properly use tensors.
@@ -1173,6 +1173,7 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         SmallVector<Value> regionArgs;
         Value idx = builder.create<arith::SubIOp>(loc, forOp.upperBound(), iv);
         Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+        idx = builder.create<arith::AddIOp>(loc, idx, forOp.lowerBound());
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         regionArgs.push_back(idx);
         regionArgs.push_back(forOp.getResult(result_idx));

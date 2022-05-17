@@ -12,6 +12,7 @@ add_mlir_dialect_library(MLIRStandalone
         ActivityAnalysis.cpp
         DeadCodeElimination.cpp
         LoopAllocHoisting.cpp
+        LinalgCanonicalize.cpp
         Utils.cpp
 
         ADDITIONAL_HEADER_DIRS

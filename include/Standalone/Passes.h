@@ -21,5 +21,7 @@ std::unique_ptr<mlir::Pass> createStaticAllocsPass();
 std::unique_ptr<mlir::Pass> createStandaloneDCEPass();
 
 std::unique_ptr<mlir::Pass> createLoopHoistingPass();
+
+std::unique_ptr<mlir::Pass> createLinalgCanonicalizePass();
 } // end namespace Standalone
 } // end namespace mlir
