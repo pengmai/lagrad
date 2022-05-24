@@ -15,10 +15,7 @@ from compile import (
     link_and_run,
 )
 from jinja2 import Environment, PackageLoader, select_autoescape
-import git
-
-repo = git.Repo(search_parent_directories=True)
-commit = repo.head.object.hexsha
+from tqdm import tqdm
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 driver_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
@@ -144,7 +141,7 @@ def loop_main(args):
     # mlir_templ = mlir_env.get_template("DELETEME_nested_loop_buf.mlir")
     mlir_templ = mlir_env.get_template("nested_loop_lagrad.mlir")
 
-    config = {"application": "loop", "commit": commit, "n": 1024, "k": 512, "d": 512}
+    config = {"application": "loop", "n": 1024, "k": 512, "d": 512}
     if args.print:
         print(mlir_templ.render(**config))
         return
@@ -164,7 +161,7 @@ def loop_main(args):
 
 
 def trimatvec_main(args):
-    config = {"application": "trimatvec", "commit": commit, "n": 4096, "method": "tri"}
+    config = {"application": "trimatvec", "n": 4096, "method": "tri"}
     assert config["method"] in [
         "full",
         "tri",
@@ -172,10 +169,10 @@ def trimatvec_main(args):
     ], f"Unexpected method: {config['method']}"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    outfile = osp.join(
-        args.results_dir,
-        f"{timestamp}_trmv_{config['n']}.json",
-    )
+    # outfile = osp.join(
+    #     args.results_dir,
+    #     f"{timestamp}_trmv_{config['n']}.json",
+    # )
     if args.print:
         mlir_templ = mlir_env.get_template("trimatvec_enzyme.mlir")
         print(mlir_templ.render(**config))
@@ -199,36 +196,110 @@ def nestedloop_main(args):
     pass
 
 
-def main():
-    driver_templ = driver_env.get_template("microbenchmark.c")
+SIZES = {"matmul": [16, 32, 64, 128, 256, 512, 1024]}
+
+
+def main(args):
+    assert args.application in [
+        "vecadd",
+        "dot",
+        "matmul",
+    ], f"Unsupported application {args.application}"
+    driver_templ = driver_env.get_template(f"microbench_{args.application}_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     mlir_templ = mlir_env.get_template("microbenchmark.mlir")
+    enzyme_c_templ = driver_env.get_template("microbenchmark_enzyme.c")
+    enzyme_mlir_templ = mlir_env.get_template(
+        f"microbenchmarks/{args.application}.mlir"
+    )
     c_templ = driver_env.get_template("microkernels.c")
-    config = {"n": 1000, "k": 25, "d": 10}
-    compile_mlir(mlir_templ.render(**config).encode("utf-8"), "microbenchmark_mlir.o")
-    compile_c(driver_templ.render(**config).encode("utf-8"), "microbenchmark_driver.o")
-    compile_c(c_templ.render(**config).encode("utf-8"), "microbench_c.o")
-    compile_c(
-        helpers_template.render(**config).encode("utf-8"), "microbenchmark_helpers.o"
-    )
-    output = link_and_run(
-        [
-            "microbenchmark_mlir.o",
-            "microbenchmark_driver.o",
-            "microbenchmark_helpers.o",
-            "microbench_c.o",
-        ],
-        "microbenchmark.out",
-    )
-    print(output.decode("utf-8"))
+    sizes = SIZES[args.application][-1:]
+    final_df = None
+    with tqdm(sizes) as t:
+        for size in t:
+            config = {"n": size}
 
+            if args.print:
+                # print(mlir_templ.render(**config))
+                print(enzyme_mlir_templ.render(**config))
+                return
+
+            compile_mlir(
+                mlir_templ.render(**config).encode("utf-8"), "microbenchmark_mlir.o"
+            )
+            compile_mlir_to_enzyme(
+                enzyme_mlir_templ.render(**config).encode("utf-8"),
+                "microbenchmark_enzyme_mlir.o",
+                emit="obj",
+            )
+            compile_c(
+                driver_templ.render(**config).encode("utf-8"), "microbenchmark_driver.o"
+            )
+            # compile_c(c_templ.render(**config).encode("utf-8"), "microbench_c.o")
+            compile_c(helpers_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
+            compile_enzyme(
+                enzyme_c_templ.render(**config).encode("utf-8"),
+                "microbenchmark_enzyme_c.o",
+            )
+            stdout = link_and_run(
+                [
+                    "microbenchmark_mlir.o",
+                    "microbenchmark_driver.o",
+                    "microbenchmark_enzyme_c.o",
+                    "microbenchmark_enzyme_mlir.o",
+                    "mlir_c_abi.o",
+                ],
+                "microbenchmark.out",
+            ).decode("utf-8")
+            try:
+                lines = stdout.splitlines()
+                keys = ["LAGrad", "Enzyme/MLIR", "Enzyme/C"]
+                assert len(lines) == len(keys), "Unexpected number of lines"
+                results = pd.DataFrame.from_dict(
+                    {key: json.loads(line) for key, line in zip(keys, lines)}
+                )
+                results.columns = pd.MultiIndex.from_product(
+                    [[config["n"]], results.columns]
+                )
+                if final_df is None:
+                    final_df = results
+                else:
+                    final_df = final_df.join(results)
+            except (json.JSONDecodeError, Exception):
+                print("Failed to parse output")
+                print(stdout)
+
+    print(final_df.to_csv(sep="\t", index=False))
+
+
+df_1_txt = """
+LAGrad	Enzyme/MLIR	Enzyme/C
+223	1145	313
+194	373	310
+193	372	310
+194	372	311
+194	372	310
+193	372	309
+"""
+df_2_txt = """
+LAGrad	Enzyme/MLIR	Enzyme/C
+223	1145	313
+194	393	340
+193	392	340
+194	392	341
+194	392	340
+193	392	349
+"""
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results-dir", default="benchmarks/results")
     parser.add_argument("--print", "-p", action="store_true")
+    parser.add_argument("--application", default="vecadd")
     args = parser.parse_args()
 
+    if not args.print:
+        print(f"Running application {args.application}")
     # trimatvec_main(args)
     # loop_main(args)
-    cache_main(args)
+    # cache_main(args)
+    main(args)
