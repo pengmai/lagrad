@@ -84,48 +84,48 @@ func @lagrad_vecadd(%arg0: tensor<{{n}}xf64>, %arg1: tensor<{{n}}xf64>, %g: tens
   return %res : tensor<{{n}}xf64>
 }
 
-#map0 = affine_map<(d0) -> ()>
-#map1 = affine_map<(d0) -> (d0)>
-func @__grad_mvectorscalar(%arg0: tensor<16384xf64>, %arg1: f64, %arg2: tensor<16384xf64>) -> f64 {
-  %cst = arith.constant dense<0.000000e+00> : tensor<f64>
-  %0 = linalg.generic {indexing_maps = [#map1, #map1, #map0], iterator_types = ["reduction"]} ins(%arg0, %arg2 : tensor<16384xf64>, tensor<16384xf64>) outs(%cst : tensor<f64>) {
-  ^bb0(%arg3: f64, %arg4: f64, %arg5: f64):  // no predecessors
-    // %2 = arith.mulf %arg4, %arg3 : f64
-    %3 = arith.addf %arg4, %arg5 : f64
-    linalg.yield %3 : f64
-  } -> tensor<f64>
-  %1 = tensor.extract %0[] : tensor<f64>
-  return %1 : f64
-}
-func @lagrad_vecscal(%arg0: tensor<16384xf64>, %arg1: f64, %arg2: tensor<16384xf64>) -> f64 {
-  %0 = call @__grad_mvectorscalar(%arg0, %arg1, %arg2) : (tensor<16384xf64>, f64, tensor<16384xf64>) -> f64
-  return %0 : f64
-}
-
-// func @mvectorscalar(%arg0: tensor<{{n}}xf64>, %arg1: f64) -> tensor<{{n}}xf64> {
-//   %space = arith.constant dense<0.0> : tensor<{{n}}xf64>
-//   %res = linalg.generic
-//     {
-//       indexing_maps = [#map, #map],
-//       iterator_types = ["parallel"]
-//     }
-//     ins(%arg0 : tensor<{{n}}xf64>)
-//     outs(%space : tensor<{{n}}xf64>) {
-//   ^bb0(%arg2: f64, %arg3: f64):
-//     %0 = arith.mulf %arg2, %arg1 : f64
-//     linalg.yield %0 : f64
-//   } -> tensor<{{n}}xf64>
-//   return %res : tensor<{{n}}xf64>
+// #map0 = affine_map<(d0) -> ()>
+// #map1 = affine_map<(d0) -> (d0)>
+// func @__grad_mvectorscalar(%arg0: tensor<{{n}}xf64>, %arg1: f64, %arg2: tensor<{{n}}xf64>) -> f64 {
+//   %cst = arith.constant dense<0.000000e+00> : tensor<f64>
+//   %0 = linalg.generic {indexing_maps = [#map1, #map1, #map0], iterator_types = ["reduction"]} ins(%arg0, %arg2 : tensor<{{n}}xf64>, tensor<{{n}}xf64>) outs(%cst : tensor<f64>) {
+//   ^bb0(%arg3: f64, %arg4: f64, %arg5: f64):  // no predecessors
+//     %2 = arith.mulf %arg4, %arg3 : f64
+//     %3 = arith.addf %2, %arg5 : f64
+//     linalg.yield %3 : f64
+//   } -> tensor<f64>
+//   %1 = tensor.extract %0[] : tensor<f64>
+//   return %1 : f64
+// }
+// func @lagrad_vecscal(%arg0: tensor<{{n}}xf64>, %arg1: f64, %arg2: tensor<{{n}}xf64>) -> f64 {
+//   %0 = call @__grad_mvectorscalar(%arg0, %arg1, %arg2) : (tensor<{{n}}xf64>, f64, tensor<{{n}}xf64>) -> f64
+//   return %0 : f64
 // }
 
-// func @lagrad_vecscal(%arg0: tensor<{{n}}xf64>, %arg1: f64, %g: tensor<{{n}}xf64>) -> f64 {
-//   %f = constant @mvectorscalar : (tensor<{{n}}xf64>, f64) -> tensor<{{n}}xf64>
-//   %df = standalone.grad %f {of = [1], grad_signal = true} :
-//     (tensor<{{n}}xf64>, f64) -> tensor<{{n}}xf64>,
-//     (tensor<{{n}}xf64>, f64, tensor<{{n}}xf64>) -> f64
-//   %res = call_indirect %df(%arg0, %arg1, %g) : (tensor<{{n}}xf64>, f64, tensor<{{n}}xf64>) -> f64
-//   return %res : f64
-// }
+func @mvectorscalar(%arg0: tensor<{{n}}xf64>, %arg1: f64) -> tensor<{{n}}xf64> {
+  %space = arith.constant dense<0.0> : tensor<{{n}}xf64>
+  %res = linalg.generic
+    {
+      indexing_maps = [#map, #map],
+      iterator_types = ["parallel"]
+    }
+    ins(%arg0 : tensor<{{n}}xf64>)
+    outs(%space : tensor<{{n}}xf64>) {
+  ^bb0(%arg2: f64, %arg3: f64):
+    %0 = arith.mulf %arg2, %arg1 : f64
+    linalg.yield %0 : f64
+  } -> tensor<{{n}}xf64>
+  return %res : tensor<{{n}}xf64>
+}
+
+func @lagrad_vecscal(%arg0: tensor<{{n}}xf64>, %arg1: f64, %g: tensor<{{n}}xf64>) -> f64 {
+  %f = constant @mvectorscalar : (tensor<{{n}}xf64>, f64) -> tensor<{{n}}xf64>
+  %df = standalone.grad %f {of = [1], grad_signal = true} :
+    (tensor<{{n}}xf64>, f64) -> tensor<{{n}}xf64>,
+    (tensor<{{n}}xf64>, f64, tensor<{{n}}xf64>) -> f64
+  %res = call_indirect %df(%arg0, %arg1, %g) : (tensor<{{n}}xf64>, f64, tensor<{{n}}xf64>) -> f64
+  return %res : f64
+}
 
 func @matmul(%A: tensor<{{n}}x{{n}}xf64>, %B: tensor<{{n}}x{{n}}xf64>) -> tensor<{{n}}x{{n}}xf64> {
   %zero = arith.constant 0.0 : f64
