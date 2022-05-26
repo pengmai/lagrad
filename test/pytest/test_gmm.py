@@ -38,3 +38,16 @@ def test_main_term():
     assert dmeans == expected_means
     assert dQs == expected_Qs
     assert dLs == expected_Ls
+
+
+def test_compressed_vecmat():
+    expected = [-38.41, 29.46, -0.3, 5.4, 0]
+    assert extract_1d(jit_file(f"{MLIR_FILES}/gmm/compressed_vecmat.mlir")) == expected
+
+
+def test_compressed_outer_product():
+    expected = [-10.23, 21.45, -13.86, 3.96, -20.8, 13.44, -3.84, -8.82, 2.52, 1.44]
+    assert (
+        extract_1d(jit_file(f"{MLIR_FILES}/gmm/compressed_outer_product.mlir"))
+        == expected
+    )
