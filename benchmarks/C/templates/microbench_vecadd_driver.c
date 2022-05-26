@@ -5,8 +5,8 @@
 #include <sys/time.h>
 
 #define NUM_RUNS 6
-// #define N {{n}}
-#define N 1024
+#define N {{n}}
+// #define N 1024
 double *deadbeef = (double *)0xdeadbeef;
 
 extern F64Descriptor1D
