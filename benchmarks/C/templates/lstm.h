@@ -52,6 +52,20 @@ void read_lstm_instance(LSTMInput *input) {
   fclose(fd);
 }
 
+void read_ref_grad(const char *ffilename, int main_sz, int extra_sz,
+                   double *ref_jacobian) {
+  FILE *fp = fopen(ffilename, "r");
+  if (!fp) {
+    fprintf(stderr, "Failed to open file: %s\n", ffilename);
+    exit(1);
+  }
+
+  for (size_t i = 0; i < main_sz + extra_sz; i++) {
+    fscanf(fp, "%lf", &ref_jacobian[i]);
+  }
+  fclose(fp);
+}
+
 void free_lstm_instance(LSTMInput *input) {
   free(input->main_params);
   free(input->extra_params);
