@@ -31,6 +31,18 @@ elstm_objective(/*main_params=*/double *, double *, int64_t, int64_t, int64_t,
                 /*sequence=*/double *, double *, int64_t, int64_t, int64_t,
                 /*out=*/double *, double *, int64_t);
 
+extern void grad_lstm_model_hb(
+    /*weight=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*dweight=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*bias=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*dbias=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*hidden=*/double *, double *, int64_t, int64_t, int64_t,
+    /*dhidden=*/double *, double *, int64_t, int64_t, int64_t,
+    /*cell=*/double *, double *, int64_t, int64_t, int64_t,
+    /*dcell=*/double *, double *, int64_t, int64_t, int64_t,
+    /*input=*/double *, double *, int64_t, int64_t, int64_t,
+    /*dinput=*/double *, double *, int64_t, int64_t, int64_t);
+
 extern LSTMGrad
 lagrad_lstm(/*main_params=*/double *, double *, int64_t, int64_t, int64_t,
             /*extra_params=*/double *, double *, int64_t, int64_t, int64_t,
@@ -77,7 +89,105 @@ unsigned long collect_enzyme_c_lstm(LSTMInput input, double *state,
 }
 
 double *deadbeef = (double *)0xdeadbeef;
+int lstm_model_main() {
+  LSTMInput input;
+  read_lstm_instance(&input);
+  int b = input.b;
+  size_t weight_size = 4 * b;
+  double *weight = input.main_params;
+  double *weightb = calloc(weight_size, sizeof(double));
+  double *bias = &input.main_params[weight_size];
+  double *biasb = calloc(weight_size, sizeof(double));
+  double *hidden = malloc(b * sizeof(double));
+  memcpy(hidden, &input.state[0], input.b * sizeof(double));
+  double *hiddenb = calloc(b, sizeof(double));
+  for (size_t i = 0; i < b; i++) {
+    hiddenb[i] = 1.0;
+  }
+
+  double *cell = malloc(b * sizeof(double));
+  memcpy(cell, &input.state[b], b * sizeof(double));
+  double *cellb = calloc(b, sizeof(double));
+
+  double *_input = &input.sequence[0];
+  double *_inputb = calloc(b, sizeof(double));
+  grad_lstm_model_hb(deadbeef, weight, 0, 4, b, b, 1, deadbeef, weightb, 0, 4,
+                     b, b, 1, deadbeef, bias, 0, 4, b, b, 1, deadbeef, biasb, 0,
+                     4, b, b, 1, deadbeef, hidden, 0, b, 1, deadbeef, hiddenb,
+                     0, b, 1, deadbeef, cell, 0, b, 1, deadbeef, cellb, 0, b, 1,
+                     deadbeef, _input, 0, b, 1, deadbeef, _inputb, 0, b, 1);
+  // print_d_arr_2d(weightb, 4, b);
+  // print_d_arr_2d(biasb, 4, b);
+  // print_d_arr(cellb, b);
+  // print_d_arr(_inputb, b);
+  // print_d_arr(hiddenb, b);
+  free_lstm_instance(&input);
+  return 0;
+}
+
+extern void grad_predict_hb(
+    /*w=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*dw=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*w2=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*dw2=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*s=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*ds=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*x=*/double *, double *, int64_t, int64_t, int64_t,
+    /*x2=*/double *, double *, int64_t, int64_t, int64_t,
+    /*dx2=*/double *, double *, int64_t, int64_t, int64_t);
+extern void predict_hb(
+    /*w=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*w2=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*s=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t,
+    /*x=*/double *, double *, int64_t, int64_t, int64_t,
+    /*x2=*/double *, double *, int64_t, int64_t, int64_t);
+
 int main() {
+  LSTMInput input;
+  read_lstm_instance(&input);
+  int b = input.b;
+  double *main_paramsb = calloc(4 * 4 * b, sizeof(double));
+  double *extra_paramsb = calloc(3 * b, sizeof(double));
+  double *state = malloc(2 * 2 * b * sizeof(double));
+  memcpy(state, &input.state[0], 2 * 2 * b * sizeof(double));
+  double *stateb = calloc(2 * 2 * b, sizeof(double));
+  double *x2 = malloc(b * sizeof(double));
+  double *dx2 = malloc(b * sizeof(double));
+  for (size_t i = 0; i < b; i++) {
+    dx2[i] = 1.0;
+  }
+  // predict_hb(deadbeef, input.main_params, 0, 4, 4, b, 4 * b, b, 1, deadbeef,
+  //            input.extra_params, 0, 3, b, b, 1, deadbeef, state, 0, input.l, 2,
+  //            b, 2 * b, b, 1, deadbeef, input.sequence, 0, b, 1, deadbeef, x2, 0,
+  //            b, 1);
+  // print_d_arr(x2, b);
+  grad_predict_hb(deadbeef, input.main_params, 0, 4, 4, b, 4 * b, b, 1,
+                  deadbeef, main_paramsb, 0, 4, 4, b, 4 * b, b, 1, deadbeef,
+                  input.extra_params, 0, 3, b, b, 1, deadbeef, extra_paramsb,
+                  0, 3, b, b, 1, deadbeef, state, 0, input.l, 2, b, 2 * b, b,
+                  1, deadbeef, stateb, 0, input.l, 2, b, 2 * b, b, 1,
+                  deadbeef, input.sequence, 0, b, 1, deadbeef, x2, 0, b, 1,
+                  deadbeef, dx2, 0, b, 1);
+  // print_d_arr_3d(main_paramsb, 4, 4, b);
+  // print_d_arr_2d(extra_paramsb, 3, b);
+  print_d_arr_2d(stateb, 4, b);
+  free(main_paramsb);
+  free(extra_paramsb);
+  free(state);
+  free(stateb);
+  free(x2);
+  free(dx2);
+  free_lstm_instance(&input);
+  return 0;
+}
+
+int benchmark_main() {
   LSTMInput input;
   read_lstm_instance(&input);
   double *ref_jacobian =
@@ -130,4 +240,5 @@ int main() {
   free(ref_jacobian);
   free(state);
   free_lstm_instance(&input);
+  return 0;
 }

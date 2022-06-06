@@ -15,8 +15,11 @@ c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 def main(args):
     driver_templ = c_env.get_template("lstm_driver.c")
     enzyme_c_templ = c_env.get_template("enzyme_lstm.c")
+    enzyme_mlir_templ = mlir_env.get_template("lstm_enzyme.mlir")
     helpers_templ = c_env.get_template("mlir_c_abi.c")
     lagrad_templ = mlir_env.get_template("lstm.mlir")
+    hand_buf_templ = mlir_env.get_template("lstm_hand_bufferized.mlir")
+    # lagrad_hand_diff_templ = mlir_env.get_template("lstm_hand_differentiated.mlir")
 
     l, c, b = 2, 1024, 14
     config = {
@@ -30,15 +33,32 @@ def main(args):
     }
 
     if args.print:
-        print(lagrad_templ.render(**config))
+        print(hand_buf_templ.render(**config))
+        # print(lagrad_templ.render(**config))
+        # print(enzyme_mlir_templ.render(**config))
+        # print(lagrad_hand_diff_templ.render(**config))
         return
 
+    compile_mlir(hand_buf_templ.render(**config).encode("utf-8"), "lstm_handbuf.o")
     compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
     compile_c(driver_templ.render(**config).encode("utf-8"), "lstm_driver.o")
     compile_c(helpers_templ.render(**config).encode("utf-8"), "mlir_c_abi.o")
     compile_enzyme(enzyme_c_templ.render(**config).encode("utf-8"), "lstm_enzyme_c.o")
+    compile_mlir_to_enzyme(
+        enzyme_mlir_templ.render(**config).encode("utf-8"),
+        "lstm_enzyme_mlir.o",
+        emit="obj",
+    )
     stdout = link_and_run(
-        ["lstm_driver.o", "mlir_c_abi.o", "lstm_lagrad.o", "lstm_enzyme_c.o"],
+        [
+            "lstm_driver.o",
+            "mlir_c_abi.o",
+            "lstm_lagrad.o",
+            "lstm_handbuf.o",
+            "lstm_enzyme_c.o",
+            # "lstm_cpp_ref.o",
+            "lstm_enzyme_mlir.o",
+        ],
         "lstm_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
