@@ -517,7 +517,7 @@ func @grad_lstm_model_hb(
 }
 
 func @predict_hb(
-  %w: memref<4x4x{{b}}xf64>,
+  %w: memref<{{l}}x2x4x{{b}}xf64>,
   %w2: memref<3x{{b}}xf64>,
   %s: memref<{{l}}x2x{{b}}xf64>,
   %x: memref<{{b}}xf64, #view>,
@@ -542,10 +542,8 @@ func @predict_hb(
   %cl = arith.constant {{l}} : index
   %c2b = arith.constant {{2 * b}} : index
   scf.for %iv = %c0 to %cl step %c1 {
-    %tiv = arith.muli %iv, %c2 : index
-    %tiv1 = arith.addi %tiv, %c1 : index
-    %weight = memref.subview %w[%tiv, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
-    %bias = memref.subview %w[%tiv1, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %weight = memref.subview %w[%iv, 0, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %bias = memref.subview %w[%iv, 1, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
     %hidden = memref.subview %s[%iv, 0, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
     %cell = memref.subview %s[%iv, 1, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
 
@@ -575,8 +573,8 @@ func @predict_hb(
 }
 
 func @grad_predict_hb(
-  %w: memref<4x4x{{b}}xf64>,
-  %dw: memref<4x4x{{b}}xf64>,
+  %w: memref<{{l}}x2x4x{{b}}xf64>,
+  %dw: memref<{{l}}x2x4x{{b}}xf64>,
   %w2: memref<3x{{b}}xf64>,
   %dw2: memref<3x{{b}}xf64>,
   %s: memref<{{l}}x2x{{b}}xf64>,
@@ -612,10 +610,8 @@ func @grad_predict_hb(
   scf.for %iv = %c0 to %cl step %c1 {
     %cache_slice = memref.subview %cache_x[%iv, 0] [1, {{b}}] [1, 1] : memref<{{l}}x{{b}}xf64> to memref<{{b}}xf64, #view>
     linalg.copy(%x2, %cache_slice) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
-    %tiv = arith.muli %iv, %c2 : index
-    %tiv1 = arith.addi %tiv, %c1 : index
-    %weight = memref.subview %w[%tiv, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
-    %bias = memref.subview %w[%tiv1, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %weight = memref.subview %w[%iv, 0, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %bias = memref.subview %w[%iv, 1, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
     %hidden = memref.subview %s[%iv, 0, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
     %cell = memref.subview %s[%iv, 1, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
     call @lstm_model_hb(%weight, %bias, %hidden, %cell, %x2) : (
@@ -664,15 +660,13 @@ func @grad_predict_hb(
   scf.for %raw_iv = %c0 to %cl step %c1 {
     %iv_0 = arith.subi %cl, %raw_iv : index
     %iv = arith.subi %iv_0, %c1 : index
-    %tiv = arith.muli %iv, %c2 : index
-    %tiv1 = arith.addi %tiv, %c1 : index
     %orig_x = memref.subview %cache_x[%iv, 0] [1, {{b}}] [1, 1] : memref<{{l}}x{{b}}xf64> to memref<{{b}}xf64, #view>
     linalg.copy(%orig_x, %x2) : memref<{{b}}xf64, #view>, memref<{{b}}xf64>
 
-    %weight = memref.subview %w[%tiv, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
-    %dweight = memref.subview %dw[%tiv, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
-    %bias = memref.subview %w[%tiv1, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
-    %dbias = memref.subview %dw[%tiv1, 0, 0] [1, 4, {{b}}] [1, 1, 1] : memref<4x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %weight = memref.subview %w[%iv, 0, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %dweight = memref.subview %dw[%iv, 0, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %bias = memref.subview %w[%iv, 1, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
+    %dbias = memref.subview %dw[%iv, 1, 0, 0] [1, 1, 4, {{b}}] [1, 1, 1, 1] : memref<{{l}}x2x4x{{b}}xf64> to memref<4x{{b}}xf64, #view2>
     %hidden = memref.subview %s_copy[%iv, 0, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
     %dhidden = memref.subview %ds[%iv, 0, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
     %cell = memref.subview %s_copy[%iv, 1, 0] [1, 1, {{b}}] [1, 1, 1] : memref<{{l}}x2x{{b}}xf64> to memref<{{b}}xf64, #view>
@@ -714,8 +708,8 @@ func @grad_predict_hb(
 }
 
 func @grad_lstm_objective_hb(
-  %main_params: memref<4x4x{{b}}xf64>,
-  %dmain_params: memref<4x4x{{b}}xf64>,
+  %main_params: memref<{{l}}x2x4x{{b}}xf64>,
+  %dmain_params: memref<{{l}}x2x4x{{b}}xf64>,
   %extra_params: memref<3x{{b}}xf64>,
   %dextra_params: memref<3x{{b}}xf64>,
   %state: memref<{{l}}x2x{{b}}xf64>,
@@ -738,7 +732,7 @@ func @grad_lstm_objective_hb(
     %all_state_slice = memref.subview %all_states[%tv, 0, 0, 0] [1, {{l}}, 2, {{b}}] [1, 1, 1, 1] : memref<?x{{l}}x2x{{b}}xf64> to memref<{{l}}x2x{{b}}xf64, #view3>
     linalg.copy(%state, %all_state_slice) : memref<{{l}}x2x{{b}}xf64>, memref<{{l}}x2x{{b}}xf64, #view3>
     call @predict_hb(%main_params, %extra_params, %state, %input, %ypred) : (
-      memref<4x4x{{b}}xf64>,
+      memref<{{l}}x2x4x{{b}}xf64>,
       memref<3x{{b}}xf64>,
       memref<{{l}}x2x{{b}}xf64>,
       memref<{{b}}xf64, #view>,
@@ -838,8 +832,8 @@ func @grad_lstm_objective_hb(
       %ypred,
       %dypred
     ) : (
-      memref<4x4x{{b}}xf64>,
-      memref<4x4x{{b}}xf64>,
+      memref<{{l}}x2x4x{{b}}xf64>,
+      memref<{{l}}x2x4x{{b}}xf64>,
       memref<3x{{b}}xf64>,
       memref<3x{{b}}xf64>,
       memref<{{l}}x2x{{b}}xf64>,

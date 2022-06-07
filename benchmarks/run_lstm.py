@@ -1,4 +1,6 @@
 import argparse
+import pandas as pd
+import json
 from compile import (
     compile_mlir_to_enzyme,
     compile_mlir,
@@ -20,8 +22,10 @@ def main(args):
     lagrad_templ = mlir_env.get_template("lstm.mlir")
     hand_buf_templ = mlir_env.get_template("lstm_hand_bufferized.mlir")
     # lagrad_hand_diff_templ = mlir_env.get_template("lstm_hand_differentiated.mlir")
+    data_file = "benchmarks/data/lstm/lstm_l4_c4096.txt"
+    with open(data_file, "r") as f:
+        l, c, b = [int(x) for x in f.readline().split()]
 
-    l, c, b = 2, 1024, 14
     config = {
         "l": l,
         "c": c,
@@ -30,6 +34,7 @@ def main(args):
         "extra_sz": 3 * b,
         "state_sz": 2 * l * b,
         "seq_sz": c * b,
+        "data_file": data_file,
     }
 
     if args.print:
@@ -62,7 +67,20 @@ def main(args):
         "lstm_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
-    print(stdout)
+    try:
+        lines = stdout.splitlines()
+        keys = ["Handrolled", "Enzyme/C"]
+        assert len(keys) == len(
+            lines
+        ), f"expected # of apps to match {len(keys)} vs {len(lines)}"
+        results = pd.DataFrame.from_dict(
+            {key: json.loads(line) for key, line in zip(keys, lines)}
+        )
+        print(results.to_csv(sep="\t", index=False))
+        print(results[1:].mean())
+    except (json.JSONDecodeError, Exception):
+        print("Failed to parse output")
+        print(stdout)
 
 
 if __name__ == "__main__":

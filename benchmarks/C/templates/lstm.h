@@ -4,17 +4,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LSTM_DATA_FILE "benchmarks/data/lstm/lstm_l2_c1024.txt"
-
 typedef struct {
   int l, c, b, main_sz, extra_sz, state_sz, seq_sz;
   double *main_params, *extra_params, *state, *sequence;
 } LSTMInput;
 
-void read_lstm_instance(LSTMInput *input) {
-  FILE *fd = fopen(LSTM_DATA_FILE, "r");
+void read_lstm_instance(const char *data_file, LSTMInput *input) {
+  FILE *fd = fopen(data_file, "r");
   if (!fd) {
-    fprintf(stderr, "Failed to open file: %s\n", LSTM_DATA_FILE);
+    fprintf(stderr, "Failed to open file: %s\n", data_file);
     exit(1);
   }
   fscanf(fd, "%i %i %i", &input->l, &input->c, &input->b);
@@ -50,20 +48,6 @@ void read_lstm_instance(LSTMInput *input) {
   }
 
   fclose(fd);
-}
-
-void read_ref_grad(const char *ffilename, int main_sz, int extra_sz,
-                   double *ref_jacobian) {
-  FILE *fp = fopen(ffilename, "r");
-  if (!fp) {
-    fprintf(stderr, "Failed to open file: %s\n", ffilename);
-    exit(1);
-  }
-
-  for (size_t i = 0; i < main_sz + extra_sz; i++) {
-    fscanf(fp, "%lf", &ref_jacobian[i]);
-  }
-  fclose(fp);
 }
 
 void free_lstm_instance(LSTMInput *input) {

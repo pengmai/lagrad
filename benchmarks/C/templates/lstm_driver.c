@@ -13,9 +13,9 @@ typedef struct {
 
 extern void grad_lstm_objective_hb(
     /*main_params=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
-    int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t, int64_t, int64_t,
     /*dmain_params=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
-    int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t, int64_t, int64_t,
     /*extra_params=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
     int64_t,
     /*dextra_params=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
@@ -91,17 +91,17 @@ unsigned long collect_handrolled_lstm(LSTMInput input, double *state,
                                       double *ref_jacobian) {
   struct timeval start, stop;
   memcpy(state, input.state, input.state_sz * sizeof(double));
-  int b = input.b;
+  int l = input.l, c = input.c, b = input.b;
 
   gettimeofday(&start, NULL);
-  double *main_paramsb = calloc(4 * 4 * b, sizeof(double));
-  double *extra_paramsb = calloc(3 * b, sizeof(double));
-  grad_lstm_objective_hb(deadbeef, input.main_params, 0, 4, 4, b, 4 * b, b, 1,
-                         deadbeef, main_paramsb, 0, 4, 4, b, 4 * b, b, 1,
-                         deadbeef, input.extra_params, 0, 3, b, b, 1, deadbeef,
-                         extra_paramsb, 0, 3, b, b, 1, deadbeef, state, 0,
-                         input.l, 2, b, 2 * b, b, 1, deadbeef, input.sequence,
-                         0, input.c, b, b, 1, /*g=*/1.0);
+  double *main_paramsb = calloc(input.main_sz, sizeof(double));
+  double *extra_paramsb = calloc(input.extra_sz, sizeof(double));
+  grad_lstm_objective_hb(deadbeef, input.main_params, 0, l, 2, 4, b, 2 * 4 * b,
+                         4 * b, b, 1, deadbeef, main_paramsb, 0, l, 2, 4, b,
+                         2 * 4 * b, 4 * b, b, 1, deadbeef, input.extra_params,
+                         0, 3, b, b, 1, deadbeef, extra_paramsb, 0, 3, b, b, 1,
+                         deadbeef, state, 0, l, 2, b, 2 * b, b, 1, deadbeef,
+                         input.sequence, 0, c, b, b, 1, /*g=*/1.0);
   gettimeofday(&stop, NULL);
 
   verify_lstm_jacobian(input.main_sz, input.extra_sz, main_paramsb,
@@ -135,7 +135,7 @@ unsigned long collect_enzyme_c_lstm(LSTMInput input, double *state,
 
 int lstm_model_main() {
   LSTMInput input;
-  read_lstm_instance(&input);
+  read_lstm_instance("{{data_file}}", &input);
   int b = input.b;
   size_t weight_size = 4 * b;
   double *weight = input.main_params;
@@ -194,18 +194,18 @@ extern void predict_hb(
 
 int check_main() {
   LSTMInput input;
-  read_lstm_instance(&input);
+  read_lstm_instance("{{data_file}}", &input);
   int b = input.b;
   double *main_paramsb = calloc(4 * 4 * b, sizeof(double));
   double *extra_paramsb = calloc(3 * b, sizeof(double));
   double *state = malloc(2 * 2 * b * sizeof(double));
   memcpy(state, &input.state[0], 2 * 2 * b * sizeof(double));
-  grad_lstm_objective_hb(deadbeef, input.main_params, 0, 4, 4, b, 4 * b, b, 1,
-                         deadbeef, main_paramsb, 0, 4, 4, b, 4 * b, b, 1,
-                         deadbeef, input.extra_params, 0, 3, b, b, 1, deadbeef,
-                         extra_paramsb, 0, 3, b, b, 1, deadbeef, state, 0,
-                         input.l, 2, b, 2 * b, b, 1, deadbeef, input.sequence,
-                         0, input.c, b, b, 1, /*g=*/1.0);
+  grad_lstm_objective_hb(
+      deadbeef, input.main_params, 0, input.l, 2, 4, b, 2 * 4 * b, 4 * b, b, 1,
+      deadbeef, main_paramsb, 0, input.l, 2, 4, b, 2 * 4 * b, 4 * b, b, 1,
+      deadbeef, input.extra_params, 0, 3, b, b, 1, deadbeef, extra_paramsb, 0,
+      3, b, b, 1, deadbeef, state, 0, input.l, 2, b, 2 * b, b, 1, deadbeef,
+      input.sequence, 0, input.c, b, b, 1, /*g=*/1.0);
   print_d_arr_3d(main_paramsb, 4, 4, b);
   // print_d_arr_2d(extra_paramsb, 3, b);
   free(main_paramsb);
@@ -215,15 +215,34 @@ int check_main() {
   return 0;
 }
 
+void populate_ref_grad(LSTMInput input, double *state, double *ref_jacobian) {
+  memcpy(state, input.state, input.state_sz * sizeof(double));
+
+  double loss = 0.0, dloss = 1.0;
+  double *dmain_params = calloc(input.main_sz, sizeof(double));
+  double *dextra_params = calloc(input.extra_sz, sizeof(double));
+  enzyme_c_lstm_objective(input.l, input.c, input.b, input.main_params,
+                          dmain_params, input.extra_params, dextra_params,
+                          state, input.sequence, &loss, &dloss);
+
+  for (size_t i = 0; i < input.main_sz; i++) {
+    ref_jacobian[i] = dmain_params[i];
+  }
+  for (size_t i = 0; i < input.extra_sz; i++) {
+    ref_jacobian[input.main_sz + i] = dextra_params[i];
+  }
+
+  free(dmain_params);
+  free(dextra_params);
+}
+
 int main() {
   LSTMInput input;
-  read_lstm_instance(&input);
+  read_lstm_instance("{{data_file}}", &input);
   double *ref_jacobian =
       malloc((input.main_sz + input.extra_sz) * sizeof(double));
-  read_ref_grad("ref_lstm_grad.txt", input.main_sz, input.extra_sz,
-                ref_jacobian);
-
   double *state = malloc(input.state_sz * sizeof(double));
+  populate_ref_grad(input, state, ref_jacobian);
   lstmBodyFunc funcs[] = {collect_handrolled_lstm, collect_enzyme_c_lstm};
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
   unsigned long results_df[NUM_RUNS];
