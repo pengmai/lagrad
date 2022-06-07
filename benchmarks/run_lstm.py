@@ -40,24 +40,24 @@ def main(args):
         return
 
     compile_mlir(hand_buf_templ.render(**config).encode("utf-8"), "lstm_handbuf.o")
-    compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
+    # compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
     compile_c(driver_templ.render(**config).encode("utf-8"), "lstm_driver.o")
     compile_c(helpers_templ.render(**config).encode("utf-8"), "mlir_c_abi.o")
     compile_enzyme(enzyme_c_templ.render(**config).encode("utf-8"), "lstm_enzyme_c.o")
-    compile_mlir_to_enzyme(
-        enzyme_mlir_templ.render(**config).encode("utf-8"),
-        "lstm_enzyme_mlir.o",
-        emit="obj",
-    )
+    # compile_mlir_to_enzyme(
+    #     enzyme_mlir_templ.render(**config).encode("utf-8"),
+    #     "lstm_enzyme_mlir.o",
+    #     emit="obj",
+    # )
     stdout = link_and_run(
         [
             "lstm_driver.o",
             "mlir_c_abi.o",
-            "lstm_lagrad.o",
+            # "lstm_lagrad.o",
             "lstm_handbuf.o",
             "lstm_enzyme_c.o",
             # "lstm_cpp_ref.o",
-            "lstm_enzyme_mlir.o",
+            # "lstm_enzyme_mlir.o",
         ],
         "lstm_driver.out",
         link_runner_utils=True,

@@ -2,6 +2,7 @@
 #twod = affine_map<(d0, d1) -> (d0, d1)>
 #view = affine_map<(d0)[s0] -> (d0 + s0)>
 #view2 = affine_map<(d0, d1)[s0, s1] -> (d0 * s1 + s0 + d1)>
+#view3 = affine_map<(d0, d1, d2)[s0, s1, s2] -> (d0 * s2 + d1 * s1 + s0 + d2)>
 
 func private @print_memref_f64(memref<*xf64>) attributes { llvm.emit_c_interface }
 
@@ -60,6 +61,38 @@ func private @mlogsumexp_hb(%t: memref<{{b}}xf64>) -> f64 {
   %lse_2 = arith.addf %lse_v, %two : f64
   %lse_l = math.log %lse_2 : f64
   return %lse_l : f64
+}
+
+func private @grad_logsumexp_hb(%t: memref<{{b}}xf64>, %g: f64, %out: memref<{{b}}xf64>) {
+  linalg.generic
+    {indexing_maps = [#oned, #oned], iterator_types = ["parallel"]}
+    ins(%t : memref<{{b}}xf64>)
+    outs(%out : memref<{{b}}xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = math.exp %arg0 : f64
+    linalg.yield %0 : f64
+  }
+  %sumexp = memref.alloca() : memref<f64>
+  %two = arith.constant 2.0 : f64
+  memref.store %two, %sumexp[] : memref<f64>
+  linalg.generic
+    {indexing_maps = [#oned, affine_map<(d0) -> ()>], iterator_types = ["reduction"]}
+    ins(%out : memref<{{b}}xf64>)
+    outs(%sumexp : memref<f64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
+  %sumexpv = memref.load %sumexp[] : memref<f64>
+  linalg.generic
+    {indexing_maps = [#oned], iterator_types = ["parallel"]}
+    outs(%out : memref<{{b}}xf64>) {
+  ^bb0(%arg0: f64):
+    %0 = arith.mulf %g, %arg0 : f64
+    %1 = arith.divf %0, %sumexpv : f64
+    linalg.yield %1 : f64
+  }
+  return
 }
 
 func @lstm_model_hb(
@@ -367,13 +400,41 @@ func @grad_lstm_model_hb(
   }
 
   %dbias0 = memref.subview %dbias[0, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
-  linalg.copy(%dforget, %dbias0) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  linalg.generic
+    { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+    ins(%dforget : memref<{{b}}xf64>)
+    outs(%dbias0 : memref<{{b}}xf64, #view>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
   %dbias1 = memref.subview %dbias[1, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
-  linalg.copy(%dingate, %dbias1) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  linalg.generic
+    { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+    ins(%dingate : memref<{{b}}xf64>)
+    outs(%dbias1 : memref<{{b}}xf64, #view>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
   %dbias2 = memref.subview %dbias[2, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
-  linalg.copy(%doutgate, %dbias2) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  linalg.generic
+    { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+    ins(%doutgate : memref<{{b}}xf64>)
+    outs(%dbias2 : memref<{{b}}xf64, #view>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
   %dbias3 = memref.subview %dbias[3, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
-  linalg.copy(%dchange, %dbias3) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  linalg.generic
+    { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+    ins(%dchange : memref<{{b}}xf64>)
+    outs(%dbias3 : memref<{{b}}xf64, #view>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
 
   %dweight0 = memref.subview %dweight[0, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
   linalg.generic
@@ -385,7 +446,8 @@ func @grad_lstm_model_hb(
     outs(%dweight0 : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
   }
   %dweight1 = memref.subview %dweight[1, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
   linalg.generic
@@ -397,7 +459,8 @@ func @grad_lstm_model_hb(
     outs(%dweight1 : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
   }
   %dweight2 = memref.subview %dweight[2, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
   linalg.generic
@@ -409,7 +472,8 @@ func @grad_lstm_model_hb(
     outs(%dweight2 : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
   }
   %dweight3 = memref.subview %dweight[3, 0] [1, {{b}}] [1, 1] : memref<4x{{b}}xf64, #view2> to memref<{{b}}xf64, #view>
   linalg.generic
@@ -418,7 +482,8 @@ func @grad_lstm_model_hb(
     outs(%dweight3 : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
   }
 
   linalg.generic
@@ -567,7 +632,15 @@ func @grad_predict_hb(
   %w2_weight = memref.subview %w2[1, 0] [1, {{b}}] [1, 1] : memref<3x{{b}}xf64> to memref<{{b}}xf64, #view>
   %w2_bias = memref.subview %w2[2, 0] [1, {{b}}] [1, 1] : memref<3x{{b}}xf64> to memref<{{b}}xf64, #view>
   %dw2_bias = memref.subview %dw2[2, 0] [1, {{b}}] [1, 1] : memref<3x{{b}}xf64> to memref<{{b}}xf64, #view>
-  linalg.copy(%dx2, %dw2_bias) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  // linalg.copy(%dx2, %dw2_bias) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+  linalg.generic
+    { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+    ins(%dx2 : memref<{{b}}xf64>)
+    outs(%dw2_bias : memref<{{b}}xf64, #view>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  }
   %dw2_weight = memref.subview %dw2[1, 0] [1, {{b}}] [1, 1] : memref<3x{{b}}xf64> to memref<{{b}}xf64, #view>
   linalg.generic
     { indexing_maps = [#oned, #oned, #oned], iterator_types = ["parallel"] }
@@ -575,7 +648,8 @@ func @grad_predict_hb(
     outs(%dw2_weight : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
   }
   %dx = memref.alloc() : memref<{{b}}xf64>
   linalg.generic
@@ -633,7 +707,147 @@ func @grad_predict_hb(
     outs(%dw2_0 : memref<{{b}}xf64, #view>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
-    linalg.yield %0 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
+  }
+  return
+}
+
+func @grad_lstm_objective_hb(
+  %main_params: memref<4x4x{{b}}xf64>,
+  %dmain_params: memref<4x4x{{b}}xf64>,
+  %extra_params: memref<3x{{b}}xf64>,
+  %dextra_params: memref<3x{{b}}xf64>,
+  %state: memref<{{l}}x2x{{b}}xf64>,
+  %sequence: memref<{{c}}x{{b}}xf64>,
+  %g: f64
+) {
+  %zero = arith.constant 0.0 : f64
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %cb = arith.constant {{b}} : index
+  %clm1 = arith.constant {{c - 1}} : index
+  %all_states = memref.alloc(%clm1) : memref<?x{{l}}x2x{{b}}xf64>
+  %ypred_cache = memref.alloc(%clm1) : memref<?x{{b}}xf64>
+  %ypred = memref.alloc() : memref<{{b}}xf64>
+  %ynorm = memref.alloc() : memref<{{b}}xf64>
+  %total = memref.alloca() : memref<f64>
+  memref.store %zero, %total[] : memref<f64>
+  %count = scf.for %tv = %c0 to %clm1 step %c1 iter_args(%count_it = %c0) -> (index) {
+    %input = memref.subview %sequence[%tv, 0] [1, {{b}}] [1, 1] : memref<{{c}}x{{b}}xf64> to memref<{{b}}xf64, #view>
+    %all_state_slice = memref.subview %all_states[%tv, 0, 0, 0] [1, {{l}}, 2, {{b}}] [1, 1, 1, 1] : memref<?x{{l}}x2x{{b}}xf64> to memref<{{l}}x2x{{b}}xf64, #view3>
+    linalg.copy(%state, %all_state_slice) : memref<{{l}}x2x{{b}}xf64>, memref<{{l}}x2x{{b}}xf64, #view3>
+    call @predict_hb(%main_params, %extra_params, %state, %input, %ypred) : (
+      memref<4x4x{{b}}xf64>,
+      memref<3x{{b}}xf64>,
+      memref<{{l}}x2x{{b}}xf64>,
+      memref<{{b}}xf64, #view>,
+      memref<{{b}}xf64>
+    ) -> ()
+    %ypred_cache_slice = memref.subview %ypred_cache[%tv, 0] [1, {{b}}] [1, 1] : memref<?x{{b}}xf64> to memref<{{b}}xf64, #view>
+    linalg.copy(%ypred, %ypred_cache_slice) : memref<{{b}}xf64>, memref<{{b}}xf64, #view>
+
+    %lse = call @mlogsumexp_hb(%ypred) : (memref<{{b}}xf64>) -> f64
+    linalg.generic
+      {
+        indexing_maps = [#oned, #oned],
+        iterator_types = ["parallel"]
+      }
+      ins(%ypred : memref<{{b}}xf64>)
+      outs(%ynorm : memref<{{b}}xf64>) {
+    ^bb0(%arg0: f64, %arg1: f64):
+      %0 = arith.subf %arg0, %lse : f64
+      linalg.yield %0 : f64
+    }
+    %tvp1 = arith.addi %tv, %c1 : index
+    %ygold = memref.subview %sequence[%tvp1, 0] [1, {{b}}] [1, 1] : memref<{{c}}x{{b}}xf64> to memref<{{b}}xf64, #view>
+    linalg.generic
+      {
+        indexing_maps = [#oned, #oned, affine_map<(d0) -> ()>],
+        iterator_types = ["reduction"]
+      }
+      ins(%ygold, %ynorm : memref<{{b}}xf64, #view>, memref<{{b}}xf64>)
+      outs(%total : memref<f64>) {
+    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+      %0 = arith.mulf %arg0, %arg1 : f64
+      %1 = arith.addf %0, %arg2 : f64
+      linalg.yield %1 : f64
+    }
+    %count_next = arith.addi %count_it, %cb : index
+    scf.yield %count_next : index
+  }
+
+  %neg_g = arith.negf %g : f64
+  %counti = arith.index_cast %count : index to i64
+  %countf = arith.sitofp %counti : i64 to f64
+  %dtotal = arith.divf %neg_g, %countf : f64
+
+  %dstate = memref.alloc() : memref<{{l}}x2x{{b}}xf64>
+  linalg.fill(%zero, %dstate) : f64, memref<{{l}}x2x{{b}}xf64>
+  %dynorm = memref.alloc() : memref<{{b}}xf64>
+  %dypred = memref.alloc() : memref<{{b}}xf64>
+  %sumdynorm = memref.alloca() : memref<f64>
+  linalg.fill(%zero, %dstate) : f64, memref<{{l}}x2x{{b}}xf64>
+  scf.for %raw_tv = %c0 to %clm1 step %c1 {
+    %tv_0 = arith.subi %clm1, %raw_tv : index
+    %tv = arith.subi %tv_0, %c1 : index
+    %tvp1 = arith.addi %tv, %c1 : index
+    %seq_tplus1 = memref.subview %sequence[%tvp1, 0] [1, {{b}}] [1, 1] : memref<{{c}}x{{b}}xf64> to memref<{{b}}xf64, #view>
+    linalg.generic
+      { indexing_maps = [#oned, #oned], iterator_types = ["parallel"] }
+      ins(%seq_tplus1 : memref<{{b}}xf64, #view>)
+      outs(%dynorm : memref<{{b}}xf64>) {
+    ^bb0(%arg0: f64, %arg1: f64):
+      %0 = arith.mulf %arg0, %dtotal : f64
+      linalg.yield %0 : f64
+    }
+    %ypred_cache_slice = memref.subview %ypred_cache[%tv, 0] [1, {{b}}] [1, 1] : memref<?x{{b}}xf64> to memref<{{b}}xf64, #view>
+    linalg.copy(%ypred_cache_slice, %ypred) : memref<{{b}}xf64, #view>, memref<{{b}}xf64>
+
+    memref.store %zero, %sumdynorm[] : memref<f64>
+    linalg.generic
+      { indexing_maps = [#oned, affine_map<(d0) -> ()>], iterator_types = ["reduction"] }
+      ins(%dynorm : memref<{{b}}xf64>)
+      outs(%sumdynorm : memref<f64>) {
+    ^bb0(%arg0: f64, %arg1: f64):
+      %0 = arith.addf %arg0, %arg1 : f64
+      linalg.yield %0 : f64
+    }
+    %sumdynormv = memref.load %sumdynorm[] : memref<f64>
+    call @grad_logsumexp_hb(%ypred, %sumdynormv, %dypred) : (memref<{{b}}xf64>, f64, memref<{{b}}xf64>) -> ()
+    linalg.generic
+      { indexing_maps = [#oned, #oned, #oned], iterator_types = ["parallel"] }
+      ins(%dynorm, %dypred : memref<{{b}}xf64>, memref<{{b}}xf64>)
+      outs(%dypred : memref<{{b}}xf64>) {
+    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+      %0 = arith.subf %arg0, %arg1 : f64
+      linalg.yield %0 : f64
+    }
+
+    %state_cached = memref.subview %all_states[%tv, 0, 0, 0] [1, {{l}}, 2, {{b}}] [1, 1, 1, 1] : memref<?x{{l}}x2x{{b}}xf64> to memref<{{l}}x2x{{b}}xf64, #view3>
+    %input = memref.subview %sequence[%tv, 0] [1, {{b}}] [1, 1] : memref<{{c}}x{{b}}xf64> to memref<{{b}}xf64, #view>
+    linalg.copy(%state_cached, %state) : memref<{{l}}x2x{{b}}xf64, #view3>, memref<{{l}}x2x{{b}}xf64>
+    call @grad_predict_hb(
+      %main_params,
+      %dmain_params,
+      %extra_params,
+      %dextra_params,
+      %state,
+      %dstate,
+      %input,
+      %ypred,
+      %dypred
+    ) : (
+      memref<4x4x{{b}}xf64>,
+      memref<4x4x{{b}}xf64>,
+      memref<3x{{b}}xf64>,
+      memref<3x{{b}}xf64>,
+      memref<{{l}}x2x{{b}}xf64>,
+      memref<{{l}}x2x{{b}}xf64>,
+      memref<{{b}}xf64, #view>,
+      memref<{{b}}xf64>,
+      memref<{{b}}xf64>
+    ) -> ()
   }
   return
 }
