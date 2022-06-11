@@ -2,6 +2,7 @@
 #include "shared_types.h"
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 // out = a - b
 
@@ -163,7 +164,7 @@ void couter(int d, double *x, double *y, double *out) {
   }
 }
 
-void cgrad_log_sum_exp(int d, double *x, double g, double *dx) {
+void cgrad_log_sum_exp(int d, double const *x, double g, double *restrict dx) {
   double lse = log_sum_exp(d, x);
 
   for (size_t i = 0; i < d; i++) {
@@ -171,9 +172,11 @@ void cgrad_log_sum_exp(int d, double *x, double g, double *dx) {
   }
 }
 
-void manual_c_main_term(int d, int k, int n, double *alphas, double *alphasb,
-                        double *means, double *meansb, double *Qs, double *Qsb,
-                        double *Ls, double *Lsb, double *x) {
+void manual_c_main_term(int d, int k, int n, double const *restrict alphas,
+                        double *restrict alphasb, double const *restrict means,
+                        double *restrict meansb, double const *restrict Qs,
+                        double *restrict Qsb, double const *restrict Ls,
+                        double *restrict Lsb, double const *restrict x) {
 #define int int64_t
   int ix, ik;
   int tri_size = d * (d - 1) / 2;
@@ -191,18 +194,18 @@ void manual_c_main_term(int d, int k, int n, double *alphas, double *alphasb,
   preprocess_qs(d, k, Qs, &sum_qs[0], &Qdiags[0]);
 
   double slse = 0.;
-  double *xcentered_cache = malloc(k * d * sizeof(double));
-  double *Qxcentered_cache = malloc(k * d * sizeof(double));
+  double *xcentered_cache = malloc(n * k * d * sizeof(double));
+  double *Qxcentered_cache = malloc(n * k * d * sizeof(double));
   for (ix = 0; ix < n; ix++) {
     for (ik = 0; ik < k; ik++) {
       subtract(d, &x[ix * d], &means[ik * d], &xcentered[0]);
       cQtimesx(d, &Qdiags[ik * d], &Ls[ik * tri_size], &xcentered[0],
                &Qxcentered[0]);
 
-      for (int i = 0; i < d; i++) {
-        xcentered_cache[ik * d + i] = xcentered[i];
-        Qxcentered_cache[ik * d + i] = Qxcentered[i];
-      }
+      memcpy(&xcentered_cache[ix * k * d + ik * d], xcentered,
+             d * sizeof(double));
+      memcpy(&Qxcentered_cache[ix * k * d + ik * d], Qxcentered,
+             d * sizeof(double));
       main_term[ik] = alphas[ik] + sum_qs[ik] - 0.5 * sqnorm(d, &Qxcentered[0]);
     }
 
@@ -215,18 +218,31 @@ void manual_c_main_term(int d, int k, int n, double *alphas, double *alphasb,
     }
 
     for (ik = 0; ik < k; ik++) {
+      memcpy(xcentered, &xcentered_cache[ix * k * d + ik * d],
+             d * sizeof(double));
+      memcpy(Qxcentered, &Qxcentered_cache[ix * k * d + ik * d],
+             d * sizeof(double));
       for (int i = 0; i < d; i++) {
-        dQxcentered[i] = -dmain_term[ik] * Qxcentered_cache[ik * d + i];
+        dQxcentered[i] = -dmain_term[ik] * Qxcentered[i];
         dxcentered[i] = Qdiags[ik * d + i] * dQxcentered[i];
       }
 
       cvecmat(d, dQxcentered, &Ls[ik * tri_size], dxcentered);
-      couter(d, dQxcentered, &xcentered_cache[ik * d], &Lsb[ik * tri_size]);
+      couter(d, dQxcentered, &xcentered_cache[ix * k * d + ik * d],
+             &Lsb[ik * tri_size]);
+      // for (int i = 0; i < d; i++) {
+      //   int Lparamsidx = i * (2 * d - i - 1) / 2;
+      //   for (int j = i + 1; j < d; j++) {
+      //     // and this x
+      //     int Lidx = ik * tri_size + Lparamsidx;
+      //     meansb[ik * d + i] -= Ls[Lidx] * dQxcentered[j];
+      //     Lsb[Lidx] += dQxcentered[j] * xcentered[i];
+      //     Lparamsidx++;
+      //   }
+      // }
       for (int i = 0; i < d; i++) {
         meansb[ik * d + i] -= dxcentered[i];
-      }
-      for (int i = 0; i < d; i++) {
-        dQdiags[ik * d + i] += dQxcentered[i] * xcentered_cache[ik * d + i];
+        dQdiags[ik * d + i] += dQxcentered[i] * xcentered[i];
       }
     }
   }
@@ -248,8 +264,8 @@ void manual_c_main_term(int d, int k, int n, double *alphas, double *alphasb,
   free(dxcentered);
   free(Qxcentered);
   free(dQxcentered);
-  free(main_term);
-  free(dmain_term);
+  // free(main_term);
+  // free(dmain_term);
 
 #undef int
 }
