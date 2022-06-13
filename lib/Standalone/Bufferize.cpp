@@ -94,10 +94,6 @@ public:
     auto destType = getTypeConverter()
                         ->convertType(adaptor.source().getType())
                         .dyn_cast<MemRefType>();
-    if (op.getType().getRank() != op.getSourceType().getRank() + 1 ||
-        op.getSourceType().getRank() > 2) {
-      return failure();
-    }
 
     auto slice_layout =
         getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
