@@ -574,6 +574,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                                           /*init=*/true);
       Value new_value = vjp_value;
       if (requires_add) {
+        assert(env[operand].getType() == operand.getType() &&
+               "operand and its gradient had different types");
         auto before = rewriter.create<tensor::ExtractSliceOp>(
             op->getLoc(), resultType, space, extractSliceOp.getMixedOffsets(),
             extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
@@ -1064,16 +1066,18 @@ void populatePrimalCache(scf::ForOp forOp,
       auto intToAttr = [&](int64_t i) {
         return IntegerAttr::get(IntegerType::get(ctx, 64), i);
       };
-      auto staticOffset = ArrayAttr::get(
-          ctx, {IntegerAttr::get(
-                    IntegerType::get(ctx, 64),
-                    -9223372036854775808ULL), // This is a weird magic number
-                                              // that means "no static offset"
-                intToAttr(0)});
-      auto staticSize = ArrayAttr::get(
-          ctx, {intToAttr(1), intToAttr(tensorType.getDimSize(0))});
-      auto staticStride = ArrayAttr::get(ctx, {intToAttr(1), intToAttr(1)});
-
+      SmallVector<Attribute> staticOffsets{
+          IntegerAttr::get(IntegerType::get(ctx, 64), -9223372036854775808ULL)};
+      SmallVector<Attribute> staticSizes{intToAttr(1)};
+      SmallVector<Attribute> staticStrides{intToAttr(1)};
+      for (int i = 0; i < tensorType.getRank(); i++) {
+        staticOffsets.push_back(intToAttr(0));
+        staticSizes.push_back(intToAttr(tensorType.getShape()[i]));
+        staticStrides.push_back(intToAttr(1));
+      }
+      auto staticOffset = ArrayAttr::get(ctx, staticOffsets);
+      auto staticSize = ArrayAttr::get(ctx, staticSizes);
+      auto staticStride = ArrayAttr::get(ctx, staticStrides);
       auto view = rewriter.create<memref::SubViewOp>(
           valToCache.getLoc(), resultType, ccache,
           /*dynamic shapes=*/ValueRange(forOp.getInductionVar()), ValueRange(),
@@ -1166,11 +1170,6 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
       num_float_operands++;
     }
   }
-  llvm::errs() << "Reached here:\n";
-
-  // inputOperands.insert(inputOperands.end(), forOp.getIterOperands().begin() +
-  // 1,
-  //                      forOp.getIterOperands().end());
 
   for (auto input_operand : inputOperands) {
     // Allocate spaces for the gradients of each input operand, if required.
@@ -1208,18 +1207,21 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
               return IntegerAttr::get(
                   IntegerType::get(builder.getContext(), 64), i);
             };
-            auto staticOffset = ArrayAttr::get(
-                builder.getContext(),
-                {IntegerAttr::get(
-                     IntegerType::get(builder.getContext(), 64),
-                     -9223372036854775808ULL), // This is a weird magic number
-                                               // that means "no static offset"
-                 intToAttr(0)});
-            auto staticSize = ArrayAttr::get(
-                builder.getContext(),
-                {intToAttr(1), intToAttr(tensorType.getDimSize(0))});
-            auto staticStride = ArrayAttr::get(builder.getContext(),
-                                               {intToAttr(1), intToAttr(1)});
+            SmallVector<Attribute> staticOffsets{
+                IntegerAttr::get(IntegerType::get(builder.getContext(), 64),
+                                 -9223372036854775808ULL)};
+            SmallVector<Attribute> staticSizes{intToAttr(1)};
+            SmallVector<Attribute> staticStrides{intToAttr(1)};
+            for (int i = 0; i < tensorType.getRank(); i++) {
+              staticOffsets.push_back(intToAttr(0));
+              staticSizes.push_back(intToAttr(tensorType.getShape()[i]));
+              staticStrides.push_back(intToAttr(1));
+            }
+            auto staticOffset =
+                ArrayAttr::get(builder.getContext(), staticOffsets);
+            auto staticSize = ArrayAttr::get(builder.getContext(), staticSizes);
+            auto staticStride =
+                ArrayAttr::get(builder.getContext(), staticStrides);
 
             auto view = builder.create<memref::SubViewOp>(
                 cpair.second.getLoc(), resultType, cpair.second,
@@ -1263,8 +1265,11 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         // to the right place.
         auto inputRegionArgs = ValueRange(replacedPrimalIterArgs);
         for (size_t i = 0; i < inputRegionArgs.size(); i++) {
-          env[inputRegionArgs[i]] =
-              iterArgs[iterArgs.size() - inputOperands.size() + i];
+          auto iterArg = iterArgs[iterArgs.size() - inputRegionArgs.size() + i];
+          env[inputRegionArgs[i]] = iterArg;
+          assert(env[inputRegionArgs[i]].getType() == iterArg.getType() &&
+                 "reverseForOp: mismatched type when populating primal iter "
+                 "arg gradient");
         }
         SmallVector<Value> adjointResults;
         for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
