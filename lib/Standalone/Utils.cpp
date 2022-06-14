@@ -425,15 +425,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
     auto free_operand_vec = llvm::to_vector<4>(freeOperands);
-    auto vjp_values = reverseForOp(forOp, ctx, free_operand_vec, vjp_value,
-                                   result_idx, env, rewriter);
-    for (auto result_pair : llvm::zip(free_operand_vec, vjp_values)) {
-      auto free_operand = std::get<0>(result_pair);
-      auto result_vjp = std::get<1>(result_pair);
-      // If the free operand already has a space in the gradient, the for op
-      // will add to that space.
-      env[free_operand] = result_vjp;
-    }
+    reverseForOp(forOp, ctx, free_operand_vec, vjp_value, result_idx, env,
+                 rewriter);
     // // only works for GMMs
     // if (forOp.getResultTypes()[0].isa<FloatType>()) {
     //   llvm::errs() << "OUTER FOR OP:\nDifferentiated through " << fv_count
@@ -996,7 +989,7 @@ Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
 void populatePrimalCache(scf::ForOp forOp,
                          llvm::SmallDenseSet<Value> effectivelyUsed,
                          ConversionPatternRewriter &rewriter,
-                         DenseMap<Value, Value> &val_to_cached) {
+                         SmallVector<std::pair<Value, Value>> &val_to_cached) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
 
   // This is the newer version to try to incorporate effective use analysis
@@ -1010,12 +1003,13 @@ void populatePrimalCache(scf::ForOp forOp,
       valuesToCache.push_back(iterOp);
     }
     // We naïvely cache all 1d tensor values here.
-    // if (auto rankedType =
-    //         iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
-    //   if (rankedType.getRank() == 1) {
-    //     valuesToCache.push_back(iterOp);
-    //   }
-    // }
+    if (auto rankedType =
+            iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
+      // For LSTMs, we're representing the state as a 3d tensor.
+      // if (rankedType.getRank() == 1 || rankedType.getRank() == 3) {
+      valuesToCache.push_back(iterOp);
+      // }
+    }
   }
   // As a bit of a hack, cache the values using a MemRef because it's easier
   // than modifying the iter arguments to properly use tensors.
@@ -1033,8 +1027,11 @@ void populatePrimalCache(scf::ForOp forOp,
       // fully cache every 1d iter arg.
       SmallVector<int64_t> shape;
       shape.reserve(rankedType.getRank() + 1);
-      shape.push_back(-1);                       // dynamic size
-      shape.push_back(rankedType.getShape()[0]); // assume the tensor is 1d.
+      shape.push_back(-1); // dynamic size
+      for (auto size : rankedType.getShape()) {
+        shape.push_back(size);
+      }
+      // shape.push_back(rankedType.getShape()[0]); // assume the tensor is 1d.
       auto primalCache = rewriter.create<memref::AllocOp>(
           cacheVal.getLoc(),
           MemRefType::get(shape, rankedType.getElementType()), cacheSize);
@@ -1091,7 +1088,8 @@ void populatePrimalCache(scf::ForOp forOp,
       rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
                                        forOp.getInductionVar());
     }
-    val_to_cached[valToCache] = ccache;
+    val_to_cached.push_back(std::pair<Value, Value>(valToCache, ccache));
+    // val_to_cached[valToCache] = ccache;
   }
 }
 
@@ -1136,16 +1134,16 @@ void runEffectiveUseAnalysis(scf::ForOp forOp, LAGradContext &ctx,
   }
 }
 
-ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
-                        ValueRange free_operands, Value vjp_value,
-                        size_t result_idx, DenseMap<Value, Value> outer_env,
-                        ConversionPatternRewriter &rewriter) {
+void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
+                  ValueRange free_operands, Value vjp_value, size_t result_idx,
+                  DenseMap<Value, Value> &outer_env,
+                  ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
   auto primalOps = forOp.getLoopBody().getOps();
   llvm::SmallDenseSet<Value> effectivelyUsed;
   runEffectiveUseAnalysis(forOp, ctx, free_operands, effectivelyUsed);
-  DenseMap<Value, Value> iterArgsToCached;
+  SmallVector<std::pair<Value, Value>> iterArgsToCached;
   populatePrimalCache(forOp, effectivelyUsed, rewriter, iterArgsToCached);
   // llvm::errs() << "effectively used:\n";
   // for (auto eu : effectivelyUsed) {
@@ -1158,14 +1156,31 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
       // only read once.
       forOp.getRegionIterArgs()[result_idx]};
   SmallVector<Value> iterArgsInit({vjp_value});
+  SmallVector<Value> inputOperands{free_operands};
+  inputOperands.reserve(free_operands.size() + forOp.getNumIterOperands());
+  size_t num_float_operands = 1;
+  for (size_t i = 0; i < forOp.getNumIterOperands(); i++) {
+    auto iterOperand = forOp.getIterOperands()[i];
+    if (isFloatOrFloatTensor(iterOperand.getType()) && i != result_idx) {
+      inputOperands.push_back(iterOperand);
+      num_float_operands++;
+    }
+  }
+  llvm::errs() << "Reached here:\n";
 
-  for (auto free_operand : free_operands) {
-    auto space = outer_env[free_operand]
-                     ? outer_env[free_operand]
-                     : getZero(free_operand.getLoc(), free_operand, rewriter,
+  // inputOperands.insert(inputOperands.end(), forOp.getIterOperands().begin() +
+  // 1,
+  //                      forOp.getIterOperands().end());
+
+  for (auto input_operand : inputOperands) {
+    // Allocate spaces for the gradients of each input operand, if required.
+    auto space = outer_env[input_operand]
+                     ? outer_env[input_operand]
+                     : getZero(input_operand.getLoc(), input_operand, rewriter,
                                /*init=*/true);
     iterArgsInit.push_back(space);
   }
+  // llvm::errs() << "iter args init length: " << iterArgsInit.size() << "\n";
   auto adjointFor = rewriter.create<scf::ForOp>(
       forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
       iterArgsInit,
@@ -1177,6 +1192,7 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         regionArgs.push_back(idx);
         regionArgs.push_back(forOp.getResult(result_idx));
+        SmallVector<Value> replacedPrimalIterArgs;
         Value vjp_op = nullptr;
         for (auto cpair : iterArgsToCached) {
           operandsWithIV.push_back(cpair.first);
@@ -1227,6 +1243,8 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
               forOp.getRegionIterArgForOpOperand(
                   forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
             vjp_op = loaded;
+          } else if (isFloatOrFloatTensor(loaded.getType())) {
+            replacedPrimalIterArgs.push_back(loaded);
           }
           regionArgs.push_back(loaded);
         }
@@ -1235,9 +1253,18 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
             /*offsetInputs=*/false);
 
         DenseMap<Value, Value> env;
-        for (size_t i = 0; i < free_operands.size(); i++) {
-          env[free_operands[i]] =
-              iterArgs[iterArgs.size() - free_operands.size() + i];
+        for (size_t i = 0; i < inputOperands.size(); i++) {
+          env[inputOperands[i]] =
+              iterArgs[iterArgs.size() - inputOperands.size() + i];
+        }
+        // This line is necessary because the copied ops in the primal (that we
+        // iterate over in reverse) will have their operands replaced with
+        // cached values, so we need this to make sure the gradient signal goes
+        // to the right place.
+        auto inputRegionArgs = ValueRange(replacedPrimalIterArgs);
+        for (size_t i = 0; i < inputRegionArgs.size(); i++) {
+          env[inputRegionArgs[i]] =
+              iterArgs[iterArgs.size() - inputOperands.size() + i];
         }
         SmallVector<Value> adjointResults;
         for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
@@ -1272,9 +1299,25 @@ ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
           }
           adjointResults.push_back(env[free_operand]);
         }
+        for (size_t i = 0; i < inputRegionArgs.size(); i++) {
+          auto inputArg = inputRegionArgs[i];
+          if (!env[inputArg]) {
+            env[inputArg] =
+                iterArgs[iterArgs.size() - inputOperands.size() + i];
+          }
+          adjointResults.push_back(env[inputArg]);
+        }
         rewriter.create<scf::YieldOp>(loc, adjointResults);
       });
-  return adjointFor.getResults().drop_front(1);
+
+  for (auto result_pair :
+       llvm::zip(inputOperands, adjointFor.getResults().drop_front(1))) {
+    auto free_operand = std::get<0>(result_pair);
+    auto result_vjp = std::get<1>(result_pair);
+    // If the free operand already has a space in the gradient, the for op
+    // will add to that space.
+    outer_env[free_operand] = result_vjp;
+  }
 }
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
