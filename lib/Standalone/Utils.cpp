@@ -1315,6 +1315,9 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         rewriter.create<scf::YieldOp>(loc, adjointResults);
       });
 
+  // The output argument is a special case here. The gradient of the primal
+  // result should always be the first adjoint result by construction.
+  outer_env[forOp.getIterOperands()[result_idx]] = adjointFor.getResult(0);
   for (auto result_pair :
        llvm::zip(inputOperands, adjointFor.getResults().drop_front(1))) {
     auto free_operand = std::get<0>(result_pair);
