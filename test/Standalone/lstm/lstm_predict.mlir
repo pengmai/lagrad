@@ -196,15 +196,6 @@ func @main() {
       9.0438e-01, 7.8972e-01, 9.2442e-01, 4.5663e-01, 2.2874e-02, 4.4151e-01],
      [5.6080e-01, 9.9277e-01, 2.0624e-01, 4.1726e-01, 4.4307e-01, 7.3984e-01, 1.8457e-01, 1.8016e-01,
       1.8162e-01, 4.5309e-01, 3.0257e-01, 5.7440e-02, 4.3623e-01, 2.6003e-01]]]> : tensor<2x2x14xf64>
-  // %state_vals = arith.constant dense<[
-  //   9.3682e-01, 4.8578e-01, 1.4065e-01, 1.6320e-01, 3.5769e-01, 2.9583e-02, 7.9633e-01, 8.4384e-01,
-  //     3.3121e-01, 5.7096e-01, 6.9654e-01, 6.6078e-01, 9.5455e-01, 4.2876e-01,
-  //   2.5705e-01, 7.7617e-01, 8.6593e-01, 6.2958e-01, 6.5128e-01, 7.0054e-01, 1.8294e-01, 4.8103e-02,
-  //     3.5343e-01, 1.7129e-01, 8.2196e-01, 2.2436e-01, 3.8642e-01, 6.7482e-01,
-  //   1.8866e-01, 3.6445e-01, 1.8349e-01, 9.4309e-01, 1.4140e-01, 1.4861e-01, 7.7937e-01, 2.2436e-02,
-  //     9.0438e-01, 7.8972e-01, 9.2442e-01, 4.5663e-01, 2.2874e-02, 4.4151e-01,
-  //   5.6080e-01, 9.9277e-01, 2.0624e-01, 4.1726e-01, 4.4307e-01, 7.3984e-01, 1.8457e-01, 1.8016e-01,
-  //     1.8162e-01, 4.5309e-01, 3.0257e-01, 5.7440e-02, 4.3623e-01, 2.6003e-01]> : tensor<2x2x14xf64>
   %x = arith.constant dense<[0., 0., 0., 0., 0., 0., 0., 1., 0., 1., 0., 1., 0., 0.]> : tensor<14xf64>
   %zero_state = arith.constant dense<0.0> : tensor<2x2x14xf64>
   %state_init = arith.addf %state_vals, %zero_state : tensor<2x2x14xf64>
@@ -229,8 +220,10 @@ func @main() {
     tensor<2x2x14xf64>,
     tensor<14xf64>
   ) -> (tensor<2x2x4x14xf64>, tensor<3x14xf64>, tensor<2x2x14xf64>)
-  // %U = tensor.cast %res#0 : tensor<2x2x4x14xf64> to tensor<*xf64>
-  // %U = tensor.cast %res#1 : tensor<3x14xf64> to tensor<*xf64>
+  %Um = tensor.cast %res#0 : tensor<2x2x4x14xf64> to tensor<*xf64>
+  call @print_memref_f64(%Um) : (tensor<*xf64>) -> ()
+  %Ue = tensor.cast %res#1 : tensor<3x14xf64> to tensor<*xf64>
+  call @print_memref_f64(%Ue) : (tensor<*xf64>) -> ()
   %Us = tensor.cast %res#2 : tensor<2x2x14xf64> to tensor<*xf64>
   call @print_memref_f64(%Us) : (tensor<*xf64>) -> ()
   return
