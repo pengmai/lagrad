@@ -1,4 +1,5 @@
 import ctypes
+import pathlib
 import numpy as np
 from numpy.typing import NDArray
 
@@ -123,3 +124,10 @@ def ndto_args(arr):
         + arr.shape
         + tuple(stride // arr.itemsize for stride in arr.strides)
     )
+
+# print("Printing file")
+# print(pathlib.Path(__file__).parents[2])
+TMP_DIR = pathlib.Path(__file__).parent / "tmp"
+BENCHMARK_TEMPLATES = pathlib.Path(__file__).parents[2] / "benchmarks" / "mlir" / "templates"
+HAND_MLIR_FILE = f"{BENCHMARK_TEMPLATES}/hand.mlir"
+print(HAND_MLIR_FILE, TMP_DIR)
