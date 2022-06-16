@@ -2,6 +2,7 @@ import ctypes
 import pathlib
 import numpy as np
 from numpy.typing import NDArray
+import subprocess
 
 double_ptr = ctypes.POINTER(ctypes.c_double)
 cstdlib = ctypes.cdll.LoadLibrary("libSystem.dylib")
@@ -16,7 +17,8 @@ class MemRefDescriptor(ctypes.Structure):
     def to_numpy(self):
         assert not self.freed, "Memory was freed"
         if not self.nparr:
-            self.nparr = np.ctypeslib.as_array(self.aligned, self.shape)
+            self.nparr = np.ctypeslib.as_array(self.aligned, self.shape).copy()
+        self.free()
         return self.nparr
 
     def free(self):
@@ -125,9 +127,63 @@ def ndto_args(arr):
         + tuple(stride // arr.itemsize for stride in arr.strides)
     )
 
-# print("Printing file")
-# print(pathlib.Path(__file__).parents[2])
 TMP_DIR = pathlib.Path(__file__).parent / "tmp"
-BENCHMARK_TEMPLATES = pathlib.Path(__file__).parents[2] / "benchmarks" / "mlir" / "templates"
+BENCHMARK_TEMPLATES = (
+    pathlib.Path(__file__).parents[2] / "benchmarks" / "mlir" / "templates"
+)
 HAND_MLIR_FILE = f"{BENCHMARK_TEMPLATES}/hand.mlir"
-print(HAND_MLIR_FILE, TMP_DIR)
+
+def compile_bindings(verbose=False):
+    try:
+        opt_p = subprocess.run(
+            ["make", "-C", pathlib.Path(__file__).parent],
+            capture_output=True,
+            check=True,
+        )
+        if verbose:
+            print(opt_p.stdout.decode("utf-8"))
+    except subprocess.CalledProcessError as e:
+        raise Exception(e.stderr.decode("utf-8"))
+
+compile_bindings()
+
+
+class LSTMModelGrad(ctypes.Structure):
+    _fields_ = [
+        ("dweight", F64Descriptor2D),
+        ("dbias", F64Descriptor2D),
+        ("dhidden", F64Descriptor1D),
+        ("dcell", F64Descriptor1D),
+        ("dinput", F64Descriptor1D),
+    ]
+
+
+class LSTMPredictGrad(ctypes.Structure):
+    _fields_ = [
+        ("dmain_params", F64Descriptor4D),
+        ("dextra_params", F64Descriptor2D),
+        ("dstate", F64Descriptor3D),
+    ]
+
+
+def struct_to_tuple(s):
+    return (getattr(s, field[0]).to_numpy() for field in s._fields_)
+
+
+mlirlib = ctypes.CDLL(TMP_DIR / "mlir_bindings.dylib")
+mlirlib.lagrad_lstm_model.argtypes = (
+    memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
+)
+mlirlib.lagrad_lstm_model.restype = LSTMModelGrad
+mlirlib.lagrad_lstm_predict.argtypes = memref_4d + memref_2d + memref_3d + memref_1d
+mlirlib.lagrad_lstm_predict.restype = LSTMPredictGrad
+
+
+def wrap(mlir_func):
+    def wrapped(*args):
+        args = tuple(arg for ndarr in args for arg in ndto_args(ndarr))
+        return struct_to_tuple(mlir_func(*args))
+    return wrapped
+
+lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
+lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)

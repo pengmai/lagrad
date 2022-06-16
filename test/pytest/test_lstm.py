@@ -1,399 +1,70 @@
+import pytest
 import warnings
+from benchmark_io import read_lstm_instance, LSTMInput
+from pytorch_ref.pytorch_lstm import lstm, predict
+from mlir_bindings import lagrad_lstm_model, lagrad_lstm_predict
+import torch
 import os.path as osp
 import numpy as np
-from toolchain import jit_file
-from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d, extract_4d
 
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
-LSTM_DATA_FILE = osp.join(osp.dirname(__file__), "..", "..", "benchmarks", "data", "lstm", "lstm_l2_c1024.txt")
-with open(LSTM_DATA_FILE) as f:
-    print(f.readline())
-
-def test_lstm_model():
-    # warnings.warn("LSTM model test disabled")
-    # return
-    dweight = np.array(
-        [
-            [
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                2.6048e-02,
-                0.0000e00,
-                2.4683e-02,
-                0.0000e00,
-                7.4462e-02,
-                0.0000e00,
-                0.0000e00,
-            ],
-            [
-                4.5293e-02,
-                2.6449e-02,
-                2.0459e-02,
-                1.0389e-03,
-                2.5506e-03,
-                1.2957e-03,
-                1.1269e-02,
-                1.1259e-02,
-                2.2045e-02,
-                7.1844e-04,
-                2.2365e-02,
-                3.2253e-02,
-                2.4304e-02,
-                1.8542e-02,
-            ],
-            [
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                1.1629e-01,
-                0.0000e00,
-                8.9053e-02,
-                0.0000e00,
-                1.2982e-01,
-                0.0000e00,
-                0.0000e00,
-            ],
-            [
-                2.4827e-02,
-                2.6828e-02,
-                4.0622e-02,
-                1.1076e-02,
-                4.6308e-02,
-                4.9528e-02,
-                7.8642e-02,
-                1.2699e-01,
-                7.6052e-02,
-                4.0121e-03,
-                3.9182e-02,
-                1.5823e-01,
-                1.6023e-01,
-                1.5397e-01,
-            ],
-        ]
-    )
-    dbias = np.array(
-        [
-            [
-                3.6996e-02,
-                3.2030e-02,
-                4.4361e-02,
-                2.3463e-02,
-                3.6573e-02,
-                8.0527e-02,
-                5.4009e-02,
-                2.6048e-02,
-                4.4343e-02,
-                2.4683e-02,
-                2.6025e-02,
-                7.4462e-02,
-                4.5101e-02,
-                6.7633e-02,
-            ],
-            [
-                6.7948e-02,
-                3.2893e-02,
-                5.7499e-02,
-                2.7081e-02,
-                2.3489e-02,
-                7.3191e-03,
-                3.0556e-02,
-                2.9006e-02,
-                5.2407e-02,
-                5.7077e-02,
-                4.0472e-02,
-                4.4113e-02,
-                4.8772e-02,
-                4.0392e-02,
-            ],
-            [
-                1.5818e-01,
-                2.0412e-01,
-                1.4058e-01,
-                6.3495e-02,
-                5.8194e-02,
-                1.0598e-01,
-                1.3162e-01,
-                1.1629e-01,
-                1.3750e-01,
-                8.9053e-02,
-                1.7813e-01,
-                1.2982e-01,
-                9.6539e-02,
-                9.9578e-02,
-            ],
-            [
-                3.7246e-02,
-                3.3365e-02,
-                1.1416e-01,
-                2.8874e-01,
-                4.2647e-01,
-                2.7976e-01,
-                2.1323e-01,
-                3.2717e-01,
-                1.8079e-01,
-                3.1875e-01,
-                7.0903e-02,
-                2.1641e-01,
-                3.2153e-01,
-                3.3540e-01,
-            ],
-        ]
-    )
-    dhidden = np.array(
-        [
-            6.3463e-02,
-            3.5488e-02,
-            6.4150e-02,
-            3.1274e-01,
-            3.0431e-01,
-            4.4541e-02,
-            1.7661e-02,
-            2.5539e-01,
-            1.9617e-01,
-            1.2687e-01,
-            2.7875e-02,
-            9.1561e-02,
-            2.2210e-01,
-            3.0332e-01,
-        ]
-    )
-    dcell = np.array(
-        [
-            2.1507e-01,
-            1.1897e-01,
-            2.3271e-01,
-            3.2343e-01,
-            4.7445e-01,
-            3.3792e-01,
-            2.7919e-01,
-            3.9026e-01,
-            2.3640e-01,
-            4.3813e-01,
-            1.7612e-01,
-            2.3555e-01,
-            3.0942e-01,
-            3.1736e-01,
-        ]
-    )
-    dinput = np.array(
-        [
-            8.6637e-02,
-            1.5934e-01,
-            5.1677e-02,
-            6.6190e-02,
-            9.7245e-03,
-            3.4641e-02,
-            5.6597e-02,
-            4.2224e-02,
-            5.9924e-02,
-            9.0983e-02,
-            7.4646e-02,
-            9.6997e-02,
-            1.0905e-01,
-            9.6298e-02,
-        ]
-    )
-    [weightb, biasb, hiddenb, cellb, inputb] = jit_file(
-        f"{MLIR_FILES}/lstm/lstm_model.mlir"
-    ).split("Unranked")[1:]
-    tol = 1e-5
-    assert np.abs(extract_2d(weightb) - dweight).max() < tol
-    assert np.abs(extract_2d(biasb) - dbias).max() < tol
-    assert np.abs(extract_1d(hiddenb) - dhidden).max() < tol
-    assert np.abs(extract_1d(cellb) - dcell).max() < tol
-    assert np.abs(extract_1d(inputb) - dinput).max() < tol
+LSTM_DATA_FILE = osp.join(
+    osp.dirname(__file__), "..", "..", "benchmarks", "data", "lstm", "lstm_l2_c1024.txt"
+)
 
 
-def test_lstm_predict():
-    dmain_params = np.array([[[[0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
-           0.0000e+00, 0.0000e+00, 1.6123e-05, 0.0000e+00, 3.0505e-04,
-           0.0000e+00, 1.4799e-05, 0.0000e+00, 0.0000e+00],
-          [3.6861e-03, 1.2443e-03, 9.9836e-05, 2.0881e-04, 5.0143e-04,
-           6.1385e-05, 3.6004e-04, 9.8490e-04, 1.0475e-03, 9.3525e-04,
-           2.2932e-03, 3.0886e-04, 4.0298e-04, 5.2572e-05],
-          [0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
-           0.0000e+00, 0.0000e+00, 4.5264e-04, 0.0000e+00, 1.0146e-03,
-           0.0000e+00, 1.0070e-04, 0.0000e+00, 0.0000e+00],
-          [1.0850e-02, 6.2586e-03, 2.3312e-03, 1.4256e-03, 5.9709e-04,
-           3.8386e-04, 4.7015e-04, 1.8456e-03, 2.9466e-03, 1.1191e-02,
-           3.4889e-03, 2.9224e-04, 3.4476e-04, 7.8977e-05]],
-
-         [[1.9391e-03, 4.9571e-03, 5.8985e-03, 2.2559e-03, 1.2285e-03,
-           3.4768e-03, 1.5681e-04, 9.9528e-05, 1.7787e-03, 1.2600e-03,
-           3.3895e-03, 1.1831e-04, 2.2048e-04, 1.0009e-04],
-          [3.9347e-03, 2.5615e-03, 7.0984e-04, 1.2795e-03, 1.4019e-03,
-           2.0750e-03, 4.5213e-04, 1.1672e-03, 3.1626e-03, 1.6380e-03,
-           3.2923e-03, 4.6741e-04, 4.2217e-04, 1.2261e-04],
-          [1.2610e-02, 6.9887e-03, 7.3676e-03, 4.2621e-03, 3.4372e-03,
-           1.2032e-02, 2.2776e-03, 2.7942e-03, 6.4713e-03, 4.1908e-03,
-           1.1045e-02, 8.0508e-04, 1.2514e-03, 5.3266e-04],
-          [1.1582e-02, 1.2884e-02, 1.6575e-02, 8.7351e-03, 1.6693e-03,
-           1.2976e-02, 5.9040e-04, 2.1872e-03, 8.8965e-03, 1.9600e-02,
-           5.0088e-03, 4.4226e-04, 3.6118e-04, 1.8420e-04]]],
+@pytest.fixture(scope="module")
+def lstm_input():
+    return read_lstm_instance(LSTM_DATA_FILE)
 
 
-        [[[8.4522e-03, 9.2527e-03, 4.4209e-03, 1.2539e-02, 1.0281e-02,
-           8.8494e-03, 4.5071e-03, 3.2662e-03, 5.7158e-03, 3.4229e-03,
-           3.6900e-03, 1.6540e-04, 2.8412e-03, 2.3185e-03],
-          [4.0550e-03, 6.0025e-03, 7.3789e-03, 1.1112e-02, 5.5097e-03,
-           3.5388e-03, 7.4711e-03, 7.9965e-04, 4.2909e-02, 2.5014e-02,
-           1.7925e-02, 2.1290e-03, 1.6853e-04, 5.5360e-03],
-          [3.1236e-02, 2.8110e-02, 2.1061e-02, 2.6024e-02, 3.0646e-02,
-           3.6346e-02, 6.9649e-03, 1.7267e-02, 4.1768e-02, 1.0456e-02,
-           3.5356e-02, 3.6398e-03, 7.7948e-03, 1.2267e-02],
-          [1.7796e-02, 8.7849e-03, 2.7018e-02, 2.3059e-01, 8.0972e-03,
-           7.2849e-03, 1.7094e-01, 1.9981e-03, 1.6023e-01, 8.0115e-02,
-           3.0091e-02, 4.4252e-03, 6.8432e-04, 7.5183e-03]],
-
-         [[2.5415e-02, 2.3092e-02, 1.5452e-02, 3.3131e-02, 1.9731e-02,
-           2.8127e-02, 1.2768e-02, 8.6058e-03, 1.6747e-02, 2.4672e-02,
-           7.6267e-03, 3.9193e-04, 6.1593e-03, 4.6912e-03],
-          [2.1494e-02, 1.6470e-02, 4.0214e-02, 1.1782e-02, 3.8966e-02,
-           2.3812e-02, 9.5861e-03, 3.5642e-02, 4.7445e-02, 3.1675e-02,
-           1.9391e-02, 4.6625e-03, 7.3679e-03, 1.2539e-02],
-          [9.3924e-02, 7.0156e-02, 7.3610e-02, 6.8763e-02, 5.8815e-02,
-           1.1552e-01, 1.9731e-02, 4.5495e-02, 1.2238e-01, 7.5362e-02,
-           7.3077e-02, 8.6248e-03, 1.6898e-02, 2.4821e-02],
-          [9.4328e-02, 2.4105e-02, 1.4725e-01, 2.4451e-01, 5.7266e-02,
-           4.9018e-02, 2.1933e-01, 8.9057e-02, 1.7717e-01, 1.0145e-01,
-           3.2552e-02, 9.6909e-03, 2.9917e-02, 1.7029e-02]]]])
-    dextra_params = np.array(
-        [
-            [
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                0.0000e00,
-                8.4677e-04,
-                0.0000e00,
-                7.1851e-04,
-                0.0000e00,
-                5.5252e-04,
-                0.0000e00,
-                0.0000e00,
-            ],
-            [
-                3.9472e-01,
-                5.5788e-01,
-                2.3744e-01,
-                2.0553e-01,
-                4.3332e-01,
-                4.6490e-01,
-                1.5486e-01,
-                2.5799e-01,
-                3.3530e-01,
-                4.6640e-01,
-                5.0854e-01,
-                4.1405e-01,
-                3.0760e-01,
-                3.8972e-01,
-            ],
-            [
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-                1.0000e00,
-            ],
-        ]
+def test_lstm_model(lstm_input: LSTMInput):
+    # Arrange
+    weight, bias, hidden, cell, _input = (
+        lstm_input.main_params[0],
+        lstm_input.main_params[1],
+        lstm_input.state[0],
+        lstm_input.state[1],
+        lstm_input.sequence[0],
     )
-    dstate = np.array(
-        [
-            [
-                [
-                    9.8126e-03,
-                    1.2439e-02,
-                    8.5007e-03,
-                    7.9599e-03,
-                    2.1749e-03,
-                    7.2984e-03,
-                    8.3456e-04,
-                    2.7471e-03,
-                    4.8876e-03,
-                    4.2732e-03,
-                    1.8113e-03,
-                    4.7288e-04,
-                    6.3542e-04,
-                    1.4470e-04,
-                ],
-                [
-                    1.7317e-02,
-                    1.3428e-02,
-                    1.4885e-02,
-                    9.5447e-03,
-                    4.4388e-03,
-                    1.6850e-02,
-                    2.0929e-03,
-                    5.0928e-03,
-                    1.4722e-02,
-                    1.7989e-02,
-                    1.2310e-02,
-                    1.7056e-03,
-                    1.5055e-03,
-                    5.2409e-04,
-                ],
-            ],
-            [
-                [
-                    3.6663e-02,
-                    2.2093e-02,
-                    1.2515e-01,
-                    1.4005e-02,
-                    2.3765e-02,
-                    6.1788e-02,
-                    1.1238e-02,
-                    3.6083e-02,
-                    1.0191e-01,
-                    1.2450e-01,
-                    2.6533e-02,
-                    9.3172e-03,
-                    3.1023e-02,
-                    7.0472e-03,
-                ],
-                [
-                    1.2203e-01,
-                    5.6194e-02,
-                    2.1203e-01,
-                    2.0610e-01,
-                    1.5693e-01,
-                    9.7057e-02,
-                    2.4490e-01,
-                    1.8638e-01,
-                    2.6064e-01,
-                    1.6082e-01,
-                    1.1807e-01,
-                    2.4715e-02,
-                    4.8781e-02,
-                    3.8790e-02,
-                ],
-            ],
-        ]
+    torch_args = []
+    for arg in [weight, bias, hidden, cell, _input]:
+        targ = torch.from_numpy(arg)
+        targ.requires_grad = True
+        torch_args.append(targ)
+    lstm(*torch_args)[0].sum().backward()
+
+    # Act
+    dweight, dbias, dhidden, dcell, dinput = lagrad_lstm_model(
+        weight.reshape(4, -1), bias.reshape(4, -1), hidden, cell, _input
     )
-    [mainb, extrab, stateb] = jit_file(f"{MLIR_FILES}/lstm/lstm_predict.mlir").split(
-        "Unranked"
-    )[1:]
-    tol = 1e-5
-    assert np.abs(extract_4d(mainb) - dmain_params).max() < tol
-    assert np.abs(extract_2d(extrab) - dextra_params).max() < tol
-    assert np.abs(extract_3d(stateb) - dstate).max() < tol
+
+    # Assert
+    tol = 1e-10
+    assert np.abs(dweight - torch_args[0].grad.view(4, -1).numpy()).sum() < tol
+    assert np.abs(dbias - torch_args[1].grad.view(4, -1).numpy()).sum() < tol
+    assert np.abs(dhidden - torch_args[2].grad.numpy()).sum() < tol
+    assert np.abs(dcell - torch_args[3].grad.numpy()).sum() < tol
+    assert np.abs(dinput - torch_args[4].grad.numpy()).sum() < tol
+
+
+def test_lstm_predict(lstm_input: LSTMInput):
+    x = lstm_input.sequence[0]
+    torch_args = []
+    for arg in [lstm_input.main_params, lstm_input.extra_params, lstm_input.state, x]:
+        targ = torch.from_numpy(arg)
+        targ.requires_grad = True
+        torch_args.append(targ)
+    predict(*torch_args)[0].sum().backward()
+
+    dmain, dextra, dstate = lagrad_lstm_predict(
+        lstm_input.main_params.reshape(2, 2, 4, -1),
+        lstm_input.extra_params,
+        lstm_input.state.reshape(2, 2, -1).copy(),
+        x,
+    )
+
+    tol = 1e-10
+    assert np.abs(dmain - torch_args[0].grad.view(2, 2, 4, -1).numpy()).sum() < tol
+    assert np.abs(dextra - torch_args[1].grad.numpy()).sum() < tol
+    assert np.abs(dstate - torch_args[2].grad.view(2, 2, -1).numpy()).sum() < tol
