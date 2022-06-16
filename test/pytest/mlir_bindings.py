@@ -26,13 +26,6 @@ class MemRefDescriptor(ctypes.Structure):
         cstdlib.free(self.allocated)
         self.freed = True
 
-    def __enter__(self):
-        return self.to_numpy()
-
-    def __exit__(self, typ, value, traceback):
-        if not self.freed:
-            self.free()
-
 
 class F64Descriptor1D(MemRefDescriptor):
     _fields_ = [
@@ -121,17 +114,22 @@ memref_4d = [
 
 
 def ndto_args(arr):
+    if not isinstance(arr, np.ndarray):
+        assert isinstance(arr, np.float64), f"Unexpected argument type: '{type(arr)}'"
+        return (arr,)
     return (
         (arr, arr, 0)
         + arr.shape
         + tuple(stride // arr.itemsize for stride in arr.strides)
     )
 
+
 TMP_DIR = pathlib.Path(__file__).parent / "tmp"
 BENCHMARK_TEMPLATES = (
     pathlib.Path(__file__).parents[2] / "benchmarks" / "mlir" / "templates"
 )
 HAND_MLIR_FILE = f"{BENCHMARK_TEMPLATES}/hand.mlir"
+
 
 def compile_bindings(verbose=False):
     try:
@@ -145,7 +143,16 @@ def compile_bindings(verbose=False):
     except subprocess.CalledProcessError as e:
         raise Exception(e.stderr.decode("utf-8"))
 
+
 compile_bindings()
+
+
+class BAReprojGrad(ctypes.Structure):
+    _fields_ = [
+        ("dcam", F64Descriptor1D),
+        ("dX", F64Descriptor1D),
+        ("dw", ctypes.c_double),
+    ]
 
 
 class LSTMModelGrad(ctypes.Structure):
@@ -167,10 +174,22 @@ class LSTMPredictGrad(ctypes.Structure):
 
 
 def struct_to_tuple(s):
-    return (getattr(s, field[0]).to_numpy() for field in s._fields_)
+    if isinstance(s, float):
+        return s
+    descriptors = (getattr(s, field[0]) for field in s._fields_)
+    return (
+        (desc if isinstance(desc, float) else desc.to_numpy()) for desc in descriptors
+    )
 
 
 mlirlib = ctypes.CDLL(TMP_DIR / "mlir_bindings.dylib")
+mlirlib.lagrad_compute_reproj_error.argtypes = (
+    memref_1d + memref_1d + [ctypes.c_double] + memref_1d + memref_1d
+)
+mlirlib.lagrad_compute_reproj_error.restype = BAReprojGrad
+mlirlib.lagrad_compute_w_error.argtypes = [ctypes.c_double]
+mlirlib.lagrad_compute_w_error.restype = ctypes.c_double
+
 mlirlib.lagrad_lstm_model.argtypes = (
     memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
 )
@@ -183,7 +202,11 @@ def wrap(mlir_func):
     def wrapped(*args):
         args = tuple(arg for ndarr in args for arg in ndto_args(ndarr))
         return struct_to_tuple(mlir_func(*args))
+
     return wrapped
 
+
+lagrad_ba_compute_reproj_error = wrap(mlirlib.lagrad_compute_reproj_error)
+lagrad_ba_compute_w_error = wrap(mlirlib.lagrad_compute_w_error)
 lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
 lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)

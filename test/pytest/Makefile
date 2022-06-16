@@ -41,10 +41,13 @@ LOWER_TO_LLVM=\
 
 MLIR_SRC=../Standalone
 
-OBJECTS=tmp/lstm_model.o tmp/lstm_predict.o
+OBJECTS=tmp/ba.o tmp/lstm_model.o tmp/lstm_predict.o
 
 tmp/mlir_bindings.dylib: $(OBJECTS)
 	clang -dynamiclib -o tmp/mlir_bindings.dylib $(OBJECTS)
+
+tmp/ba.o: $(MLIR_SRC)/ba/ba.mlir
+	$(OPT) $(MLIR_SRC)/ba/ba.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/ba.o
 
 tmp/lstm_model.o: $(MLIR_SRC)/lstm/lstm_model.mlir
 	$(OPT) $(MLIR_SRC)/lstm/lstm_model.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/lstm_model.o
