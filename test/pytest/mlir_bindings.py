@@ -99,6 +99,10 @@ memref_1d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags="C_CONTIGUOUS"),
 ] + [ctypes.c_longlong] * 3
+memref_1d_int = [
+    np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),
+    np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),
+] + [ctypes.c_longlong] * 3
 memref_2d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
@@ -176,12 +180,15 @@ class LSTMPredictGrad(ctypes.Structure):
 def struct_to_tuple(s):
     if isinstance(s, float):
         return s
+    elif isinstance(s, MemRefDescriptor):
+        return s.to_numpy()
     descriptors = (getattr(s, field[0]) for field in s._fields_)
     return (
         (desc if isinstance(desc, float) else desc.to_numpy()) for desc in descriptors
     )
 
 
+ctypes.CDLL(pathlib.Path.home() / ".local" / "lib" / "libmlir_runner_utils.dylib")
 mlirlib = ctypes.CDLL(TMP_DIR / "mlir_bindings.dylib")
 mlirlib.lagrad_compute_reproj_error.argtypes = (
     memref_1d + memref_1d + [ctypes.c_double] + memref_1d + memref_1d
@@ -189,6 +196,29 @@ mlirlib.lagrad_compute_reproj_error.argtypes = (
 mlirlib.lagrad_compute_reproj_error.restype = BAReprojGrad
 mlirlib.lagrad_compute_w_error.argtypes = [ctypes.c_double]
 mlirlib.lagrad_compute_w_error.restype = ctypes.c_double
+
+mlirlib.mto_pose_params.argtypes = memref_1d
+mlirlib.mto_pose_params.restype = F64Descriptor2D
+mlirlib.lagrad_to_pose_params.argtypes = memref_1d
+mlirlib.lagrad_to_pose_params.restype = F64Descriptor1D
+mlirlib.mget_posed_relatives.argtypes = memref_3d + memref_2d
+mlirlib.mget_posed_relatives.restype = F64Descriptor3D
+mlirlib.lagrad_get_posed_relatives.argtypes = memref_3d + memref_2d
+mlirlib.lagrad_get_posed_relatives.restype = F64Descriptor2D
+hand_objective_args = (
+    memref_1d
+    + memref_1d_int
+    + memref_3d
+    + memref_3d
+    + memref_2d
+    + memref_2d
+    + memref_1d_int
+    + memref_2d
+)
+mlirlib.mlir_hand_objective.argtypes = hand_objective_args
+mlirlib.mlir_hand_objective.restype = F64Descriptor2D
+mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
+mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
 
 mlirlib.lagrad_lstm_model.argtypes = (
     memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
@@ -208,5 +238,11 @@ def wrap(mlir_func):
 
 lagrad_ba_compute_reproj_error = wrap(mlirlib.lagrad_compute_reproj_error)
 lagrad_ba_compute_w_error = wrap(mlirlib.lagrad_compute_w_error)
+hand_to_pose_params = wrap(mlirlib.mto_pose_params)
+lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
+hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
+lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
+mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
+lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
 lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
 lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)

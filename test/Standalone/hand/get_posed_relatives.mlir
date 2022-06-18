@@ -1,4 +1,4 @@
-func @meuler_angles_to_rotation_matrix(%xyz: tensor<3xf64>) -> tensor<3x3xf64> attributes {pure = true} {
+func private @meuler_angles_to_rotation_matrix(%xyz: tensor<3xf64>) -> tensor<3x3xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -65,11 +65,6 @@ func @mget_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_params: te
 
     // Bypass the issue with the function call
     %pose_slice = arith.addf %pose_slice_casted, %zero3 : tensor<3xf64>
-    // %pose_slice = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]} ins(%pose_slice_casted : tensor<3xf64>) outs(%pose_slice_casted : tensor<3xf64>) {
-    // ^bb0(%arg0: f64, %arg1: f64):
-    //   %0 = arith.addf %arg0, %zero : f64
-    //   linalg.yield %0 : f64
-    // } -> tensor<3xf64>
 
     %R = call @meuler_angles_to_rotation_matrix(%pose_slice) : (tensor<3xf64>) -> tensor<3x3xf64>
     %tr_0 = tensor.insert_slice %R into %tr_init[0, 0] [3, 3] [1, 1] : tensor<3x3xf64> into tensor<4x4xf64>
@@ -83,39 +78,9 @@ func @mget_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_params: te
   return %relatives : tensor<22x4x4xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-
-func @main() {
-  %c1 = arith.constant 1 : index
-  %c3 = arith.constant 3 : index
-  %c4 = arith.constant 4 : index
-  %c16 = arith.constant 16 : index
-  %base_relatives = tensor.generate {
-  ^bb0(%i: index, %j: index, %k: index):
-    %0 = arith.muli %i, %c16 : index
-    %1 = arith.muli %j, %c4 : index
-    %2 = arith.addi %0, %1 : index
-    %3 = arith.addi %2, %k : index
-    %4 = arith.addi %3, %c1 : index
-    %5 = arith.index_cast %4 : index to i64
-    %6 = arith.sitofp %5 : i64 to f64
-    tensor.yield %6 : f64
-  } : tensor<22x4x4xf64>
-  %pose_params = tensor.generate {
-  ^bb0(%i: index, %j: index):
-    %0 = arith.muli %i, %c3 : index
-    %1 = arith.addi %0, %j : index
-    %2 = arith.addi %1, %c1 : index
-    %3 = arith.index_cast %2 : index to i64
-    %4 = arith.sitofp %3 : i64 to f64
-    tensor.yield %4 : f64
-  } : tensor<25x3xf64>
+func @lagrad_get_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_params: tensor<25x3xf64>) -> tensor<25x3xf64> {
   %f = constant @mget_posed_relatives : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<22x4x4xf64>
   %df = standalone.grad %f {of = [1]} : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<22x4x4xf64>, (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<25x3xf64>
   %res = call_indirect %df(%base_relatives, %pose_params) : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<25x3xf64>
-  // %s = tensor.extract_slice %res[7, 0, 0] [1, 4, 4] [1, 1, 1] : tensor<22x4x4xf64> to tensor<4x4xf64>
-  %U = tensor.cast %res : tensor<25x3xf64> to tensor<*xf64>
-  // %U = tensor.cast %base_relatives : tensor<22x4x4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-  return
+  return %res : tensor<25x3xf64>
 }

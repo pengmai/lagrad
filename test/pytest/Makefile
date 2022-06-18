@@ -1,13 +1,12 @@
 OPT=../../build/bin/standalone-opt
 CC=clang
 MLIR_TO_OBJ=mlir-translate -mlir-to-llvmir | llc -filetype=obj
-
+RUNNER_UTILS=$$HOME/.local/lib/libmlir_runner_utils.dylib
 PREPROCESS=\
 -take-grads\
 -canonicalize\
 -inline\
 -linalg-canonicalize\
--standalone-dce\
 -symbol-dce\
 -convert-elementwise-to-linalg\
 -convert-linalg-triangular-to-loops\
@@ -41,16 +40,31 @@ LOWER_TO_LLVM=\
 
 MLIR_SRC=../Standalone
 
-OBJECTS=tmp/ba.o tmp/lstm_model.o tmp/lstm_predict.o
+OBJECTS=\
+tmp/ba.o\
+tmp/hand_to_pose_params.o\
+tmp/hand_get_posed_relatives.o\
+tmp/hand_objective.o\
+tmp/lstm_model.o\
+tmp/lstm_predict.o
 
 tmp/mlir_bindings.dylib: $(OBJECTS)
-	clang -dynamiclib -o tmp/mlir_bindings.dylib $(OBJECTS)
+	clang -dynamiclib -o tmp/mlir_bindings.dylib $(OBJECTS) $(RUNNER_UTILS)
 
-tmp/ba.o: $(MLIR_SRC)/ba/ba.mlir
+tmp/ba.o: $(MLIR_SRC)/ba/ba.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/ba/ba.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/ba.o
 
-tmp/lstm_model.o: $(MLIR_SRC)/lstm/lstm_model.mlir
+tmp/hand_to_pose_params.o: $(MLIR_SRC)/hand/to_pose_params.mlir $(OPT)
+	$(OPT) $(MLIR_SRC)/hand/to_pose_params.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_to_pose_params.o
+
+tmp/hand_get_posed_relatives.o: $(MLIR_SRC)/hand/get_posed_relatives.mlir $(OPT)
+	$(OPT) $(MLIR_SRC)/hand/get_posed_relatives.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_get_posed_relatives.o
+
+tmp/hand_objective.o: $(MLIR_SRC)/hand/hand_objective.mlir $(OPT)
+	$(OPT) $(MLIR_SRC)/hand/hand_objective.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_objective.o
+
+tmp/lstm_model.o: $(MLIR_SRC)/lstm/lstm_model.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/lstm/lstm_model.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/lstm_model.o
 
-tmp/lstm_predict.o: $(MLIR_SRC)/lstm/lstm_predict.mlir
+tmp/lstm_predict.o: $(MLIR_SRC)/lstm/lstm_predict.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/lstm/lstm_predict.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/lstm_predict.o

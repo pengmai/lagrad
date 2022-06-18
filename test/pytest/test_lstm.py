@@ -5,7 +5,6 @@ from pytorch_ref.pytorch_lstm import lstm, predict
 from mlir_bindings import lagrad_lstm_model, lagrad_lstm_predict
 import torch
 import os.path as osp
-import numpy as np
 
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 LSTM_DATA_FILE = osp.join(
@@ -41,19 +40,20 @@ def test_lstm_model(lstm_input: LSTMInput):
 
     # Assert
     tol = 1e-10
-    assert np.abs(dweight - torch_args[0].grad.view(4, -1).numpy()).sum() < tol
-    assert np.abs(dbias - torch_args[1].grad.view(4, -1).numpy()).sum() < tol
-    assert np.abs(dhidden - torch_args[2].grad.numpy()).sum() < tol
-    assert np.abs(dcell - torch_args[3].grad.numpy()).sum() < tol
-    assert np.abs(dinput - torch_args[4].grad.numpy()).sum() < tol
+    assert dweight == pytest.approx(torch_args[0].grad.view(4, -1), tol)
+    assert dbias == pytest.approx(torch_args[1].grad.view(4, -1), tol)
+    assert dhidden == pytest.approx(torch_args[2].grad, tol)
+    assert dcell == pytest.approx(torch_args[3].grad, tol)
+    assert dinput == pytest.approx(torch_args[4].grad, tol)
 
 
 def test_lstm_predict(lstm_input: LSTMInput):
     x = lstm_input.sequence[0]
     torch_args = []
-    for arg in [lstm_input.main_params, lstm_input.extra_params, lstm_input.state, x]:
+    for i, arg in enumerate([lstm_input.main_params, lstm_input.extra_params, lstm_input.state, x]):
         targ = torch.from_numpy(arg)
-        targ.requires_grad = True
+        if i < 3:
+            targ.requires_grad = True
         torch_args.append(targ)
     predict(*torch_args)[0].sum().backward()
 
@@ -65,6 +65,6 @@ def test_lstm_predict(lstm_input: LSTMInput):
     )
 
     tol = 1e-10
-    assert np.abs(dmain - torch_args[0].grad.view(2, 2, 4, -1).numpy()).sum() < tol
-    assert np.abs(dextra - torch_args[1].grad.numpy()).sum() < tol
-    assert np.abs(dstate - torch_args[2].grad.view(2, 2, -1).numpy()).sum() < tol
+    assert dmain == pytest.approx(torch_args[0].grad.view(2, 2, 4, -1), tol)
+    assert dextra == pytest.approx(torch_args[1].grad, tol)
+    assert dstate == pytest.approx(torch_args[2].grad.view(2, 2, -1), tol)

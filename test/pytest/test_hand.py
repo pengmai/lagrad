@@ -1,46 +1,52 @@
+import pytest
+import pathlib
 import os.path as osp
+import torch
 import numpy as np
+from benchmark_io import read_hand_instance, HandInput
+from pytorch_ref.pytorch_hand import to_pose_params, get_posed_relatives, hand_objective
+from pytorch_ref.utils import torch_jacobian
+from mlir_bindings import (
+    hand_to_pose_params,
+    lagrad_hand_to_pose_params,
+    hand_get_posed_relatives,
+    lagrad_get_posed_relatives,
+    mlir_hand_objective,
+    lagrad_hand_objective,
+)
 from toolchain import jit_file
 from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
 
+HAND_DATA_DIR = (
+    pathlib.Path(__file__).parents[2] / "benchmarks" / "data" / "hand" / "simple_small"
+)
+MODEL_DIR = HAND_DATA_DIR / "model"
+HAND_DATA_FILE = HAND_DATA_DIR / "test.txt"
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 
 
-def test_to_pose_params():
-    primal, adj = jit_file(f"{MLIR_FILES}/hand/to_pose_params.mlir").split("Unranked")[
-        1:
-    ]
-    primal = extract_2d(primal)
-    adj = extract_1d(adj)
-    expected_primal = [
-        [1, 2, 3],
-        [1, 1, 1],
-        [4, 5, 6],
-        [0, 0, 0],
-        [0, 0, 0],
-        [7, 8, 0],
-        [9, 0, 0],
-        [10, 0, 0],
-        [0, 0, 0],
-        [11, 12, 0],
-        [13, 0, 0],
-        [14, 0, 0],
-        [0, 0, 0],
-        [15, 16, 0],
-        [17, 0, 0],
-        [18, 0, 0],
-        [0, 0, 0],
-        [19, 20, 0],
-        [21, 0, 0],
-        [22, 0, 0],
-        [0, 0, 0],
-        [23, 24, 0],
-        [25, 0, 0],
-        [26, 0, 0],
-        [0, 0, 0],
-    ]
-    assert primal == expected_primal
-    assert adj == np.ones(26).tolist()
+@pytest.fixture(scope="module")
+def hand_input():
+    inp = read_hand_instance(MODEL_DIR, HAND_DATA_FILE, read_us=False)
+    return inp
+
+
+@pytest.fixture
+def pose_params(hand_input):
+    return hand_to_pose_params(hand_input.theta)
+
+
+def test_to_pose_params(hand_input: HandInput):
+    ttheta = torch.from_numpy(hand_input.theta)
+    ttheta.requires_grad = True
+    torch_primal = to_pose_params(ttheta, hand_input.data.model.bone_count)
+    torch_primal.sum().backward()
+
+    mlir_primal = hand_to_pose_params(hand_input.theta)
+    mlir_grad = lagrad_hand_to_pose_params(hand_input.theta)
+    tol = 1e-10
+    assert mlir_primal == pytest.approx(torch_primal.detach(), tol)
+    assert mlir_grad == pytest.approx(ttheta.grad, tol)
 
 
 def test_pose_relatives_body():
@@ -51,37 +57,26 @@ def test_pose_relatives_body():
     )
 
 
-def test_get_posed_relatives():
-    expected = [
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-        [7.64197, -6.62924, -39.948],
-        [10.2865, 50.6281, -136.472],
-        [130.857, -149.433, -339.47],
-        [-196.358, -92.8808, -411.033],
-        [291.604, -413.609, -653.054],
-        [-607.845, -505.337, -739.837],
-        [578.474, -675.249, -845.945],
-        [-930.038, -923.424, -895.76],
-        [973.027, -850.391, -914.047],
-        [-819.011, -980.066, -643.158],
-        [1395.82, -873.335, -932.316],
-        [-115.773, -462.371, 54.694],
-        [1797.5, -652.014, -946.62],
-        [1004.88, 500.791, 922.301],
-        [2187.01, -91.9165, -926.029],
-        [2098.76, 1466.5, 1467.93],
-        [2553.83, 788.091, -829.505],
-        [2710.84, 1919.31, 1258.32],
-        [2755.56, 1735.47, -723.26],
-        [2662.28, 1571.34, 200.056],
-        [2504.22, 2277.98, -816.961],
-        [2166.97, 520.21, -1370.05],
-    ]
-    assert (
-        extract_2d(jit_file(f"{MLIR_FILES}/hand/get_posed_relatives.mlir")) == expected
+def test_get_posed_relatives(hand_input: HandInput, pose_params):
+    tpp = torch.from_numpy(pose_params)
+    tpp.requires_grad = True
+    torch_posed_relatives = get_posed_relatives(
+        tpp, torch.from_numpy(hand_input.data.model.base_relatives)
     )
+    torch_posed_relatives.sum().backward()
+    base_relatives = np.ascontiguousarray(
+        hand_input.data.model.base_relatives.transpose(0, 2, 1)
+    )
+    mlir_posed_relatives = hand_get_posed_relatives(base_relatives, pose_params)
+
+    dpose_params = lagrad_get_posed_relatives(
+        base_relatives,
+        pose_params,
+    )
+    assert mlir_posed_relatives == pytest.approx(
+        torch_posed_relatives.transpose(1, 2).detach()
+    )
+    assert dpose_params == pytest.approx(tpp.grad, rel=1e-5)
 
 
 def test_angle_axis_to_rotation_matrix():
@@ -259,3 +254,48 @@ def test_relatives_to_absolutes():
     ]
     adjoint = extract_3d(jit_file(f"{MLIR_FILES}/hand/relatives_to_absolutes.mlir"))
     assert adjoint == expected
+
+
+def test_hand_objective_simple(hand_input: HandInput):
+    ttheta = torch.from_numpy(hand_input.theta)
+    ttheta.requires_grad = True
+    model = hand_input.data.model
+    tparams = [
+        (torch.from_numpy(arg) if isinstance(arg, np.ndarray) else arg)
+        for arg in [
+            model.bone_count,
+            model.parents,
+            model.base_relatives,
+            model.inverse_base_absolutes,
+            model.base_positions,
+            model.weights,
+            model.is_mirrored,
+            hand_input.data.points,
+            hand_input.data.correspondences,
+        ]
+    ]
+
+    torch_primal, torch_J = torch_jacobian(hand_objective, (ttheta,), tparams, False)
+    mparams = (
+        hand_input.theta,
+        model.parents.astype(np.int32),
+        # MLIR is implemented assuming these matrices are column-major.
+        np.ascontiguousarray(model.base_relatives.transpose(0, 2, 1)),
+        np.ascontiguousarray(model.inverse_base_absolutes.transpose(0, 2, 1)),
+        model.base_positions,
+        model.weights,
+        hand_input.data.correspondences.astype(np.int32),
+        hand_input.data.points,
+    )
+
+    mprimal = mlir_hand_objective(*mparams)
+    err_size = np.prod(hand_input.data.points.shape)
+    lagrad_J = np.empty((err_size, hand_input.theta.shape[0]))
+    for i in range(err_size):
+        g = np.zeros_like(hand_input.data.points)
+        stride = hand_input.data.points.shape[1]
+        g[i // stride, i % stride] = 1.0
+        lagrad_J[i, :] = lagrad_hand_objective(*(mparams + (g,)))
+    tol = 1e-8
+    assert mprimal == pytest.approx(torch_primal.detach(), tol)
+    assert lagrad_J == pytest.approx(torch_J)

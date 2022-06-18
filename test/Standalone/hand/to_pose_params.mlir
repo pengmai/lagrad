@@ -45,22 +45,9 @@ func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
   return %pp_2#0 : tensor<25x3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-func private @print_memref_i64(memref<*xi64>) attributes { llvm.emit_c_interface }
-
-func @main() {
-  %theta = arith.constant dense<[
-    1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13.,
-    14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25., 26.
-  ]> : tensor<26xf64>
-  %pose_params = call @mto_pose_params(%theta) : (tensor<26xf64>) -> tensor<25x3xf64>
-  %U = tensor.cast %pose_params : tensor<25x3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
-
+func @lagrad_to_pose_params(%theta: tensor<26xf64>) -> tensor<26xf64> {
   %f = constant @mto_pose_params : (tensor<26xf64>) -> tensor<25x3xf64>
   %df = standalone.grad %f : (tensor<26xf64>) -> tensor<25x3xf64>, (tensor<26xf64>) -> tensor<26xf64>
   %res = call_indirect %df(%theta) : (tensor<26xf64>) -> tensor<26xf64>
-  %U0 = tensor.cast %res : tensor<26xf64> to tensor<*xf64>
-  call @print_memref_f64(%U0) : (tensor<*xf64>) -> ()
-  return
+  return %res : tensor<26xf64>
 }
