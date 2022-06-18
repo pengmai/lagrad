@@ -205,6 +205,10 @@ mlirlib.mget_posed_relatives.argtypes = memref_3d + memref_2d
 mlirlib.mget_posed_relatives.restype = F64Descriptor3D
 mlirlib.lagrad_get_posed_relatives.argtypes = memref_3d + memref_2d
 mlirlib.lagrad_get_posed_relatives.restype = F64Descriptor2D
+mlirlib.mrelatives_to_absolutes.argtypes = memref_3d + memref_1d_int
+mlirlib.mrelatives_to_absolutes.restype = F64Descriptor3D
+mlirlib.lagrad_relatives_to_absolutes.argtypes = memref_3d + memref_1d_int
+mlirlib.lagrad_relatives_to_absolutes.restype = F64Descriptor3D
 hand_objective_args = (
     memref_1d
     + memref_1d_int
@@ -242,6 +246,8 @@ hand_to_pose_params = wrap(mlirlib.mto_pose_params)
 lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
 hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
 lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
+hand_relatives_to_absolutes = wrap(mlirlib.mrelatives_to_absolutes)
+lagrad_relatives_to_absolutes = wrap(mlirlib.lagrad_relatives_to_absolutes)
 mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
 lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
 lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)

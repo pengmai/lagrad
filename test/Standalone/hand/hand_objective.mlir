@@ -212,7 +212,7 @@ func private @mget_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_pa
   return %relatives : tensor<22x4x4xf64>
 }
 
-func @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
+func private @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c3 = arith.constant 3 : index
