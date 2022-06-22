@@ -52,7 +52,6 @@ def lstm_objective(main_params, extra_params, state, sequence, _range=None):
             main_params, extra_params, all_states[t], sequence[t]
         )
         all_states.append(new_state)
-        # total += sum(ypred)
         ynorm = ypred - torch.log(sum(torch.exp(ypred), 2))
         ygold = sequence[t + 1]
         total += sum(ygold * ynorm)
