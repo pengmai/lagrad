@@ -11,6 +11,7 @@ func @main() -> i64 {
   %source_B = arith.constant dense<[9., 10., -11., 12.]> : tensor<4xf32>
   %source_C = arith.constant dense<1.0> : tensor<f32>
   %zero = arith.constant 0.0 : f32
+  %one = arith.constant 1.0 : f32
 
   %A = memref.buffer_cast %source_A : memref<4xf32>
   %dA = memref.alloca() : memref<4xf32>
@@ -19,10 +20,12 @@ func @main() -> i64 {
   %dB = memref.alloca() : memref<4xf32>
   linalg.fill(%zero, %dB) : f32, memref<4xf32>
   %C = memref.buffer_cast %source_C : memref<f32>
+  %dC = memref.alloca() : memref<f32>
+  memref.store %one, %dC[] : memref<f32>
 
   %f = constant @dot : (memref<4xf32>, memref<4xf32>, memref<f32>) -> f32
   %df = standalone.diff %f : (memref<4xf32>, memref<4xf32>, memref<f32>) -> f32, (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
-  call_indirect %df(%A, %dA, %B, %dB, %C, %C) : (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
+  call_indirect %df(%A, %dA, %B, %dB, %C, %dC) : (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
 
   %U = memref.cast %dA : memref<4xf32> to memref<*xf32>
   call @print_memref_f32(%U) : (memref<*xf32>) -> ()

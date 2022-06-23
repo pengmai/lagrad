@@ -43,11 +43,13 @@ func @main() -> i64 {
   %B = memref.buffer_cast %source_B : memref<4x4xf64>
   %dB = memref.alloca() : memref<4x4xf64>
   linalg.fill(%zero, %dB) : f64, memref<4x4xf64>
+  %out = memref.alloca() : memref<4x4xf64>
+  linalg.fill(%zero, %out) : f64, memref<4x4xf64>
   %C = memref.buffer_cast %source_C : memref<4x4xf64>
 
   %f = constant @generic_matmul : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
   %df = standalone.diff %f : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64, (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
-  call_indirect %df(%A, %dA, %B, %dB, %C, %C) : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
+  call_indirect %df(%A, %dA, %B, %dB, %out, %C) : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
 
   %U = memref.cast %dA : memref<4x4xf64> to memref<*xf64>
   call @print_memref_f64(%U) : (memref<*xf64>) -> ()
