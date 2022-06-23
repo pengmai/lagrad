@@ -6,6 +6,7 @@ TODO: Should really consolidate the test_grad.py files, after fixing these tests
 Some files are missing from transferring computers.
 """
 
+import pytest
 import os.path as osp
 import numpy as np
 from jinja2 import Template
@@ -133,26 +134,18 @@ def test_logsumexp():
     assert np.abs(expected - mlir_res).sum() < 1e-7
 
 
-def disabled_test_nonconst_out():
-    from autograd import elementwise_grad
-    import autograd.numpy as np
+def test_nonconst_out():
+    expected = np.array([3.076, 1.662, -0.518, 0.219])
+    assert np.array(
+        extract_1d(jit_file(f"{MLIR_FILES}/generic/nonconst_out.mlir"))
+    ) == pytest.approx(expected)
 
-    with open(f"{MLIR_FILES}/generic/nonconst_out.mlir") as f:
-        template = Template(f.read())
-    np.random.seed(0)
-    A = np.array(
-        [
-            [0.377, 0.283, 0.155, 0.858],
-            [0.3, 0.431, 0.851, 0.137],
-            [0.776, 0.555, 0.771, 0.233],
-            [0.623, 0.193, 0.005, 0.691],
-        ]
-    )
-    B = np.array([4.0, -3.0, 2.0, 1.0])
-    C = np.array([1.0, 0.2, -2.3, -1.7])
 
-    print(elementwise_grad(lambda x, y, z: y * z + np.dot(x, y), 1)(A, B, C))
-    print(np.array([2.076, 1.462, 1.782, 1.919]) + C)
+def test_logsumexp_add2():
+    expected = np.array([0.0313198, 0.0851362, 0.231424, 0.629076])
+    assert np.array(
+        extract_1d(jit_file(f"{MLIR_FILES}/generic/logsumexp_add2.mlir"))
+    ) == pytest.approx(expected)
 
 
 def test_logsumexp_1d():
@@ -342,25 +335,16 @@ def test_nested_with_slice():
             ],
         ]
     )
-    assert (
-        np.abs(
-            np.array(extract_2d(jit_file(f"{MLIR_FILES}/scf/nested_with_slice.mlir")))
-            - expected
-        ).sum()
-        < 1e-4
-    )
+    assert np.array(
+        extract_2d(jit_file(f"{MLIR_FILES}/scf/nested_with_slice.mlir"))
+    ) == pytest.approx(expected, rel=1e-5)
 
 
 def test_pow_tensor():
     expected = 4 * np.array([1.3, 1.4, 1.5, 1.6]) ** 3
-    assert (
-        np.sum(
-            np.abs(
-                extract_1d(jit_file(f"{MLIR_FILES}/cache/pow_tensor.mlir")) - expected
-            )
-        )
-        < 1e5
-    )
+    assert np.array(
+        extract_1d(jit_file(f"{MLIR_FILES}/cache/pow_tensor.mlir"))
+    ) == pytest.approx(expected)
 
 
 def disabled_test_if_else():
