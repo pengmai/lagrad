@@ -209,6 +209,12 @@ mlirlib.mrelatives_to_absolutes.argtypes = memref_3d + memref_1d_int
 mlirlib.mrelatives_to_absolutes.restype = F64Descriptor3D
 mlirlib.lagrad_relatives_to_absolutes.argtypes = memref_3d + memref_1d_int
 mlirlib.lagrad_relatives_to_absolutes.restype = F64Descriptor3D
+mlirlib.HELPER_get_transforms.argtypes = (
+    memref_1d + memref_1d_int + memref_3d + memref_3d
+)
+mlirlib.HELPER_get_transforms.restype = F64Descriptor3D
+mlirlib.lagrad_skinned_vertex_subset.argtypes = memref_3d + memref_2d + memref_2d
+mlirlib.lagrad_skinned_vertex_subset.restype = F64Descriptor3D
 hand_objective_args = (
     memref_1d
     + memref_1d_int
@@ -224,12 +230,14 @@ mlirlib.mlir_hand_objective.restype = F64Descriptor2D
 mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
 mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
 
-mlirlib.lagrad_lstm_model.argtypes = (
-    memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
-)
-mlirlib.lagrad_lstm_model.restype = LSTMModelGrad
-mlirlib.lagrad_lstm_predict.argtypes = memref_4d + memref_2d + memref_3d + memref_1d
-mlirlib.lagrad_lstm_predict.restype = LSTMPredictGrad
+DISABLE_LSTM = False
+if not DISABLE_LSTM:
+    mlirlib.lagrad_lstm_model.argtypes = (
+        memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
+    )
+    mlirlib.lagrad_lstm_model.restype = LSTMModelGrad
+    mlirlib.lagrad_lstm_predict.argtypes = memref_4d + memref_2d + memref_3d + memref_1d
+    mlirlib.lagrad_lstm_predict.restype = LSTMPredictGrad
 
 
 def wrap(mlir_func):
@@ -248,7 +256,10 @@ hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
 lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
 hand_relatives_to_absolutes = wrap(mlirlib.mrelatives_to_absolutes)
 lagrad_relatives_to_absolutes = wrap(mlirlib.lagrad_relatives_to_absolutes)
+mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
+lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
 mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
 lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
-lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
-lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)
+if not DISABLE_LSTM:
+    lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
+    lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)

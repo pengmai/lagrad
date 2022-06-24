@@ -1,3 +1,4 @@
+from asyncio import base_subprocess
 import pytest
 import pathlib
 import os.path as osp
@@ -8,6 +9,8 @@ from pytorch_ref.pytorch_hand import (
     to_pose_params,
     get_posed_relatives,
     relatives_to_absolutes,
+    helper_get_transforms,
+    skinned_vertex_subset,
     hand_objective,
 )
 from pytorch_ref.utils import torch_jacobian
@@ -18,11 +21,13 @@ from mlir_bindings import (
     lagrad_get_posed_relatives,
     hand_relatives_to_absolutes,
     lagrad_relatives_to_absolutes,
+    mlir_HELPER_get_transforms,
+    lagrad_skinned_vertex_subset,
     mlir_hand_objective,
     lagrad_hand_objective,
 )
 from toolchain import jit_file
-from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
+from stdout_parser import extract_1d, extract_2d
 
 HAND_DATA_DIR = (
     pathlib.Path(__file__).parents[2] / "benchmarks" / "data" / "hand" / "simple_small"
@@ -49,6 +54,19 @@ def posed_relatives(hand_input, pose_params):
         hand_input.data.model.base_relatives.transpose(0, 2, 1)
     )
     return hand_get_posed_relatives(base_relatives, pose_params)
+
+
+@pytest.fixture(scope="module")
+def transforms(hand_input):
+    """Remember that this is transposed relative to the PyTorch version."""
+    model = hand_input.data.model
+    return mlir_HELPER_get_transforms(
+        hand_input.theta,
+        model.parents.astype(np.int32),
+        # MLIR is implemented assuming these matrices are column-major.
+        np.ascontiguousarray(model.base_relatives.transpose(0, 2, 1)),
+        np.ascontiguousarray(model.inverse_base_absolutes.transpose(0, 2, 1)),
+    )
 
 
 def test_to_pose_params(hand_input: HandInput):
@@ -108,6 +126,33 @@ def test_angle_axis_to_rotation_matrix():
     adjoint = extract_1d(line2)
     assert primal == expected_pri
     assert adjoint == expected_adj
+
+
+def test_skinned_vertex_subset(hand_input: HandInput, transforms):
+    model = hand_input.data.model
+    ttransforms = helper_get_transforms(
+        *(
+            torch.from_numpy(arg)
+            for arg in [
+                hand_input.theta,
+                model.base_relatives,
+                model.parents,
+                model.inverse_base_absolutes,
+            ]
+        )
+    )
+    ttransforms.requires_grad = True
+    skinned_vertex_subset(
+        *(
+            [ttransforms]
+            + [torch.from_numpy(arg) for arg in [model.base_positions, model.weights]]
+        )
+    ).sum().backward()
+
+    lagrad_adj = lagrad_skinned_vertex_subset(
+        transforms, model.base_positions, model.weights
+    )
+    assert lagrad_adj == pytest.approx(ttransforms.grad.transpose(1, 2))
 
 
 def test_apply_global_transform():

@@ -7,6 +7,7 @@ PREPROCESS=\
 -canonicalize\
 -inline\
 -linalg-canonicalize\
+-standalone-dce\
 -symbol-dce\
 -convert-elementwise-to-linalg\
 -convert-linalg-triangular-to-loops\
@@ -44,6 +45,8 @@ OBJECTS=\
 tmp/ba.o\
 tmp/hand_to_pose_params.o\
 tmp/hand_get_posed_relatives.o\
+tmp/hand_relatives_to_absolutes.o\
+tmp/skinned_vertex_subset.o\
 tmp/hand_objective.o\
 tmp/lstm_model.o\
 tmp/lstm_predict.o
@@ -60,6 +63,12 @@ tmp/hand_to_pose_params.o: $(MLIR_SRC)/hand/to_pose_params.mlir $(OPT)
 tmp/hand_get_posed_relatives.o: $(MLIR_SRC)/hand/get_posed_relatives.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/hand/get_posed_relatives.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_get_posed_relatives.o
 
+tmp/hand_relatives_to_absolutes.o: $(MLIR_SRC)/hand/relatives_to_absolutes.mlir $(OPT)
+	$(OPT) $(MLIR_SRC)/hand/relatives_to_absolutes.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_relatives_to_absolutes.o
+
+tmp/skinned_vertex_subset.o: $(MLIR_SRC)/hand/skinned_vertex_subset.mlir $(OPT)
+	$(OPT) $(MLIR_SRC)/hand/skinned_vertex_subset.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/skinned_vertex_subset.o
+
 tmp/hand_objective.o: $(MLIR_SRC)/hand/hand_objective.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/hand/hand_objective.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_objective.o
 
@@ -68,3 +77,6 @@ tmp/lstm_model.o: $(MLIR_SRC)/lstm/lstm_model.mlir $(OPT)
 
 tmp/lstm_predict.o: $(MLIR_SRC)/lstm/lstm_predict.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/lstm/lstm_predict.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/lstm_predict.o
+
+clean:
+	rm $(OBJECTS) tmp/mlir_bindings.dylib
