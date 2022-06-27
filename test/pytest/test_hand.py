@@ -1,4 +1,3 @@
-from asyncio import base_subprocess
 import pytest
 import pathlib
 import os.path as osp
@@ -77,9 +76,8 @@ def test_to_pose_params(hand_input: HandInput):
 
     mlir_primal = hand_to_pose_params(hand_input.theta)
     mlir_grad = lagrad_hand_to_pose_params(hand_input.theta)
-    tol = 1e-10
-    assert mlir_primal == pytest.approx(torch_primal.detach(), tol)
-    assert mlir_grad == pytest.approx(ttheta.grad, tol)
+    assert mlir_primal == pytest.approx(torch_primal.detach())
+    assert mlir_grad == pytest.approx(ttheta.grad)
 
 
 def test_pose_relatives_body():
@@ -235,6 +233,5 @@ def test_hand_objective_simple(hand_input: HandInput):
         stride = hand_input.data.points.shape[1]
         g[i // stride, i % stride] = 1.0
         lagrad_J[i, :] = lagrad_hand_objective(*(mparams + (g,)))
-    tol = 1e-8
-    assert mprimal == pytest.approx(torch_primal.detach(), tol)
+    assert mprimal == pytest.approx(torch_primal.detach())
     assert lagrad_J == pytest.approx(torch_J)
