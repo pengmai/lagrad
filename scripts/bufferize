@@ -1,4 +1,4 @@
 #!/bin/bash
 
-PASSES="-tensor-constant-bufferize -tensor-bufferize -standalone-bufferize -linalg-bufferize -scf-bufferize -func-bufferize -finalizing-bufferize -buffer-hoisting -buffer-loop-hoisting -standalone-loop-hoisting -promote-buffers-to-stack"
+PASSES="-tensor-constant-bufferize -tensor-bufferize -standalone-bufferize -linalg-bufferize -scf-bufferize -func-bufferize -finalizing-bufferize -buffer-hoisting -buffer-loop-hoisting -standalone-loop-hoisting -promote-buffers-to-stack -canonicalize"
 ./build/bin/standalone-opt "${1:-/dev/stdin}" $PASSES

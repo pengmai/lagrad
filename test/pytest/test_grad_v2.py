@@ -235,7 +235,7 @@ def test_wrt_iter_arg():
     ]
 
 
-def test_scalar_scf_for():
+def disabled_test_scalar_scf_for():
     expected = 12 * 1.1 ** 11
 
     def test(x):
