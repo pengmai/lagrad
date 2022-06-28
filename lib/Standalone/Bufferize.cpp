@@ -18,6 +18,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
+constexpr bool in_place = false;
 
 namespace {
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
@@ -26,12 +27,23 @@ public:
   LogicalResult
   matchAndRewrite(tensor::InsertOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // This first implementation updates the tensor in place rather than
-    // returning a copy per the spec. Watch out for bugs this may cause.
-    rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
-                                     adaptor.dest(), adaptor.indices());
-    auto loaded =
-        rewriter.create<memref::TensorLoadOp>(op.getLoc(), adaptor.dest());
+    memref::TensorLoadOp loaded;
+    if (in_place) {
+      // This first implementation updates the tensor in place rather than
+      // returning a copy per the spec. Watch out for bugs this may cause.
+      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
+                                       adaptor.dest(), adaptor.indices());
+      loaded =
+          rewriter.create<memref::TensorLoadOp>(op.getLoc(), adaptor.dest());
+    } else {
+      auto space = rewriter.create<memref::AllocOp>(
+          op.getLoc(), adaptor.dest().getType().cast<MemRefType>());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), space);
+      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(), space,
+                                       adaptor.indices());
+      loaded = rewriter.create<memref::TensorLoadOp>(op.getLoc(), space);
+    }
+
     op.replaceAllUsesWith(loaded.getResult());
     rewriter.eraseOp(op);
     return success();
@@ -70,13 +82,21 @@ public:
     auto resultType =
         MemRefType::get(resultTensorType.getShape(),
                         resultTensorType.getElementType(), slice_layout);
-    auto identityResultType = getTypeConverter()->convertType(resultTensorType);
+    auto identityResultType =
+        getTypeConverter()->convertType(resultTensorType).cast<MemRefType>();
 
     auto subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(), resultType, adaptor.source(), op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
-    rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
-                                                identityResultType);
+    if (in_place) {
+      rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
+                                                  identityResultType);
+    } else {
+      auto dest =
+          rewriter.create<memref::AllocOp>(op.getLoc(), identityResultType);
+      rewriter.create<linalg::CopyOp>(op.getLoc(), subview, dest);
+      rewriter.replaceOp(op, dest.getResult());
+    }
     return success();
   }
 };
@@ -99,14 +119,42 @@ public:
         getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
     auto sliceType = MemRefType::get(destType.getShape(),
                                      destType.getElementType(), slice_layout);
-    // auto dest = rewriter.create<memref::AllocOp>(
-    //     op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
-    // rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
-    auto subview = rewriter.create<memref::SubViewOp>(
-        op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
-        op.getMixedSizes(), op.getMixedStrides());
-    rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
-    rewriter.replaceOp(op, adaptor.dest());
+    auto make_copy = op->getAttr("make_copy").dyn_cast_or_null<BoolAttr>();
+    // if (make_copy && make_copy.getValue()) {
+    //   auto dest = rewriter.create<memref::AllocOp>(
+    //       op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
+    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
+    //   auto subview = rewriter.create<memref::SubViewOp>(
+    //       op.getLoc(), sliceType, dest, op.getMixedOffsets(),
+    //       op.getMixedSizes(), op.getMixedStrides());
+
+    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(),
+    //   subview); rewriter.replaceOp(op, dest.getResult());
+    // } else {
+    //   auto subview = rewriter.create<memref::SubViewOp>(
+    //       op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
+    //       op.getMixedSizes(), op.getMixedStrides());
+    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(),
+    //   subview); rewriter.replaceOp(op, adaptor.dest());
+    // }
+    auto insert_slice_in_place = true;
+    if (insert_slice_in_place) {
+      auto subview = rewriter.create<memref::SubViewOp>(
+          op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
+          op.getMixedSizes(), op.getMixedStrides());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
+      rewriter.replaceOp(op, adaptor.dest());
+    } else {
+      auto dest = rewriter.create<memref::AllocOp>(
+          op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
+      auto subview = rewriter.create<memref::SubViewOp>(
+          op.getLoc(), sliceType, dest, op.getMixedOffsets(),
+          op.getMixedSizes(), op.getMixedStrides());
+
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
+      rewriter.replaceOp(op, dest.getResult());
+    }
     return success();
   }
 };

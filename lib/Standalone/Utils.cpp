@@ -362,6 +362,23 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
+  // if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
+  // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
+  // "\n"; if (!env[insertSliceOp.result()]) {
+  //   llvm::errs() << "need to populate the insert slice result vjp\n";
+  // } else {
+  //   llvm::errs() << "insert slice op result has a vjp\n";
+  // }
+  // if (!env[insertSliceOp.dest()]) {
+  //   llvm::errs() << "also no dest vjp defined\n";
+  // } else {
+  //   llvm::errs() << "dest vjp is defined\n";
+  // }
+
+  // if (env[insertSliceOp.dest()]) {
+  //   env[insertSliceOp.result()] = env[insertSliceOp.dest()];
+  // }
+  // }
   if (opName == "arith.sitofp") {
     // The input is an integer so can't have a gradient signal.
     return;
@@ -563,7 +580,12 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                                                      insertOp.indices());
 
       // The destination is effectively the same memory location as the result.
-      env[insertOp.dest()] = env[insertOp.result()];
+      auto zero = getZero(insertOp.getLoc(), insertOp.scalar(), rewriter);
+      auto new_dresult = rewriter.create<tensor::InsertOp>(
+          insertOp.getLoc(), zero, env[insertOp.result()], insertOp.indices());
+      env[insertOp.dest()] = new_dresult;
+      env[insertOp.result()] = new_dresult;
+      // env[insertOp.dest()] = env[insertOp.result()];
     } else if (opName == "tensor.extract_slice") {
       auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
       auto resultType =
@@ -597,7 +619,14 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           op->getLoc(), insertSliceOp.getSourceType(), vjp_value,
           insertSliceOp.getMixedOffsets(), insertSliceOp.getMixedSizes(),
           insertSliceOp.getMixedStrides());
-      env[insertSliceOp.dest()] = env[insertSliceOp.getResult()];
+      auto zero = getZero(op->getLoc(), insertSliceOp.source(), rewriter);
+      auto destGrad = rewriter.create<tensor::InsertSliceOp>(
+          op->getLoc(), zero, env[insertSliceOp.getResult()],
+          insertSliceOp.getMixedOffsets(), insertSliceOp.getMixedSizes(),
+          insertSliceOp.getMixedStrides());
+      env[insertSliceOp.dest()] = destGrad;
+
+      // env[insertSliceOp.dest()] = env[insertSliceOp.getResult()];
     } else if (opName == "linalg.generic") {
       auto genericOp = dyn_cast<linalg::GenericOp>(op);
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
@@ -1007,6 +1036,9 @@ void populatePrimalCache(scf::ForOp forOp,
     // We naïvely cache all 1d tensor values here.
     if (auto rankedType =
             iterOp.getType().dyn_cast_or_null<RankedTensorType>()) {
+      // Commenting this line out assumes the for op represents a scan and thus
+      // doesn't need any tensor caching to access its intermediate values.
+
       // For LSTMs, we're representing the state as a 3d tensor.
       // if (rankedType.getRank() == 1 || rankedType.getRank() == 3) {
       valuesToCache.push_back(iterOp);
@@ -1227,13 +1259,27 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
                 cpair.second.getLoc(), resultType, cpair.second,
                 /*dynamic shapes=*/ValueRange(idx), ValueRange(), ValueRange(),
                 /*staticShapes=*/staticOffset, staticSize, staticStride);
-            // I don't know that this is always safe
-            auto casted = builder.create<memref::CastOp>(
-                cpair.second.getLoc(), view.getResult(),
-                MemRefType::get(tensorType.getShape(),
-                                tensorType.getElementType()));
-            loaded = builder.create<memref::TensorLoadOp>(cpair.second.getLoc(),
-                                                          casted.getResult());
+
+            constexpr bool alloc_new = false;
+            if (alloc_new) {
+              auto dest = builder.create<memref::AllocOp>(
+                  cpair.second.getLoc(),
+                  MemRefType::get(tensorType.getShape(),
+                                  tensorType.getElementType()));
+              builder.create<linalg::CopyOp>(cpair.second.getLoc(),
+                                             view.getResult(), dest);
+
+              loaded = builder.create<memref::TensorLoadOp>(
+                  cpair.second.getLoc(), dest.getResult());
+            } else {
+              // I don't know that this is always safe
+              auto casted = builder.create<memref::CastOp>(
+                  cpair.second.getLoc(), view.getResult(),
+                  MemRefType::get(tensorType.getShape(),
+                                  tensorType.getElementType()));
+              loaded = builder.create<memref::TensorLoadOp>(
+                  cpair.second.getLoc(), casted.getResult());
+            }
           } else {
             loaded = builder.create<memref::LoadOp>(cpair.second.getLoc(),
                                                     cpair.second, idx);
