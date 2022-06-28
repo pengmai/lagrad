@@ -362,23 +362,23 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
-  // if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
-  // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
-  // "\n"; if (!env[insertSliceOp.result()]) {
-  //   llvm::errs() << "need to populate the insert slice result vjp\n";
-  // } else {
-  //   llvm::errs() << "insert slice op result has a vjp\n";
-  // }
-  // if (!env[insertSliceOp.dest()]) {
-  //   llvm::errs() << "also no dest vjp defined\n";
-  // } else {
-  //   llvm::errs() << "dest vjp is defined\n";
-  // }
+  if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
+    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
+    // "\n"; if (!env[insertSliceOp.result()]) {
+    //   llvm::errs() << "need to populate the insert slice result vjp\n";
+    // } else {
+    //   llvm::errs() << "insert slice op result has a vjp\n";
+    // }
+    // if (!env[insertSliceOp.dest()]) {
+    //   llvm::errs() << "also no dest vjp defined\n";
+    // } else {
+    //   llvm::errs() << "dest vjp is defined\n";
+    // }
 
-  // if (env[insertSliceOp.dest()]) {
-  //   env[insertSliceOp.result()] = env[insertSliceOp.dest()];
-  // }
-  // }
+    if (env[insertSliceOp.dest()]) {
+      env[insertSliceOp.result()] = env[insertSliceOp.dest()];
+    }
+  }
   if (opName == "arith.sitofp") {
     // The input is an integer so can't have a gradient signal.
     return;
