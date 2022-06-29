@@ -1,0 +1,17 @@
+		max_rss	vsize
+lstm_l2_c1024.txt	Handrolled	0	0
+lstm_l2_c1024.txt	LAGrad	0	0
+lstm_l2_c1024.txt	Enzyme/MLIR	0	0
+lstm_l2_c1024.txt	Enzyme/C	0	0
+lstm_l4_c1024.txt	Handrolled	0	0
+lstm_l4_c1024.txt	LAGrad	0	0
+lstm_l4_c1024.txt	Enzyme/MLIR	0	0
+lstm_l4_c1024.txt	Enzyme/C	0	0
+lstm_l2_c4096.txt	Handrolled	0	0
+lstm_l2_c4096.txt	LAGrad	0	0
+lstm_l2_c4096.txt	Enzyme/MLIR	0	0
+lstm_l2_c4096.txt	Enzyme/C	0	0
+lstm_l4_c4096.txt	Handrolled	0	0
+lstm_l4_c4096.txt	LAGrad	0	0
+lstm_l4_c4096.txt	Enzyme/MLIR	0	0
+lstm_l4_c4096.txt	Enzyme/C	0	0
