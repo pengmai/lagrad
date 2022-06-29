@@ -177,6 +177,13 @@ class LSTMPredictGrad(ctypes.Structure):
     ]
 
 
+class LSTMObjectiveGrad(ctypes.Structure):
+    _fields_ = [
+        ("dmain_params", F64Descriptor4D),
+        ("dextra_params", F64Descriptor2D),
+    ]
+
+
 def struct_to_tuple(s):
     if isinstance(s, float):
         return s
@@ -238,6 +245,10 @@ if not DISABLE_LSTM:
     mlirlib.lagrad_lstm_model.restype = LSTMModelGrad
     mlirlib.lagrad_lstm_predict.argtypes = memref_4d + memref_2d + memref_3d + memref_1d
     mlirlib.lagrad_lstm_predict.restype = LSTMPredictGrad
+    mlirlib.lagrad_lstm_objective.argtypes = (
+        memref_4d + memref_2d + memref_3d + memref_2d
+    )
+    mlirlib.lagrad_lstm_objective.restype = LSTMObjectiveGrad
 
 
 def wrap(mlir_func):
@@ -260,6 +271,15 @@ mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
 lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
 mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
 lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
-if not DISABLE_LSTM:
+if DISABLE_LSTM:
+
+    def notimplemented(*_):
+        raise NotImplemented
+
+    lagrad_lstm_model = notimplemented
+    lagrad_lstm_predict = notimplemented
+    lagrad_lstm_objective = notimplemented
+else:
     lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
     lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)
+    lagrad_lstm_objective = wrap(mlirlib.lagrad_lstm_objective)

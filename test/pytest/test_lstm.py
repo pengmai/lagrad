@@ -1,8 +1,7 @@
 import pytest
-import warnings
 from benchmark_io import read_lstm_instance, LSTMInput
-from pytorch_ref.pytorch_lstm import lstm, predict
-from mlir_bindings import lagrad_lstm_model, lagrad_lstm_predict
+from pytorch_ref.pytorch_lstm import lstm, predict, lstm_objective
+from mlir_bindings import lagrad_lstm_model, lagrad_lstm_predict, lagrad_lstm_objective
 import torch
 import os.path as osp
 
@@ -39,18 +38,19 @@ def test_lstm_model(lstm_input: LSTMInput):
     )
 
     # Assert
-    tol = 1e-10
-    assert dweight == pytest.approx(torch_args[0].grad.view(4, -1), tol)
-    assert dbias == pytest.approx(torch_args[1].grad.view(4, -1), tol)
-    assert dhidden == pytest.approx(torch_args[2].grad, tol)
-    assert dcell == pytest.approx(torch_args[3].grad, tol)
-    assert dinput == pytest.approx(torch_args[4].grad, tol)
+    assert dweight == pytest.approx(torch_args[0].grad.view(4, -1))
+    assert dbias == pytest.approx(torch_args[1].grad.view(4, -1))
+    assert dhidden == pytest.approx(torch_args[2].grad)
+    assert dcell == pytest.approx(torch_args[3].grad)
+    assert dinput == pytest.approx(torch_args[4].grad)
 
 
 def test_lstm_predict(lstm_input: LSTMInput):
     x = lstm_input.sequence[0]
     torch_args = []
-    for i, arg in enumerate([lstm_input.main_params, lstm_input.extra_params, lstm_input.state, x]):
+    for i, arg in enumerate(
+        [lstm_input.main_params, lstm_input.extra_params, lstm_input.state, x]
+    ):
         targ = torch.from_numpy(arg)
         if i < 3:
             targ.requires_grad = True
@@ -64,7 +64,31 @@ def test_lstm_predict(lstm_input: LSTMInput):
         x,
     )
 
-    tol = 1e-10
-    assert dmain == pytest.approx(torch_args[0].grad.view(2, 2, 4, -1), tol)
-    assert dextra == pytest.approx(torch_args[1].grad, tol)
-    assert dstate == pytest.approx(torch_args[2].grad.view(2, 2, -1), tol)
+    assert dmain == pytest.approx(torch_args[0].grad.view(2, 2, 4, -1))
+    assert dextra == pytest.approx(torch_args[1].grad)
+    assert dstate == pytest.approx(torch_args[2].grad.view(2, 2, -1))
+
+
+def test_lstm_objective(lstm_input: LSTMInput):
+    seq = lstm_input.sequence[:4]
+    state = lstm_input.state.copy()
+    torch_args = []
+    for i, arg in enumerate(
+        [lstm_input.main_params, lstm_input.extra_params, lstm_input.state, seq]
+    ):
+        targ = torch.from_numpy(arg)
+        if i < 3:
+            targ.requires_grad = True
+        torch_args.append(targ)
+    lstm_objective(*torch_args).backward()
+    assert lstm_input.state == pytest.approx(state)
+
+    dmain, dextra = lagrad_lstm_objective(
+        lstm_input.main_params.reshape(2, 2, 4, -1),
+        lstm_input.extra_params,
+        lstm_input.state.reshape(2, 2, -1).copy(),
+        seq,
+    )
+
+    assert dmain == pytest.approx(torch_args[0].grad.view(2, 2, 4, -1))
+    assert dextra == pytest.approx(torch_args[1].grad)
