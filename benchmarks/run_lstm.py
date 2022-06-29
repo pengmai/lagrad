@@ -22,7 +22,8 @@ def main(args):
     lagrad_templ = mlir_env.get_template("lstm.mlir")
     hand_buf_templ = mlir_env.get_template("lstm_hand_bufferized.mlir")
     # lagrad_hand_diff_templ = mlir_env.get_template("lstm_hand_differentiated.mlir")
-    data_file = "benchmarks/data/lstm/lstm_l4_c4096.txt"
+    # data_file = "benchmarks/data/lstm/lstm_l4_c4096.txt"
+    data_file = args.data_file
     with open(data_file, "r") as f:
         l, c, b = [int(x) for x in f.readline().split()]
 
@@ -38,38 +39,39 @@ def main(args):
     }
 
     if args.print:
-        print(hand_buf_templ.render(**config))
-        # print(lagrad_templ.render(**config))
+        # print(hand_buf_templ.render(**config))
+        print(lagrad_templ.render(**config))
         # print(enzyme_mlir_templ.render(**config))
         # print(lagrad_hand_diff_templ.render(**config))
         return
 
     compile_mlir(hand_buf_templ.render(**config).encode("utf-8"), "lstm_handbuf.o")
-    # compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
+    compile_mlir(lagrad_templ.render(**config).encode("utf-8"), "lstm_lagrad.o")
     compile_c(driver_templ.render(**config).encode("utf-8"), "lstm_driver.o")
     compile_c(helpers_templ.render(**config).encode("utf-8"), "mlir_c_abi.o")
     compile_enzyme(enzyme_c_templ.render(**config).encode("utf-8"), "lstm_enzyme_c.o")
-    # compile_mlir_to_enzyme(
-    #     enzyme_mlir_templ.render(**config).encode("utf-8"),
-    #     "lstm_enzyme_mlir.o",
-    #     emit="obj",
-    # )
+    compile_mlir_to_enzyme(
+        enzyme_mlir_templ.render(**config).encode("utf-8"),
+        "lstm_enzyme_mlir.o",
+        emit="obj",
+    )
+
     stdout = link_and_run(
         [
             "lstm_driver.o",
             "mlir_c_abi.o",
-            # "lstm_lagrad.o",
+            "lstm_lagrad.o",
             "lstm_handbuf.o",
             "lstm_enzyme_c.o",
             # "lstm_cpp_ref.o",
-            # "lstm_enzyme_mlir.o",
+            "lstm_enzyme_mlir.o",
         ],
         "lstm_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
     try:
         lines = stdout.splitlines()
-        keys = ["Handrolled", "Enzyme/C"]
+        keys = ["Handrolled", "LAGrad", "Enzyme/MLIR", "Enzyme/C"]
         assert len(keys) == len(
             lines
         ), f"expected # of apps to match {len(keys)} vs {len(lines)}"
@@ -85,6 +87,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("data_file")
     parser.add_argument("--print", "-p", action="store_true")
     args = parser.parse_args()
     main(args)
