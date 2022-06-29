@@ -363,8 +363,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
   if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
-    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
-    // "\n"; if (!env[insertSliceOp.result()]) {
+    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp << "\n";
+    // if (!env[insertSliceOp.result()]) {
     //   llvm::errs() << "need to populate the insert slice result vjp\n";
     // } else {
     //   llvm::errs() << "insert slice op result has a vjp\n";
@@ -375,7 +375,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     //   llvm::errs() << "dest vjp is defined\n";
     // }
 
-    if (env[insertSliceOp.dest()]) {
+    if (!env[insertSliceOp.result()] && env[insertSliceOp.dest()]) {
       env[insertSliceOp.result()] = env[insertSliceOp.dest()];
     }
   }
@@ -1191,15 +1191,18 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
       // This is only valid under certain conditions, i.e. if the result was
       // only read once.
       forOp.getRegionIterArgs()[result_idx]};
+  // TODO: This would be cleaner if the iter_args order was preserved, and free
+  // operands were added after.
+  // it goes [result value, ...free_operands, ...primal_iter_args]
   SmallVector<Value> iterArgsInit({vjp_value});
+  // By construction, free operands come before iter arg grads, which is a
+  // little awkward.
   SmallVector<Value> inputOperands{free_operands};
   inputOperands.reserve(free_operands.size() + forOp.getNumIterOperands());
-  size_t num_float_operands = 1;
   for (size_t i = 0; i < forOp.getNumIterOperands(); i++) {
     auto iterOperand = forOp.getIterOperands()[i];
     if (isFloatOrFloatTensor(iterOperand.getType()) && i != result_idx) {
       inputOperands.push_back(iterOperand);
-      num_float_operands++;
     }
   }
 
@@ -1323,8 +1326,31 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
           auto op = *it;
           auto opName = op->getName().getStringRef();
           if (opName == "scf.yield") {
-            Value operand = op->getOperand(result_idx);
-            env[operand] = iterArgs[0];
+            // llvm::errs() << "\narg types:\n";
+            // for (auto arg : iterArgs) {
+            //   llvm::errs() << arg.getType() << " ";
+            // }
+            // llvm::errs() << "\n";
+            for (size_t i = 0; i < op->getNumOperands(); i++) {
+              Value operand = op->getOperand(i);
+              if (i == result_idx) {
+                env[operand] = iterArgs[0];
+              } else if (isFloatOrFloatTensor(operand.getType())) {
+                // llvm::errs() << "num operands: " << op->getNumOperands()
+                //              << "\nnum iter args: " << iterArgs.size() <<
+                //              "\n";
+                // llvm::errs()
+                //     << "idx: " << iterArgs.size() - op->getNumOperands() + i
+                //     << " iterArg type: "
+                //     << iterArgs[iterArgs.size() - op->getNumOperands() + i]
+                //            .getType()
+                //     << " operand type: " << operand.getType() << "\n";
+                env[operand] =
+                    iterArgs[iterArgs.size() - op->getNumOperands() + i];
+                assert(operand.getType() == env[operand].getType() &&
+                       "iter arg for grad space had unexpected type");
+              }
+            }
             rewriter.setInsertionPointAfter(op);
             rewriter.eraseOp(op);
           } else {
