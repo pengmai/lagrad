@@ -1,17 +1,16 @@
 import argparse
 import pandas as pd
 import json
+import re
+import os
 from compile import (
     compile_mlir_to_enzyme,
-    jit_mlir,
     compile_c,
     compile_enzyme,
     compile_mlir,
     link_and_run,
-    run_grad,
 )
 from jinja2 import Environment, PackageLoader, select_autoescape
-import numpy as np
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
@@ -21,20 +20,27 @@ def main(args):
     driver_template = c_env.get_template("hand_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
     # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
+    enzyme_c_packed_template = c_env.get_template("enzyme_hand_packed.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
     enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
     lagrad_template = mlir_env.get_template("hand.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
+    # data_file = args.data_file
+    data_file = "benchmarks/data/hand/simple_small/hand8_t26_c6400.txt"
+    with open(data_file) as f:
+        npts, ntheta = [int(x) for x in f.readline().split()]
+        assert ntheta == 26, "Unsupported value for ntheta"
 
     nbones = 22
     nverts = 544
-    npts = 100
     config = {
         "nbones": nbones,
         "ntheta": 26,
         "nverts": nverts,
         "npts": npts,
         "primal_shape": f"{npts}x3",
+        "model_dir": "benchmarks/data/hand/simple_small/model",
+        "data_file": data_file,
     }
 
     if args.print:
@@ -49,15 +55,21 @@ def main(args):
     )
     compile_c(driver_template.render(**config).encode("utf-8"), "hand_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
-    compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
+    # compile_enzyme(
+    #     enzyme_c_packed_template.render(**config).encode("utf-8"),
+    #     "hand_enzyme_packed.o",
+    # )
+    # compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
     compile_mlir(lagrad_template.render(**config).encode("utf-8"), "hand_lagrad.o")
     stdout = link_and_run(
         [
             "hand_driver.o",
             "mlir_c_abi.o",
+            "memusage.o",
             "hand_enzyme.o",
             "hand_lagrad.o",
             "hand_enzyme_mlir.o",
+            "hand_enzyme_packed.o",
         ],
         "hand_driver.out",
         link_runner_utils=True,
@@ -66,8 +78,8 @@ def main(args):
     try:
         lines = stdout.splitlines()
         keys = [
-            "lagrad_jacobian",
-            "enzyme_jacobian",
+            "LAGrad",
+            "Enzyme/MLIR",
         ]
         assert len(keys) == len(
             lines
@@ -75,6 +87,7 @@ def main(args):
         results = pd.DataFrame.from_dict(
             {key: json.loads(line) for key, line in zip(keys, lines)}
         )
+        print(results)
         print(results[1:].mean())
 
         # TODO: Meant to serialize the output results to a file.
@@ -89,6 +102,18 @@ def main(args):
         print(stdout)
 
 
+def get_datasets(data_dir):
+    pat = re.compile(r"hand(\d+).+\.txt")
+
+    def sorter(str):
+        m = pat.match(str)
+        return int(m.group(1))
+
+    datasets = [ffile for ffile in os.listdir(data_dir) if pat.match(ffile)]
+    datasets.sort(key=sorter)
+    return datasets
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -97,6 +122,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Print the result of rendering the MLIR template, then exit.",
     )
+    parser.add_argument("--data_file")
     args = parser.parse_args()
+    data_dir = "benchmarks/data/hand/simple_small"
+    datasets = get_datasets(data_dir)
+
+    # with tqdm(datasets) as t:
+    #     for dataset in t:
+    #         t.write(f"Benchmarking {dataset}")
+    #         args.data_file = f"{data_dir}/{dataset}"
+    #         t.write(main(args))
 
     main(args)

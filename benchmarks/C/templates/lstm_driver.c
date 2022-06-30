@@ -1,11 +1,20 @@
 #include "lstm.h"
+#include "memusage.h"
 #include "mlir_c_abi.h"
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
 
 #define NUM_RUNS 6
+/* set CHECK_MEM to 0 to measure memory consumption, 1 to measure performance */
+#define CHECK_MEM 0
 
 double *deadbeef = (double *)0xdeadbeef;
+RunProcDyn rpd;
+void check_mem_usage() {
+  run_get_dynamic_proc_info(getpid(), &rpd);
+  printf("%zu\t%zu\n", rpd.rss, rpd.vsize);
+}
 
 typedef struct {
   F64Descriptor4D dmain_params;
@@ -122,9 +131,14 @@ unsigned long collect_handrolled_lstm(LSTMInput input, double *state,
                          input.sequence, 0, c, b, b, 1, /*g=*/1.0);
   gettimeofday(&stop, NULL);
 
-  verify_lstm_jacobian(input.main_sz, input.extra_sz, main_paramsb,
-                       extra_paramsb, ref_jacobian,
-                       "Handrolled hand-bufferized");
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_lstm_jacobian(input.main_sz, input.extra_sz, main_paramsb,
+                         extra_paramsb, ref_jacobian,
+                         "Handrolled hand-bufferized");
+  }
+
   free(main_paramsb);
   free(extra_paramsb);
   return timediff(start, stop);
@@ -147,6 +161,7 @@ unsigned long collect_lagrad_lstm(LSTMInput input, double *state,
 
   verify_lstm_jacobian(input.main_sz, input.extra_sz, res.dmain_params.aligned,
                        res.dextra_params.aligned, ref_jacobian, "LAGrad");
+  // check_mem_usage();
   free(res.dmain_params.aligned);
   free(res.dextra_params.aligned);
   return timediff(start, stop);
@@ -167,8 +182,13 @@ unsigned long collect_enzyme_mlir_lstm(LSTMInput input, double *state,
       /*sequence=*/deadbeef, input.sequence, 0, c, b, b, 1);
   gettimeofday(&stop, NULL);
 
-  verify_lstm_jacobian(input.main_sz, input.extra_sz, res.dmain_params.aligned,
-                       res.dextra_params.aligned, ref_jacobian, "Enzyme/MLIR");
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_lstm_jacobian(input.main_sz, input.extra_sz,
+                         res.dmain_params.aligned, res.dextra_params.aligned,
+                         ref_jacobian, "Enzyme/MLIR");
+  }
   free(res.dmain_params.aligned);
   free(res.dextra_params.aligned);
   return timediff(start, stop);
@@ -187,9 +207,12 @@ unsigned long collect_enzyme_c_lstm(LSTMInput input, double *state,
                           dmain_params, input.extra_params, dextra_params,
                           state, input.sequence, &loss, &dloss);
   gettimeofday(&stop, NULL);
-
-  verify_lstm_jacobian(input.main_sz, input.extra_sz, dmain_params,
-                       dextra_params, ref_jacobian, "Enzyme/C");
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_lstm_jacobian(input.main_sz, input.extra_sz, dmain_params,
+                         dextra_params, ref_jacobian, "Enzyme/C");
+  }
   free(dmain_params);
   free(dextra_params);
   return timediff(start, stop);
@@ -304,9 +327,15 @@ int main() {
   double *ref_jacobian =
       malloc((input.main_sz + input.extra_sz) * sizeof(double));
   double *state = malloc(input.state_sz * sizeof(double));
-  populate_ref_grad(input, state, ref_jacobian);
-  lstmBodyFunc funcs[] = {collect_handrolled_lstm, collect_lagrad_lstm,
-                          collect_enzyme_mlir_lstm, collect_enzyme_c_lstm};
+  if (!CHECK_MEM) {
+    populate_ref_grad(input, state, ref_jacobian);
+  }
+  lstmBodyFunc funcs[] = {
+      // collect_handrolled_lstm,
+      collect_lagrad_lstm,
+      // collect_enzyme_mlir_lstm,
+      // collect_enzyme_c_lstm
+  };
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
   unsigned long results_df[NUM_RUNS];
   for (size_t app = 0; app < num_apps; app++) {
@@ -316,36 +345,6 @@ int main() {
     print_ul_arr(results_df, NUM_RUNS);
   }
 
-  // double loss = 0.0;
-  // lstm_objective(input.l, input.c, input.b, input.main_params,
-  //                input.extra_params, state, input.sequence, &loss);
-  // printf("C Primal: %.8e\n", loss);
-
-  // int l = input.l, c = input.c, b = input.b;
-  // memcpy(state, input.state, input.state_sz * sizeof(double));
-  // double mlir_p = mlstm_objective(
-  //     /*main_params=*/deadbeef, input.main_params, 0, l, 2, 4, b, 2 * 4 * b,
-  //     4 * b, b, 1,
-  //     /*extra_params*/ deadbeef, input.extra_params, 0, 3, b, b, 1,
-  //     /*state=*/deadbeef, state, 0, l, 2, b, 2 * b, b, 1,
-  //     /*sequence=*/deadbeef, input.sequence, 0, c, b, b, 1);
-  // printf("MLIR Primal: %.8e\n", mlir_p);
-
-  // memcpy(state, input.state, input.state_sz * sizeof(double));
-  // LSTMGrad res = lagrad_lstm(
-  //     /*main_params=*/deadbeef, input.main_params, 0, l, 2, 4, b, 2 * 4 * b,
-  //     4 * b, b, 1,
-  //     /*extra_params*/ deadbeef, input.extra_params, 0, 3, b, b, 1,
-  //     /*state=*/deadbeef, state, 0, l, 2, b, 2 * b, b, 1,
-  //     /*sequence=*/deadbeef, input.sequence, 0, c, b, b, 1);
-  // printf("Reference:\n");
-  // print_d_arr(&ref_jacobian[input.main_sz], 10);
-  // printf("Computed:\n");
-  // print_d_arr(res.dextra_params.aligned, 10);
-  // print_d_arr(res.dmain_params.aligned, 10);
-  // free(res.dmain_params.aligned);
-  // free(res.dextra_params.aligned);
-  // free(ref_jacobian);
   free(state);
   free_lstm_instance(&input);
   return 0;
