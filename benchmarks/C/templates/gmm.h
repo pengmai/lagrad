@@ -10,7 +10,7 @@
 // #define FILENAME "benchmarks/data/gmm_d128_K200.txt"
 // #define GRAD_FILENAME "benchmarks/data/gmm_d128_K200_results.txt"
 
-GMMInput read_gmm_data(const char*data_file) {
+GMMInput read_gmm_data(const char *data_file) {
   FILE *fp;
   GMMInput gmm_input;
   fp = fopen(data_file, "r");
@@ -87,8 +87,8 @@ GMMInput read_gmm_data(const char*data_file) {
   return gmm_input;
 }
 
-void read_gmm_grads(const char *grad_file, size_t d, size_t k, size_t n, double *dalphas,
-                    double *dmeans, double *dicf) {
+void read_gmm_grads(const char *grad_file, size_t d, size_t k, size_t n,
+                    double *dalphas, double *dmeans, double *dicf) {
   FILE *fp = fopen(grad_file, "r");
   if (fp == NULL) {
     fprintf(stderr, "Failed to open file \"%s\"\n", grad_file);
@@ -111,8 +111,8 @@ void read_gmm_grads(const char *grad_file, size_t d, size_t k, size_t n, double 
   fclose(fp);
 }
 
-void serialize_gmm_grads(const char* grad_file, size_t d, size_t k, size_t n, double *dalphas,
-                         double *dmeans, double *dicf) {
+void serialize_gmm_grads(const char *grad_file, size_t d, size_t k, size_t n,
+                         double *dalphas, double *dmeans, double *dicf) {
   FILE *fp;
   fp = fopen(grad_file, "w");
   if (fp == NULL) {
@@ -182,19 +182,34 @@ void check_gmm_err(size_t d, size_t k, size_t n, double *dalphas,
   }
 
   int icf_sz = d * (d + 1) / 2;
-  double max_icf_err = -1;
-  hasNaN = 0;
-  for (size_t i = 0; i < k * icf_sz; i++) {
-    hasNaN |= isnan(dicf[i]);
-    if (fabs(ref_icf[i] - dicf[i]) > max_icf_err) {
-      max_icf_err = fabs(ref_icf[i] - dicf[i]);
+  int tri_sz = d * (d + 1) / 2;
+  double qs_err = 0.0;
+  for (size_t i = 0; i < k; i++) {
+    for (size_t j = 0; j < d; j++) {
+      hasNaN |= isnan(dicf[i * icf_sz + j]);
+      qs_err += fabs(dicf[i * icf_sz + j] - ref_icf[i * icf_sz + j]);
     }
   }
   if (hasNaN) {
-    printf("(%s) icf has NaN values\n", app);
+    printf("(%s) Qs has NaN values\n", app);
   }
-  if (max_icf_err > 1e-5) {
-    printf("(%s) max icf err: %f\n", app, max_icf_err);
+  if (qs_err > 1e-5) {
+    printf("(%s) Qs error: %f\n", app, qs_err);
+  }
+
+  hasNaN = 0;
+  double ls_err = 0.0;
+  for (size_t i = 0; i < k; i++) {
+    for (size_t j = 0; j < tri_sz; j++) {
+      hasNaN |= isnan(dicf[i * icf_sz + d + j]);
+      ls_err += fabs(dicf[i * icf_sz + d + j] - ref_icf[i * icf_sz + d + j]);
+    }
+  }
+  if (hasNaN) {
+    printf("(%s) Ls has NaN values\n", app);
+  }
+  if (ls_err > 1e-5) {
+    printf("(%s) Ls err: %.4e\n", app, ls_err);
   }
 }
 

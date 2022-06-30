@@ -221,36 +221,6 @@ BAInput read_ba_data(const char *data_file) {
   return ba_input;
 }
 
-void read_ba_results(const char *ffile, BASparseMat *mat) {
-  int p = mat->p;
-  int nrows = 2 * p + p;
-  int nnonzero = (BA_NCAMPARAMS + 3 + 1) * 2 * p + p;
-  int row_size = nrows + 1;
-
-  FILE *fp = fopen(ffile, "r");
-  if (fp == NULL) {
-    fprintf(stderr, "Failed to open file \"%s\"\n", ffile);
-    exit(EXIT_FAILURE);
-  }
-
-  for (size_t i = 0; i < row_size; i++) {
-    fscanf(fp, "%d", &mat->rows[i]);
-  }
-  mat->row_end = row_size;
-
-  for (size_t i = 0; i < nnonzero; i++) {
-    fscanf(fp, "%d", &mat->cols[i]);
-  }
-  mat->col_end = nnonzero;
-
-  for (size_t i = 0; i < nnonzero; i++) {
-    fscanf(fp, "%lf", &mat->vals[i]);
-  }
-  mat->val_end = nnonzero;
-
-  fclose(fp);
-}
-
 void verify_ba_results(BASparseMat *ref, BASparseMat *actual, const char *app) {
   int p = actual->p;
   int nrows = 2 * p + p;

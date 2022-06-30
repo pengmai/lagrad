@@ -49,6 +49,20 @@ typedef struct {
 } F64Descriptor3D;
 
 typedef struct {
+  double *allocated;
+  double *aligned;
+  int64_t offset;
+  int64_t size_0;
+  int64_t size_1;
+  int64_t size_2;
+  int64_t size_3;
+  int64_t stride_0;
+  int64_t stride_1;
+  int64_t stride_2;
+  int64_t stride_3;
+} F64Descriptor4D;
+
+typedef struct {
   float *allocated;
   float *aligned;
   int64_t offset;

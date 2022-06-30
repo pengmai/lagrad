@@ -1,4 +1,4 @@
-#map_1d_id = affine_map<(d0) -> (d0)>
+#map = affine_map<(d0) -> (d0)>
 
 func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
@@ -29,7 +29,7 @@ func @mlir_compute_reproj_error(
   %w_cross_X_space = arith.constant dense<0.0> : tensor<3xf64>
   %sqtheta_tensor = linalg.generic
     {
-      indexing_maps = [#map_1d_id, affine_map<(d0) -> ()>],
+      indexing_maps = [#map, affine_map<(d0) -> ()>],
       iterator_types = ["reduction"]
     }
     ins(%cam_rot : tensor<3xf64>)
@@ -51,7 +51,7 @@ func @mlir_compute_reproj_error(
 
     %w0 = linalg.generic
       {
-        indexing_maps = [#map_1d_id, #map_1d_id],
+        indexing_maps = [#map, #map],
         iterator_types = ["parallel"]
       }
       ins(%cam_rot : tensor<3xf64>)
@@ -67,7 +67,7 @@ func @mlir_compute_reproj_error(
           affine_map<(d0) -> ((d0 + 2) mod 3)>,
           affine_map<(d0) -> ((d0 + 2) mod 3)>,
           affine_map<(d0) -> ((d0 + 1) mod 3)>,
-          #map_1d_id
+          #map
         ],
         iterator_types = ["parallel"]
       }
@@ -87,7 +87,7 @@ func @mlir_compute_reproj_error(
 
     %X_costheta = linalg.generic
       {
-        indexing_maps = [#map_1d_id, #map_1d_id],
+        indexing_maps = [#map, #map],
         iterator_types = ["parallel"]
       }
       ins(%Xsubcam : tensor<3xf64>)
@@ -99,7 +99,7 @@ func @mlir_compute_reproj_error(
 
     %w_cross_X_sintheta = linalg.generic
       {
-        indexing_maps = [#map_1d_id, #map_1d_id],
+        indexing_maps = [#map, #map],
         iterator_types = ["parallel"]
       }
       ins(%w_cross_X : tensor<3xf64>)
@@ -111,7 +111,7 @@ func @mlir_compute_reproj_error(
 
     %w_times_tmp = linalg.generic
       {
-        indexing_maps = [#map_1d_id, #map_1d_id],
+        indexing_maps = [#map, #map],
         iterator_types = ["parallel"]
       }
       ins(%w0 : tensor<3xf64>)
@@ -133,7 +133,7 @@ func @mlir_compute_reproj_error(
           affine_map<(d0) -> ((d0 + 2) mod 3)>,
           affine_map<(d0) -> ((d0 + 2) mod 3)>,
           affine_map<(d0) -> ((d0 + 1) mod 3)>,
-          #map_1d_id
+          #map
         ],
         iterator_types = ["parallel"]
       }
@@ -154,7 +154,7 @@ func @mlir_compute_reproj_error(
   %Xcam_end = tensor.extract %Xcam[%twoi] : tensor<3xf64>
   %Xcam_div_space = arith.constant dense<0.0> : tensor<2xf64>
   %Xcam_div = linalg.generic
-    {indexing_maps = [#map_1d_id, #map_1d_id], iterator_types = ["parallel"]}
+    {indexing_maps = [#map, #map], iterator_types = ["parallel"]}
     ins(%Xcam_start : tensor<2xf64>)
     outs(%Xcam_div_space : tensor<2xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
@@ -164,7 +164,7 @@ func @mlir_compute_reproj_error(
   %rsq_init = arith.constant dense<0.0> : tensor<f64>
   %rsq_tensor = linalg.generic
     {
-      indexing_maps = [#map_1d_id, affine_map<(d0) -> ()>],
+      indexing_maps = [#map, affine_map<(d0) -> ()>],
       iterator_types = ["reduction"]
     }
     ins(%Xcam_div : tensor<2xf64>)
@@ -192,7 +192,7 @@ func @mlir_compute_reproj_error(
   %out_init = arith.constant dense<0.0> : tensor<2xf64>
   %distorted = linalg.generic
     {
-      indexing_maps = [#map_1d_id, #map_1d_id],
+      indexing_maps = [#map, #map],
       iterator_types = ["parallel"]
     }
     ins(%Xcam_div : tensor<2xf64>)
@@ -203,7 +203,7 @@ func @mlir_compute_reproj_error(
   } -> tensor<2xf64>
 
   %proj0 = linalg.generic
-    {indexing_maps = [#map_1d_id, #map_1d_id], iterator_types = ["parallel"]}
+    {indexing_maps = [#map, #map], iterator_types = ["parallel"]}
     ins(%distorted : tensor<2xf64>)
     outs(%Xcam_div_space : tensor<2xf64>) {
   ^bb0(%arg0: f64, %arg1: f64):
@@ -213,7 +213,7 @@ func @mlir_compute_reproj_error(
   %proj = arith.addf %proj0, %cam_x0 : tensor<2xf64>
 
   %err = linalg.generic
-    {indexing_maps = [#map_1d_id, #map_1d_id, #map_1d_id], iterator_types = ["parallel"]}
+    {indexing_maps = [#map, #map, #map], iterator_types = ["parallel"]}
     ins(%proj, %feat : tensor<2xf64>, tensor<2xf64>)
     outs(%cst : tensor<2xf64>) {
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):

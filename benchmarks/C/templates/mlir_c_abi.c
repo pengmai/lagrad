@@ -75,7 +75,7 @@ void print_f_arr(float *arr, size_t n) {
 void print_d_arr(const double *arr, size_t n) {
   printf("[");
   for (size_t i = 0; i < n; i++) {
-    printf("%.4f", arr[i]);
+    printf("%.4e", arr[i]);
     if (i != n - 1) {
       printf(", ");
     }
