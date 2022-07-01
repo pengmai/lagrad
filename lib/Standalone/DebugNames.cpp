@@ -3,7 +3,7 @@
 #include <limits>
 #include <string>
 
-#define ENABLE_NAME_DEBUG false
+#define ENABLE_NAME_DEBUG true
 
 namespace mlir {
 using namespace mlir;
@@ -84,6 +84,7 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
         src += line;
       }
 
+      tokens.clear();
       parseCommaSepParens(src, tokens);
       assert(tokens.size() == forOp.getNumIterOperands() &&
              "Mismatch of parsed names and for op iter args");
@@ -96,9 +97,9 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
     }
   }
 
-  for (auto pair : ctx.debug_names) {
-    llvm::errs() << "name: '" << pair.second << "'\n";
-  }
+  // for (auto pair : ctx.debug_names) {
+  //   llvm::errs() << "name: '" << pair.second << "'\n";
+  // }
 }
 
 void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx) {
@@ -110,9 +111,10 @@ void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx) {
   auto loc = funcOp.getLoc().cast<FileLineColLoc>();
   std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());
-  llvm::errs() << "\nlooking at function " << funcOp.getName() << "\n";
+  // llvm::errs() << "\nlooking at function " << funcOp.getName() << "\n";
   if (!sourceFile.is_open()) {
-    assert(false && "failed to open file");
+    funcOp.emitWarning() << "failed to open file\n";
+    return;
   }
   gotoLine(sourceFile, loc.getLine());
   getline(sourceFile, src);
