@@ -15,6 +15,8 @@ public:
   llvm::SmallDenseSet<Value> activeValues;
 };
 
+bool isFloatOrFloatTensor(Type typ);
+
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
 
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,

@@ -100,9 +100,9 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
     }
   }
 
-  for (auto pair : ctx.debug_names) {
-    llvm::errs() << "name: '" << pair.second << "'\n";
-  }
+  // for (auto pair : ctx.debug_names) {
+  //   llvm::errs() << "name: '" << pair.second << "'\n";
+  // }
 }
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
