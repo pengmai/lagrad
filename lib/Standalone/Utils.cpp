@@ -102,6 +102,8 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     return nullptr;
   }
 
+  DEBUGpopulateFuncArgs(funcOp, ctx);
+
   // Need to double check the return type.
   assert(funcOp.getType().getNumResults() == 1 &&
          "differentiating functions with more than one result not supported");
@@ -363,8 +365,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
   if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
-    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp << "\n";
-    // if (!env[insertSliceOp.result()]) {
+    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
+    // "\n"; if (!env[insertSliceOp.result()]) {
     //   llvm::errs() << "need to populate the insert slice result vjp\n";
     // } else {
     //   llvm::errs() << "insert slice op result has a vjp\n";

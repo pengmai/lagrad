@@ -33,45 +33,96 @@ std::fstream &gotoLine(std::fstream &file, unsigned int num) {
   return file;
 }
 
+void parseCommaSepParens(std::string src, SmallVector<std::string> &tokens) {
+  std::string subs;
+  auto start = src.find('(');
+  auto argend = src.find(')');
+  assert(argend != std::string::npos && "Failed to find closing paren");
+  src = src.substr(0, argend + 1);
+  start++;
+  auto end = src.find(',');
+  while (end != std::string::npos) {
+    subs = src.substr(start, end - start);
+    tokens.push_back(trim(subs));
+    start = end + 1;
+    end = src.find(',', start);
+  }
+  subs = src.substr(start, argend - start);
+  tokens.push_back(trim(subs));
+}
+
 void DEBUGpopulateFuncArgs(FuncOp funcOp, LAGradContext &ctx) {
+  // Clearing the map makes printing everything less verbose
+  ctx.debug_names.clear();
   auto loc = funcOp.getLoc().cast<FileLineColLoc>();
-  std::string funDeclSrc;
-  std::string line;
+  std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());
-  llvm::errs() << "looking at function " << funcOp.getName() << "\n";
-  if (sourceFile.is_open()) {
-    gotoLine(sourceFile, loc.getLine());
-    getline(sourceFile, funDeclSrc);
-    while (funDeclSrc.find(')') == std::string::npos) {
-      getline(sourceFile, line);
-      funDeclSrc += line;
+  llvm::errs() << "\n\nlooking at function " << funcOp.getName() << "\n";
+  if (!sourceFile.is_open()) {
+    assert(false && "failed to open file");
+  }
+  gotoLine(sourceFile, loc.getLine());
+  getline(sourceFile, src);
+  while (src.find(')') == std::string::npos) {
+    getline(sourceFile, line);
+    src += line;
+  }
+
+  SmallVector<std::string> tokens;
+  parseCommaSepParens(src, tokens);
+  for (size_t i = 0; i < tokens.size(); i++) {
+    subs = tokens[i].substr(0, tokens[i].find(':'));
+    ctx.debug_names[funcOp.getArgument(i)] = trim(subs);
+  }
+  tokens.clear();
+
+  auto *region = funcOp.getCallableRegion();
+  assert(region && "Cannot differentiate funcOp with null region");
+  size_t count = 0;
+  for (auto &op : region->getOps()) {
+    gotoLine(sourceFile, op.getLoc().cast<FileLineColLoc>().getLine());
+    getline(sourceFile, src);
+    if (op.getNumResults() == 1) {
+      assert(src.find('=') != std::string::npos &&
+             "Expect op line to contain equals sign");
+      subs = src.substr(0, src.find('='));
+      ctx.debug_names[op.getResult(0)] = trim(subs);
     }
 
-    auto start = funDeclSrc.find('(');
-    auto argend = funDeclSrc.find(')');
-    SmallVector<std::string> tokens;
-    assert(argend != std::string::npos && "Failed to find closing paren");
-    start++;
-    auto end = funDeclSrc.find(',');
-    std::string subs;
-    while (end != std::string::npos) {
-      subs = funDeclSrc.substr(start, end - start);
-      tokens.push_back(ltrim(subs));
-      start = end + 1;
-      end = funDeclSrc.find(',', start);
-    }
-    subs = funDeclSrc.substr(start, argend - start);
-    tokens.push_back(ltrim(subs));
+    if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+      if (forOp.getNumResults() > 1) {
+        assert(src.find('=') != std::string::npos &&
+               "Expect op line to contain equals sign");
+        subs = src.substr(0, src.find(':'));
+        trim(subs);
+        for (size_t i = 0; i < forOp.getNumResults(); i++) {
+          ctx.debug_names[op.getResult(i)] = subs + "#" + std::to_string(i);
+        }
+      }
+      while (src.find('{') == std::string::npos) {
+        getline(sourceFile, line);
+        src += line;
+      }
 
-    for (size_t i = 0; i < tokens.size(); i++) {
-      ctx.debug_names[funcOp.getArgument(i)] =
-          tokens[i].substr(0, tokens[i].find(':'));
+      parseCommaSepParens(src, tokens);
+      assert(tokens.size() == forOp.getNumIterOperands() &&
+             "Mismatch of parsed names and for op iter args");
+      for (auto pair : llvm::zip(forOp.getRegionIterArgs(), tokens)) {
+        subs = std::get<1>(pair).substr(0, std::get<1>(pair).find('='));
+        ctx.debug_names[std::get<0>(pair)] = trim(subs);
+      }
+
+      // llvm::errs() << "Looking at for op\n" << src << "\n";
     }
-    for (auto pair : ctx.debug_names) {
-      llvm::errs() << pair.first << " -> " << pair.second << "\n";
-    }
-  } else {
-    llvm::errs() << "Failed to open file\n";
+    // TODO: Might at some point be worth parsing the args in a linalg.generic
+    // op
+    if (count > 10)
+      break;
+    count++;
+  }
+
+  for (auto pair : ctx.debug_names) {
+    llvm::errs() << pair.first << " -> " << pair.second << "\n";
   }
 }
 
