@@ -94,15 +94,18 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
       }
 
       DEBUGpopulateRegion(&forOp.getRegion(), sourceFile, ctx);
+    } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
+      DEBUGpopulateRegion(&ifOp.thenRegion(), sourceFile, ctx);
+      DEBUGpopulateRegion(&ifOp.elseRegion(), sourceFile, ctx);
     }
   }
 
-  // for (auto pair : ctx.debug_names) {
-  //   llvm::errs() << "name: '" << pair.second << "'\n";
-  // }
+  for (auto pair : ctx.debug_names) {
+    llvm::errs() << "name: '" << pair.second << "'\n";
+  }
 }
 
-void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx) {
+void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
   if (!ENABLE_NAME_DEBUG) {
     return;
   }
@@ -113,7 +116,7 @@ void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx) {
   std::fstream sourceFile(loc.getFilename().str());
   // llvm::errs() << "\nlooking at function " << funcOp.getName() << "\n";
   if (!sourceFile.is_open()) {
-    funcOp.emitWarning() << "failed to open file\n";
+    // funcOp.emitWarning() << "failed to open file\n";
     return;
   }
   gotoLine(sourceFile, loc.getLine());

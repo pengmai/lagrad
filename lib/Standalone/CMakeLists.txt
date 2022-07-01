@@ -13,6 +13,7 @@ add_mlir_dialect_library(MLIRStandalone
         DeadCodeElimination.cpp
         LoopAllocHoisting.cpp
         LinalgCanonicalize.cpp
+        PrimalCaching.cpp
         Utils.cpp
         DebugNames.cpp
 

@@ -102,8 +102,6 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     return nullptr;
   }
 
-  DEBUGpopulateFunc(funcOp, ctx);
-
   // Need to double check the return type.
   assert(funcOp.getType().getNumResults() == 1 &&
          "differentiating functions with more than one result not supported");

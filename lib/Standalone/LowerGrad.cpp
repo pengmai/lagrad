@@ -9,7 +9,6 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
-#include "queue"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
@@ -113,7 +112,9 @@ private:
     FuncOp funcOp =
         copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
     LAGradContext lagradctx{moduleOp};
+    DEBUGpopulateFunc(lagradctx, funcOp);
     runActivityAnalysis(lagradctx, funcOp, gradientsOf);
+    // populatePrimalCaches(lagradctx, funcOp, rewriter);
     return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,
                                  /*topLevel=*/!customGradSignal);
   }

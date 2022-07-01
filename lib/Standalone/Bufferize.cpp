@@ -73,7 +73,7 @@ public:
         op.getResult().getType().dyn_cast_or_null<RankedTensorType>();
     auto resultRank = resultTensorType.getRank();
     // Curently only deal with 2D -> 1D and 3D -> 2D rank reduction cases.
-    if (!resultTensorType || resultRank > 2 ||
+    if (!resultTensorType ||
         op.getOffsetSizeAndStrideStartOperandIndex() != 1) {
       return failure();
     }
@@ -119,7 +119,7 @@ public:
         getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
     auto sliceType = MemRefType::get(destType.getShape(),
                                      destType.getElementType(), slice_layout);
-    auto make_copy = op->getAttr("make_copy").dyn_cast_or_null<BoolAttr>();
+    // auto make_copy = op->getAttr("make_copy").dyn_cast_or_null<BoolAttr>();
     // if (make_copy && make_copy.getValue()) {
     //   auto dest = rewriter.create<memref::AllocOp>(
     //       op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
