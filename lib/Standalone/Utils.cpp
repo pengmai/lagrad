@@ -509,8 +509,20 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     } else if (opName == "arith.negf") {
       vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
     } else if (opName == "std.select") {
-      // auto selectOp = dyn_cast<mlir::SelectOp>(op);
-      llvm_unreachable("std.select not yet implemented");
+      auto selectOp = dyn_cast<mlir::SelectOp>(op);
+      // Assume that the gradient is zero for the branch not taken.
+      // Not sure if this is true in general.
+      if (op_index == 0) {
+        // true branch
+        auto zero = getZero(op->getLoc(), operand, rewriter);
+        vjp_value = rewriter.create<SelectOp>(
+            op->getLoc(), selectOp.condition(), vjp_value, zero);
+      } else if (op_index == 1) {
+        // false branch
+        auto zero = getZero(op->getLoc(), operand, rewriter);
+        vjp_value = rewriter.create<SelectOp>(
+            op->getLoc(), selectOp.condition(), zero, vjp_value);
+      }
     } else if (opName == "math.exp") {
       auto expOp = dyn_cast<math::ExpOp>(op);
       vjp_value = rewriter.create<arith::MulFOp>(expOp.getLoc(), vjp_value,
