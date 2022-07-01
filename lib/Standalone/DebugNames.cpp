@@ -3,6 +3,8 @@
 #include <limits>
 #include <string>
 
+#define ENABLE_NAME_DEBUG false
+
 namespace mlir {
 using namespace mlir;
 // Trim functions taken from https://stackoverflow.com/a/25385766
@@ -51,13 +53,64 @@ void parseCommaSepParens(std::string src, SmallVector<std::string> &tokens) {
   tokens.push_back(trim(subs));
 }
 
-void DEBUGpopulateFuncArgs(FuncOp funcOp, LAGradContext &ctx) {
+void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
+                         LAGradContext &ctx) {
+  assert(region && "Region cannot be null");
+  std::string line, src, subs;
+  SmallVector<std::string> tokens;
+
+  for (auto &op : region->getOps()) {
+    gotoLine(sourceFile, op.getLoc().cast<FileLineColLoc>().getLine());
+    getline(sourceFile, src);
+    if (op.getNumResults() == 1) {
+      assert(src.find('=') != std::string::npos &&
+             "Expect op line to contain equals sign");
+      subs = src.substr(0, src.find('='));
+      ctx.debug_names[op.getResult(0)] = trim(subs);
+    }
+
+    if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+      if (forOp.getNumResults() > 1) {
+        assert(src.find('=') != std::string::npos &&
+               "Expect op line to contain equals sign");
+        subs = src.substr(0, src.find(':'));
+        for (size_t i = 0; i < forOp.getNumResults(); i++) {
+          ctx.debug_names[op.getResult(i)] =
+              trim(subs) + "#" + std::to_string(i);
+        }
+      }
+      while (src.find('{') == std::string::npos) {
+        getline(sourceFile, line);
+        src += line;
+      }
+
+      parseCommaSepParens(src, tokens);
+      assert(tokens.size() == forOp.getNumIterOperands() &&
+             "Mismatch of parsed names and for op iter args");
+      for (auto pair : llvm::zip(forOp.getRegionIterArgs(), tokens)) {
+        subs = std::get<1>(pair).substr(0, std::get<1>(pair).find('='));
+        ctx.debug_names[std::get<0>(pair)] = trim(subs);
+      }
+
+      DEBUGpopulateRegion(&forOp.getRegion(), sourceFile, ctx);
+    }
+  }
+
+  for (auto pair : ctx.debug_names) {
+    llvm::errs() << "name: '" << pair.second << "'\n";
+  }
+}
+
+void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx) {
+  if (!ENABLE_NAME_DEBUG) {
+    return;
+  }
   // Clearing the map makes printing everything less verbose
   ctx.debug_names.clear();
   auto loc = funcOp.getLoc().cast<FileLineColLoc>();
   std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());
-  llvm::errs() << "\n\nlooking at function " << funcOp.getName() << "\n";
+  llvm::errs() << "\nlooking at function " << funcOp.getName() << "\n";
   if (!sourceFile.is_open()) {
     assert(false && "failed to open file");
   }
@@ -74,56 +127,7 @@ void DEBUGpopulateFuncArgs(FuncOp funcOp, LAGradContext &ctx) {
     subs = tokens[i].substr(0, tokens[i].find(':'));
     ctx.debug_names[funcOp.getArgument(i)] = trim(subs);
   }
-  tokens.clear();
-
-  auto *region = funcOp.getCallableRegion();
-  assert(region && "Cannot differentiate funcOp with null region");
-  size_t count = 0;
-  for (auto &op : region->getOps()) {
-    gotoLine(sourceFile, op.getLoc().cast<FileLineColLoc>().getLine());
-    getline(sourceFile, src);
-    if (op.getNumResults() == 1) {
-      assert(src.find('=') != std::string::npos &&
-             "Expect op line to contain equals sign");
-      subs = src.substr(0, src.find('='));
-      ctx.debug_names[op.getResult(0)] = trim(subs);
-    }
-
-    if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
-      if (forOp.getNumResults() > 1) {
-        assert(src.find('=') != std::string::npos &&
-               "Expect op line to contain equals sign");
-        subs = src.substr(0, src.find(':'));
-        trim(subs);
-        for (size_t i = 0; i < forOp.getNumResults(); i++) {
-          ctx.debug_names[op.getResult(i)] = subs + "#" + std::to_string(i);
-        }
-      }
-      while (src.find('{') == std::string::npos) {
-        getline(sourceFile, line);
-        src += line;
-      }
-
-      parseCommaSepParens(src, tokens);
-      assert(tokens.size() == forOp.getNumIterOperands() &&
-             "Mismatch of parsed names and for op iter args");
-      for (auto pair : llvm::zip(forOp.getRegionIterArgs(), tokens)) {
-        subs = std::get<1>(pair).substr(0, std::get<1>(pair).find('='));
-        ctx.debug_names[std::get<0>(pair)] = trim(subs);
-      }
-
-      // llvm::errs() << "Looking at for op\n" << src << "\n";
-    }
-    // TODO: Might at some point be worth parsing the args in a linalg.generic
-    // op
-    if (count > 10)
-      break;
-    count++;
-  }
-
-  for (auto pair : ctx.debug_names) {
-    llvm::errs() << pair.first << " -> " << pair.second << "\n";
-  }
+  DEBUGpopulateRegion(funcOp.getCallableRegion(), sourceFile, ctx);
 }
 
 } // namespace mlir

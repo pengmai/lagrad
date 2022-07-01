@@ -102,7 +102,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     return nullptr;
   }
 
-  DEBUGpopulateFuncArgs(funcOp, ctx);
+  DEBUGpopulateFunc(funcOp, ctx);
 
   // Need to double check the return type.
   assert(funcOp.getType().getNumResults() == 1 &&

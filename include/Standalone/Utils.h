@@ -15,9 +15,9 @@ public:
   llvm::SmallDenseSet<Value> activeValues;
 };
 
-void DEBUGpopulateFuncArgs(FuncOp funcOp, LAGradContext &ctx);
+void DEBUGpopulateFunc(FuncOp funcOp, LAGradContext &ctx);
 
-// void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc, ConversionPatternRewriter &rewriter);
+void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc, ConversionPatternRewriter &rewriter);
 
 AffineMap getRankReduceSubviewLayout(int64_t resultRank,
                                      ConversionPatternRewriter &rewriter);
