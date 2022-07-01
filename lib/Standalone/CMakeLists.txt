@@ -14,6 +14,7 @@ add_mlir_dialect_library(MLIRStandalone
         LoopAllocHoisting.cpp
         LinalgCanonicalize.cpp
         Utils.cpp
+        DebugNames.cpp
 
         ADDITIONAL_HEADER_DIRS
         ${PROJECT_SOURCE_DIR}/include/Standalone

@@ -3,6 +3,7 @@
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include <string>
 
 namespace mlir {
 
@@ -10,8 +11,13 @@ class LAGradContext {
 public:
   explicit LAGradContext(ModuleOp m) : moduleOp(m) {}
   ModuleOp moduleOp;
+  llvm::SmallDenseMap<Value, std::string> debug_names;
   llvm::SmallDenseSet<Value> activeValues;
 };
+
+void DEBUGpopulateFuncArgs(FuncOp funcOp, LAGradContext &ctx);
+
+// void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc, ConversionPatternRewriter &rewriter);
 
 AffineMap getRankReduceSubviewLayout(int64_t resultRank,
                                      ConversionPatternRewriter &rewriter);
@@ -54,9 +60,9 @@ Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
                   Value vjp_value, DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter);
 
-ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
+void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
                         ValueRange free_operand, Value vjp_value,
-                        size_t result_idx, DenseMap<Value, Value> outer_env,
+                        size_t result_idx, DenseMap<Value, Value> &outer_env,
                         ConversionPatternRewriter &rewriter);
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
