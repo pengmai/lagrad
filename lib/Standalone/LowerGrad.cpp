@@ -22,7 +22,7 @@ public:
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    auto funcOp = getFunctionDeclaration(op, operands, rewriter);
+    auto funcOp = generateAdjointFunc(op, operands, rewriter);
     if (!funcOp) {
       return failure();
     }
@@ -60,7 +60,7 @@ private:
     return true;
   }
 
-  static FuncOp getFunctionDeclaration(Operation *gradOp,
+  static FuncOp generateAdjointFunc(Operation *gradOp,
                                        ArrayRef<Value> operands,
                                        ConversionPatternRewriter &rewriter) {
     Value arg0 = operands[0];

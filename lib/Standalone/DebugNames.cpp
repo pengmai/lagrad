@@ -1,4 +1,5 @@
 #include "Standalone/Utils.h"
+// #include <algorithm>
 #include <fstream>
 #include <limits>
 #include <string>
@@ -68,8 +69,15 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
       subs = src.substr(0, src.find('='));
       ctx.debug_names[op.getResult(0)] = trim(subs);
     }
-
-    if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+    if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
+      size_t idx = 0;
+      for (auto arg : genericOp.getBodyRegion().getArguments()) {
+        ctx.debug_names[arg] =
+            ctx.debug_names[op.getResult(0)] + "#arg" + std::to_string(idx);
+        idx++;
+      }
+      DEBUGpopulateRegion(&genericOp.getBodyRegion(), sourceFile, ctx);
+    } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
       if (forOp.getNumResults() > 1) {
         assert(src.find('=') != std::string::npos &&
                "Expect op line to contain equals sign");
@@ -97,12 +105,38 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
       DEBUGpopulateRegion(&ifOp.thenRegion(), sourceFile, ctx);
       DEBUGpopulateRegion(&ifOp.elseRegion(), sourceFile, ctx);
+    } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
+      if (callOp.getNumResults() > 1) {
+        assert(src.find('=') != std::string::npos &&
+               "Expect op line to contain equals sign");
+        subs = src.substr(0, src.find(':'));
+        for (size_t i = 0; i < callOp.getNumResults(); i++) {
+          ctx.debug_names[op.getResult(i)] =
+              trim(subs) + "#" + std::to_string(i);
+        }
+      }
+      auto moduleOp = op.getParentOfType<ModuleOp>();
+      assert(moduleOp && "module op was null");
+      auto calledFunc = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+      assert(calledFunc && "failed to find called function");
+      DEBUGpopulateFunc(ctx, calledFunc);
     }
   }
 
+  // SmallVector<std::string> names;
+  // names.reserve(ctx.debug_names.size());
   // for (auto pair : ctx.debug_names) {
-  //   llvm::errs() << "name: '" << pair.second << "'\n";
+  //   names.push_back(pair.second);
   // }
+  // std::sort(names.begin(), names.end());
+  // llvm::errs() << "[";
+  // for (auto name : names) {
+  //   llvm::errs() << name;
+  //   if (name != names.back()) {
+  //     llvm::errs() << ", ";
+  //   }
+  // }
+  // llvm::errs() << "]\n";
 }
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
@@ -110,7 +144,7 @@ void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
     return;
   }
   // Clearing the map makes printing everything less verbose
-  ctx.debug_names.clear();
+  // ctx.debug_names.clear();
   auto loc = funcOp.getLoc().cast<FileLineColLoc>();
   std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());

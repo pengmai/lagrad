@@ -235,7 +235,7 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter,
       return rewriter.create<arith::ConstantOp>(loc, denseAttr);
     }
   }
-  llvm::outs() << "getZero for type " << operand.getType()
+  llvm::errs() << "getZero for type " << operand.getType()
                << " not yet implemented\n";
   llvm_unreachable("not yet implemented");
   return nullptr;
@@ -362,23 +362,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
-  if (auto insertSliceOp = dyn_cast_or_null<tensor::InsertSliceOp>(op)) {
-    // llvm::errs() << "\n\nlooking at insert slice op: " << insertSliceOp <<
-    // "\n"; if (!env[insertSliceOp.result()]) {
-    //   llvm::errs() << "need to populate the insert slice result vjp\n";
-    // } else {
-    //   llvm::errs() << "insert slice op result has a vjp\n";
-    // }
-    // if (!env[insertSliceOp.dest()]) {
-    //   llvm::errs() << "also no dest vjp defined\n";
-    // } else {
-    //   llvm::errs() << "dest vjp is defined\n";
-    // }
-
-    if (!env[insertSliceOp.result()] && env[insertSliceOp.dest()]) {
-      env[insertSliceOp.result()] = env[insertSliceOp.dest()];
-    }
-  }
   if (opName == "arith.sitofp") {
     // The input is an integer so can't have a gradient signal.
     return;
@@ -547,8 +530,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       vjp_value =
           rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, coshsquared);
     } else if (opName == "math.log") {
-      vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
-                                                 op->getOperand(0));
+      vjp_value =
+          rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, operand);
     } else if (opName == "math.sqrt") {
       auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value, half);
