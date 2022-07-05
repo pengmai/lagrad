@@ -188,15 +188,21 @@ static inline void printSet(LAGradContext &ctx, const ValueSet &set,
   if (pretty) {
     SmallVector<std::string> names;
     for (auto v : set) {
-      names.push_back(ctx.debug_names[v]);
+      if (ctx.debug_names.count(v) == 1) {
+        names.push_back(ctx.debug_names[v]);
+      } else {
+        names.push_back("<value not registered>");
+      }
     }
     std::sort(names.begin(), names.end());
     llvm::errs() << "{";
+    size_t i = 0;
     for (auto name : names) {
       llvm::errs() << name;
-      if (name != names.back()) {
+      if (i != names.size() - 1) {
         llvm::errs() << ", ";
       }
+      i++;
     }
     llvm::errs() << "}\n";
   }
@@ -433,11 +439,9 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
         }
       }
       if (VERBOSITY >= 1) {
-        llvm::errs() << "Final TBR values:\n";
+        llvm::errs() << "Final TBR values (" << ctx.toBeRecorded.size()
+                     << "):\n";
         printSet(ctx, ctx.toBeRecorded);
-        for (auto v : ctx.toBeRecorded) {
-          llvm::errs() << v.getType() << "\n";
-        }
       }
     }
   }
