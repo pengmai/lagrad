@@ -1,22 +1,50 @@
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#define DEBUG_AA true
+#include <algorithm>
+#include <string>
+#define DEBUG_AA false
 
 using namespace mlir;
 
 namespace {
 using ValueSet = llvm::SmallDenseSet<Value>;
 
-void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
+void runTopDownDFS(LAGradContext &ctx, SmallVector<Value> &frontier,
+                   ValueSet &out) {
   while (!frontier.empty()) {
     Value val = frontier.pop_back_val();
     if (!out.contains(val) && isFloatOrFloatTensor(val.getType())) {
       out.insert(val);
       for (auto user : val.getUsers()) {
-        if (auto scfYield = dyn_cast_or_null<scf::YieldOp>(user)) {
+        if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(user)) {
+          for (auto tup : llvm::zip(genericOp.getOperands(),
+                                    genericOp.getBodyRegion().getArguments())) {
+            if (std::get<0>(tup) == val) {
+              frontier.push_back(std::get<1>(tup));
+            }
+          }
+        } else if (auto linalgYieldOp =
+                       dyn_cast_or_null<linalg::YieldOp>(user)) {
+          auto genericOp =
+              cast<linalg::GenericOp>(linalgYieldOp->getParentOp());
+          for (auto tup :
+               llvm::zip(linalgYieldOp.getOperands(), genericOp.getResults())) {
+            if (std::get<0>(tup) == val) {
+              frontier.push_back(std::get<1>(tup));
+            }
+          }
+        } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(user)) {
+          // Handles where the use is an iter arg operand
+          for (auto &operand : forOp.getIterOpOperands()) {
+            if (operand.get() == val) {
+              frontier.push_back(forOp.getRegionIterArgForOpOperand(operand));
+            }
+          }
+        } else if (auto scfYield = dyn_cast_or_null<scf::YieldOp>(user)) {
           if (auto forOp =
                   dyn_cast_or_null<scf::ForOp>(scfYield->getParentOp())) {
+            // Handles where the use is a free variable in a for body.
             // Only include directly relevant yielded values.
             // I believe we only need the region iter args and not the iter
             // operand because this is top down analysis.
@@ -108,6 +136,11 @@ void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
           assert(result_idx != -1 && "Result was not found");
           frontier.push_back(ifOp.thenYield().getOperand(result_idx));
           frontier.push_back(ifOp.elseYield().getOperand(result_idx));
+        } else if (auto genericOp =
+                       dyn_cast_or_null<linalg::GenericOp>(definingOp)) {
+          assert(genericOp.getNumResults() == 1);
+          frontier.push_back(
+              genericOp.getBody()->getTerminator()->getOperand(0));
         }
         // If this is a call op, this is oversimplified because some operands
         // might not be active based on the contents of the function body.
@@ -119,8 +152,8 @@ void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
   }
 }
 
-void runTopDownAnalysis(FuncOp primalFunc, ArrayAttr gradientsOf,
-                        ValueSet &topDownActive) {
+void runTopDownAnalysis(LAGradContext &ctx, FuncOp primalFunc,
+                        ArrayAttr gradientsOf, ValueSet &topDownActive) {
   SmallVector<Value> frontier;
   if (!gradientsOf) {
     frontier.push_back(primalFunc.getArgument(0));
@@ -130,7 +163,7 @@ void runTopDownAnalysis(FuncOp primalFunc, ArrayAttr gradientsOf,
       frontier.push_back(primalFunc.getArgument(argIndex));
     }
   }
-  runTopDownDFS(frontier, topDownActive);
+  runTopDownDFS(ctx, frontier, topDownActive);
 }
 
 void runBottomUpAnalysis(FuncOp primalFunc, ValueSet &bottomUpActive) {
@@ -152,20 +185,40 @@ static inline void setUnion(ValueSet &a, const ValueSet &b) {
 
 static inline void printSet(LAGradContext &ctx, const ValueSet &set,
                             bool pretty = true) {
-  llvm::errs() << "{";
-  size_t i = 0;
-  for (auto v : set) {
-    if (pretty) {
-      llvm::errs() << ctx.debug_names[v];
-    } else {
-      llvm::errs() << v;
+  if (pretty) {
+    SmallVector<std::string> names;
+    for (auto v : set) {
+      names.push_back(ctx.debug_names[v]);
     }
-    if (i != set.size() - 1) {
-      llvm::errs() << ", ";
+    std::sort(names.begin(), names.end());
+    llvm::errs() << "{";
+    for (auto name : names) {
+      llvm::errs() << name;
+      if (name != names.back()) {
+        llvm::errs() << ", ";
+      }
     }
-    i++;
+    llvm::errs() << "}\n";
   }
-  llvm::errs() << "}\n";
+}
+
+static inline void printAllAdjU(LAGradContext &ctx,
+                                llvm::SmallDenseMap<Value, ValueSet> &adjU) {
+  llvm::errs() << "*** PRINTING ALL ADJU SETS***\n";
+  SmallVector<Value> names;
+  for (auto pair : adjU) {
+    names.push_back(pair.first);
+  }
+  // ctx.debug_names[adjU]
+  std::sort(names.begin(), names.end(),
+            [&](const Value &a, const Value &b) -> bool {
+              return ctx.debug_names[a] < ctx.debug_names[b];
+            });
+  for (auto name : names) {
+    llvm::errs() << ctx.debug_names[name] << ": ";
+    printSet(ctx, adjU[name]);
+  }
+  llvm::errs() << "*** DONE ***\n";
 }
 
 // void runDepsForIterArgs(LAGradContext &ctx)
@@ -188,25 +241,25 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       adjU[negOp.getResult()] = negAdjU;
     } else if (auto mulOp = dyn_cast_or_null<arith::MulFOp>(&op)) {
       ValueSet mulAdjU;
-      // if (ctx.activeValues.contains(mulOp.lhs())) {
-      mulAdjU.insert(mulOp.rhs());
-      setUnion(mulAdjU, adjU[mulOp.lhs()]);
-      // }
-      // if (ctx.activeValues.contains(mulOp.rhs())) {
-      mulAdjU.insert(mulOp.lhs());
-      setUnion(mulAdjU, adjU[mulOp.rhs()]);
-      // }
+      if (ctx.activeValues.contains(mulOp.lhs())) {
+        mulAdjU.insert(mulOp.rhs());
+        setUnion(mulAdjU, adjU[mulOp.lhs()]);
+      }
+      if (ctx.activeValues.contains(mulOp.rhs())) {
+        mulAdjU.insert(mulOp.lhs());
+        setUnion(mulAdjU, adjU[mulOp.rhs()]);
+      }
       adjU[mulOp.getResult()] = mulAdjU;
     } else if (auto divOp = dyn_cast_or_null<arith::DivFOp>(&op)) {
       ValueSet divAdjU;
-      // if (ctx.activeValues.contains(divOp.lhs())) {
-      divAdjU.insert(divOp.rhs());
-      setUnion(divAdjU, adjU[divOp.lhs()]);
-      // }
-      // if (ctx.activeValues.contains(divOp.rhs())) {
-      divAdjU.insert(divOp.lhs());
-      setUnion(divAdjU, adjU[divOp.rhs()]);
-      // }
+      if (ctx.activeValues.contains(divOp.lhs())) {
+        divAdjU.insert(divOp.rhs());
+        setUnion(divAdjU, adjU[divOp.lhs()]);
+      }
+      if (ctx.activeValues.contains(divOp.rhs())) {
+        divAdjU.insert(divOp.lhs());
+        setUnion(divAdjU, adjU[divOp.rhs()]);
+      }
       adjU[divOp.getResult()] = divAdjU;
     } else if (auto logOp = dyn_cast_or_null<math::LogOp>(&op)) {
       ValueSet logAdjU;
@@ -225,19 +278,15 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       populateAdjointUseSets(ctx, genericOp.getBodyRegion(), adjU);
       for (auto yieldOperand :
            genericOp.getBody()->getTerminator()->getOperands()) {
-        llvm::errs() << "frontier init: ";
-        printSet(ctx, adjU[yieldOperand], false);
         SmallVector<Value> frontier{adjU[yieldOperand].begin(),
                                     adjU[yieldOperand].end()};
         ValueSet yieldDeps;
         runBottomUpDFS(frontier, yieldDeps);
-        llvm::errs() << "yield deps: ";
-        printSet(ctx, yieldDeps, false);
         for (auto tup : llvm::zip(genericOp.getOperands(),
                                   genericOp.getBlock()->getArguments())) {
           if (yieldDeps.contains(std::get<1>(tup))) {
             genericAdjU.insert(std::get<0>(tup));
-            break;
+            setUnion(genericAdjU, adjU[std::get<0>(tup)]);
           }
         }
       }
@@ -272,6 +321,15 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       for (auto result : ifOp.getResults()) {
         adjU[result] = ifAdjU;
       }
+    } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+      ValueSet forAdjU;
+      populateAdjointUseSets(ctx, forOp.getBodyRegion(), adjU);
+      for (auto operand : forOp.getBody()->getTerminator()->getOperands()) {
+        setUnion(forAdjU, adjU[operand]);
+      }
+      for (auto result : forOp.getResults()) {
+        adjU[result] = forAdjU;
+      }
     } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
       ValueSet callAdjU;
       auto &callRegion =
@@ -284,8 +342,6 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
                                     adjU[returnOperand].end()};
         ValueSet returnDeps;
         runBottomUpDFS(frontier, returnDeps);
-        llvm::errs() << "adjU of return operand: ";
-        printSet(ctx, adjU[returnOperand]);
         for (auto tup :
              llvm::zip(callRegion.getArguments(), callOp.getOperands())) {
           if (returnDeps.contains(std::get<0>(tup))) {
@@ -293,8 +349,6 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
           }
         }
       }
-      llvm::errs() << "call adjointU: ";
-      printSet(ctx, callAdjU);
       for (auto result : callOp.getResults()) {
         adjU[result] = callAdjU;
       }
@@ -305,46 +359,48 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
 void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
   // adjU maps results to sets of effectively used values
   llvm::SmallDenseMap<Value, ValueSet> adjU;
-  primalFunc.walk([&](scf::ForOp forOp) {
-    ValueSet finalAdjU;
-    populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
-    for (auto operand :
-         forOp.getLoopBody().front().getTerminator()->getOperands()) {
-      setUnion(finalAdjU, adjU[operand]);
-    }
+  for (auto &op : primalFunc.getCallableRegion()->getOps()) {
+    if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+      ValueSet finalAdjU;
+      populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
+      if (DEBUG_AA) {
+        printAllAdjU(ctx, adjU);
+      }
+      for (auto operand :
+           forOp.getLoopBody().front().getTerminator()->getOperands()) {
+        setUnion(finalAdjU, adjU[operand]);
+      }
 
-    if (DEBUG_AA) {
-      llvm::errs() << "adjU:\n";
-      printSet(ctx, finalAdjU);
-    }
+      if (DEBUG_AA) {
+        llvm::errs() << "adjU:\n";
+        printSet(ctx, finalAdjU);
+      }
 
-    ValueSet derivedFromIterArgs;
-    SmallVector<Value> frontier;
-    for (auto arg : forOp.getRegionIterArgs()) {
-      if (ctx.activeValues.contains(arg)) {
-        frontier.push_back(arg);
+      ValueSet derivedFromIterArgs;
+      SmallVector<Value> frontier;
+      for (auto arg : forOp.getRegionIterArgs()) {
+        if (ctx.activeValues.contains(arg)) {
+          frontier.push_back(arg);
+        }
+      }
+      runTopDownDFS(ctx, frontier, derivedFromIterArgs);
+      if (DEBUG_AA) {
+        llvm::errs() << "derived from iter args:\n";
+        printSet(ctx, derivedFromIterArgs);
+      }
+
+      ValueSet tbr;
+      for (auto v : derivedFromIterArgs) {
+        if (finalAdjU.contains(v)) {
+          tbr.insert(v);
+        }
+      }
+      if (DEBUG_AA) {
+        llvm::errs() << "Final TBR values:\n";
+        printSet(ctx, tbr);
       }
     }
-    runTopDownDFS(frontier, derivedFromIterArgs);
-    if (DEBUG_AA) {
-      llvm::errs() << "derived from iter args:\n";
-      printSet(ctx, derivedFromIterArgs);
-      // for (auto v : derivedFromIterArgs) {
-      //   llvm::errs() << "* " << ctx.debug_names[v] << "\n";
-      // }
-    }
-
-    ValueSet tbr;
-    for (auto v : derivedFromIterArgs) {
-      if (finalAdjU.contains(v)) {
-        tbr.insert(v);
-      }
-    }
-    if (DEBUG_AA) {
-      llvm::errs() << "Final TBR values:\n";
-      printSet(ctx, tbr);
-    }
-  });
+  }
 }
 } // namespace
 
@@ -352,16 +408,14 @@ void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
                                ArrayAttr gradientsOf) {
   llvm::SmallDenseSet<Value> topDownActive;
   llvm::SmallDenseSet<Value> bottomUpActive;
-  runTopDownAnalysis(primalFunc, gradientsOf, topDownActive);
+  runTopDownAnalysis(ctx, primalFunc, gradientsOf, topDownActive);
   runBottomUpAnalysis(primalFunc, bottomUpActive);
 
-  // llvm::errs() << "Top down active values:\n";
-  // for (auto td : topDownActive) {
-  //   llvm::errs() << "* " << ctx.debug_names[td] << "\n";
-  // }
-  // llvm::errs() << "\nBottom up active values:\n";
-  // for (auto td : bottomUpActive) {
-  //   llvm::errs() << "* " << ctx.debug_names[td] << "\n";
+  // if (DEBUG_AA) {
+  //   llvm::errs() << "Top down active values: ";
+  //   printSet(ctx, topDownActive);
+  //   llvm::errs() << "\nBottom up active values: ";
+  //   printSet(ctx, bottomUpActive);
   // }
 
   // Set intersection
@@ -371,7 +425,7 @@ void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
     }
   }
   if (DEBUG_AA) {
-    llvm::errs() << "active values:\n";
+    llvm::errs() << "active values: (" << ctx.activeValues.size() << "):\n";
     printSet(ctx, ctx.activeValues);
   }
   runEffectiveUseAnalysis(ctx, primalFunc);

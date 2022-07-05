@@ -6,3 +6,5 @@ test/pytest/tmp
 benchmarks/tmp
 benchmarks/results
 .secretpass
+notes*.md
+
