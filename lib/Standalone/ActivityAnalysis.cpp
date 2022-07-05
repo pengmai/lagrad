@@ -3,7 +3,7 @@
 #include "mlir/Dialect/SCF/SCF.h"
 #include <algorithm>
 #include <string>
-#define DEBUG_AA false
+#define VERBOSITY 1
 
 using namespace mlir;
 
@@ -209,7 +209,6 @@ static inline void printAllAdjU(LAGradContext &ctx,
   for (auto pair : adjU) {
     names.push_back(pair.first);
   }
-  // ctx.debug_names[adjU]
   std::sort(names.begin(), names.end(),
             [&](const Value &a, const Value &b) -> bool {
               return ctx.debug_names[a] < ctx.debug_names[b];
@@ -278,6 +277,13 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       populateAdjointUseSets(ctx, genericOp.getBodyRegion(), adjU);
       for (auto yieldOperand :
            genericOp.getBody()->getTerminator()->getOperands()) {
+        // Add free operands that are in adjU
+        for (auto v : adjU[yieldOperand]) {
+          if (v.getParentBlock() != genericOp.getBlock()) {
+            genericAdjU.insert(v);
+          }
+        }
+
         SmallVector<Value> frontier{adjU[yieldOperand].begin(),
                                     adjU[yieldOperand].end()};
         ValueSet yieldDeps;
@@ -293,6 +299,37 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       assert(genericOp.getNumResults() == 1 &&
              "expected generic op to have one result");
       adjU[genericOp.getResult(0)] = genericAdjU;
+    } else if (op.getName().getStringRef() == "linalg.dot" ||
+               op.getName().getStringRef() == "linalg.matmul" ||
+               op.getName().getStringRef() == "linalg.matvec" ||
+               op.getName().getStringRef() == "linalg.vecmat" ||
+               op.getName().getStringRef() == "linalg.batch_matmul") {
+      ValueSet linalgAdjU;
+      auto linalgOp = cast<linalg::LinalgOp>(&op);
+      assert(linalgOp.getNumInputs() == 2 &&
+             "Expected named linalg op to have 2 inputs");
+      auto lhs = linalgOp.getInputOperand(0)->get();
+      auto rhs = linalgOp.getInputOperand(1)->get();
+      if (ctx.activeValues.contains(lhs)) {
+        linalgAdjU.insert(rhs);
+        setUnion(linalgAdjU, adjU[lhs]);
+      }
+      if (ctx.activeValues.contains(rhs)) {
+        linalgAdjU.insert(lhs);
+        setUnion(linalgAdjU, adjU[rhs]);
+      }
+      adjU[linalgOp->getResult(0)] = linalgAdjU;
+    } else if (auto extractOp = dyn_cast_or_null<tensor::ExtractOp>(&op)) {
+      ValueSet extractAdjU;
+      setUnion(extractAdjU, adjU[extractOp.tensor()]);
+      adjU[extractOp.getResult()] = extractAdjU;
+    } else if (auto insertOp = dyn_cast_or_null<tensor::InsertOp>(&op)) {
+      if (ctx.activeValues.contains(insertOp.scalar())) {
+        ValueSet insertAdjU;
+        setUnion(insertAdjU, adjU[insertOp.scalar()]);
+        setUnion(insertAdjU, adjU[insertOp.dest()]);
+        adjU[insertOp.getResult()] = insertAdjU;
+      }
     } else if (auto extractSliceOp =
                    dyn_cast_or_null<tensor::ExtractSliceOp>(&op)) {
       ValueSet extractSliceAdjU;
@@ -346,6 +383,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
              llvm::zip(callRegion.getArguments(), callOp.getOperands())) {
           if (returnDeps.contains(std::get<0>(tup))) {
             callAdjU.insert(std::get<1>(tup));
+            setUnion(callAdjU, adjU[std::get<1>(tup)]);
           }
         }
       }
@@ -363,7 +401,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
     if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
       ValueSet finalAdjU;
       populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
-      if (DEBUG_AA) {
+      if (VERBOSITY >= 3) {
         printAllAdjU(ctx, adjU);
       }
       for (auto operand :
@@ -371,7 +409,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
         setUnion(finalAdjU, adjU[operand]);
       }
 
-      if (DEBUG_AA) {
+      if (VERBOSITY >= 2) {
         llvm::errs() << "adjU:\n";
         printSet(ctx, finalAdjU);
       }
@@ -384,20 +422,22 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
         }
       }
       runTopDownDFS(ctx, frontier, derivedFromIterArgs);
-      if (DEBUG_AA) {
+      if (VERBOSITY >= 2) {
         llvm::errs() << "derived from iter args:\n";
         printSet(ctx, derivedFromIterArgs);
       }
 
-      ValueSet tbr;
       for (auto v : derivedFromIterArgs) {
         if (finalAdjU.contains(v)) {
-          tbr.insert(v);
+          ctx.toBeRecorded.insert(v);
         }
       }
-      if (DEBUG_AA) {
+      if (VERBOSITY >= 1) {
         llvm::errs() << "Final TBR values:\n";
-        printSet(ctx, tbr);
+        printSet(ctx, ctx.toBeRecorded);
+        for (auto v : ctx.toBeRecorded) {
+          llvm::errs() << v.getType() << "\n";
+        }
       }
     }
   }
@@ -411,12 +451,12 @@ void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
   runTopDownAnalysis(ctx, primalFunc, gradientsOf, topDownActive);
   runBottomUpAnalysis(primalFunc, bottomUpActive);
 
-  // if (DEBUG_AA) {
-  //   llvm::errs() << "Top down active values: ";
-  //   printSet(ctx, topDownActive);
-  //   llvm::errs() << "\nBottom up active values: ";
-  //   printSet(ctx, bottomUpActive);
-  // }
+  if (VERBOSITY >= 3) {
+    llvm::errs() << "Top down active values: ";
+    printSet(ctx, topDownActive);
+    llvm::errs() << "\nBottom up active values: ";
+    printSet(ctx, bottomUpActive);
+  }
 
   // Set intersection
   for (auto td : topDownActive) {
@@ -424,7 +464,7 @@ void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
       ctx.activeValues.insert(td);
     }
   }
-  if (DEBUG_AA) {
+  if (VERBOSITY >= 2) {
     llvm::errs() << "active values: (" << ctx.activeValues.size() << "):\n";
     printSet(ctx, ctx.activeValues);
   }

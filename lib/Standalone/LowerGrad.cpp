@@ -60,9 +60,8 @@ private:
     return true;
   }
 
-  static FuncOp generateAdjointFunc(Operation *gradOp,
-                                       ArrayRef<Value> operands,
-                                       ConversionPatternRewriter &rewriter) {
+  static FuncOp generateAdjointFunc(Operation *gradOp, ArrayRef<Value> operands,
+                                    ConversionPatternRewriter &rewriter) {
     Value arg0 = operands[0];
     auto arg0Type = arg0.getType().dyn_cast<FunctionType>();
     if (!arg0Type) {
@@ -114,7 +113,7 @@ private:
     LAGradContext lagradctx{moduleOp};
     DEBUGpopulateFunc(lagradctx, funcOp);
     runActivityAnalysis(lagradctx, funcOp, gradientsOf);
-    // populatePrimalCaches(lagradctx, funcOp, rewriter);
+    populatePrimalCaches(lagradctx, funcOp, rewriter);
     return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,
                                  /*topLevel=*/!customGradSignal);
   }
