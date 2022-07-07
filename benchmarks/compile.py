@@ -38,6 +38,9 @@ OPENBLAS_OBJ = osp.join(OPENBLAS_DIR, "lib", "libopenblas.a")
 CLANG_12 = osp.join(LLVM_12_BIN, "clang-12")
 OPT_12 = osp.join(LLVM_12_BIN, "opt")
 LLC_12 = osp.join(LLVM_12_BIN, "llc")
+MONITOR_BIN = osp.join(
+    osp.dirname(__file__), "..", "memory_monitor", "memory_monitor.out"
+)
 
 BIN = osp.join(osp.dirname(__file__), "..", "build", "bin")
 TMP = osp.join(osp.dirname(__file__), "tmp")
@@ -54,10 +57,11 @@ BUFFERIZE = [
     "-standalone-loop-hoisting",
     "-promote-buffers-to-stack",
     "-buffer-deallocation",
+    "-canonicalize",
 ]
 LOWER_TO_LOOPS = [
-    # "-convert-linalg-to-affine-loops",
     "-convert-linalg-to-loops",
+    # "-convert-linalg-to-affine-loops",
     # "-affine-loop-unroll",
     "-lower-affine",
 ]
@@ -76,6 +80,7 @@ LOWER_TO_LLVM_WITH_ENZYME = [
     "-convert-scf-to-std",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
+    "-convert-math-to-libm",
     "-convert-standalone-to-llvm",
     "-convert-std-to-llvm",
     "-convert-static-allocs",
@@ -98,18 +103,18 @@ def run_safe(args, stdin: bytes = None, suppress_stderr=False):
 def run_grad(contents):
     print(
         run_safe(
-            [f"{BIN}/standalone-opt", "-take-grads", "-canonicalize"],
+            [f"{BIN}/lagrad-opt", "-take-grads", "-canonicalize"],
             stdin=contents,
         ).decode("utf-8")
     )
 
 
-def compile_mlir(contents, output, lower_type="loops"):
+def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=False):
     assert lower_type in ["loops", "blas"], "Invalid lower_type"
     # print(
     #     run_safe(
     #         [
-    #             f"{BIN}/standalone-opt",
+    #             f"{BIN}/lagrad-opt",
     #             "-take-grads",
     #             "-linalg-generalize-named-ops",
     #             "-canonicalize",
@@ -123,25 +128,30 @@ def compile_mlir(contents, output, lower_type="loops"):
 
     llvm_dialect = run_safe(
         [
-            f"{BIN}/standalone-opt",
+            f"{BIN}/lagrad-opt",
             # "-loop-invariant-code-motion",
             # "-linalg-generalize-named-ops",
             "-take-grads",
             "-canonicalize",
-            # "-inline",
-            "-standalone-dce",
+            "-inline",
+            "-linalg-canonicalize",
+            # "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
             # "-linalg-fuse-elementwise-ops",
             "-canonicalize",
         ]
-        + BUFFERIZE
+        + (
+            ["-linalg-comprehensive-module-bufferize=allow-return-memref"]
+            if comprehensive_bufferize
+            else BUFFERIZE
+        )
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
         stdin=contents,
     )
     llvm_ir = run_safe(["mlir-translate", "-mlir-to-llvmir"], stdin=llvm_dialect)
-    llvm_ir = run_safe(["opt", "-O3"], stdin=llvm_ir)
+    llvm_ir = run_safe(["opt", "-S", "-O3"], stdin=llvm_ir)
     obj = run_safe(["llc", "-filetype=obj"], stdin=llvm_ir)
     with open(f"{TMP}/{output}", "wb") as f:
         f.write(obj)
@@ -153,7 +163,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
     if print_loops:
         loops = run_safe(
             [
-                f"{BIN}/standalone-opt",
+                f"{BIN}/lagrad-opt",
                 "-take-grads",
                 "-convert-elementwise-to-linalg",
                 "-canonicalize",
@@ -165,7 +175,7 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
         print(loops.decode("utf-8"))
 
     llvm_dialect = run_safe(
-        [f"{BIN}/standalone-opt", "-convert-elementwise-to-linalg", "-canonicalize"]
+        [f"{BIN}/lagrad-opt", "-convert-elementwise-to-linalg", "-canonicalize"]
         + BUFFERIZE
         + (LOWER_TO_LOOPS if lower_type == "loops" else LOWER_TO_LIBRARY)
         + LOWER_TO_LLVM,
@@ -179,13 +189,28 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
 
 
 def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
-    def hand_opt_replace(str):
-        pass
+    def replace_hand_optimization(lines: bytes):
+        # warnings.warn(
+        #     "Running hand tracking memset_pattern replacement for Enzyme/MLIR"
+        # )
+        memset_pattern = "@.memset_pattern = private unnamed_addr constant [3 x double] [double 1.000000e+00, double 1.000000e+00, double 1.000000e+00], align 16"
+        memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %63, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
+
+        def process_line(line: str):
+            if line.lstrip().startswith("call void @memset_pattern16"):
+                return memset_call
+            elif line.startswith("@.memset_pattern ="):
+                return memset_pattern
+            return line
+
+        return "\n".join(
+            [process_line(line) for line in lines.decode("utf-8").splitlines()]
+        ).encode("utf-8")
 
     assert emit in ["llvm", "jit", "obj"], "Invalid emit type"
     llvm_dialect = run_safe(
         [
-            f"{BIN}/standalone-opt",
+            f"{BIN}/lagrad-opt",
             # "-linalg-generalize-named-ops",
             "-canonicalize",
             "-convert-elementwise-to-linalg",
@@ -221,13 +246,14 @@ def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
             stdin=llvm_ir,
             suppress_stderr=True,
         )
-        # with open(osp.join(TMP, "preenzyme_post_O2.ll"), "w") as f:
-        #     f.write(llvm_ir.decode("utf-8"))
+        # with open(osp.join(TMP, "preenzyme_post_O2.ll"), "wb") as f:
+        #     f.write(llvm_ir)
     else:
         warnings.warn("pre-Enzyme optimization disabled")
     # warnings.warn("Using hand-modified post_O2 hand tracking")
     # with open(osp.join(TMP, "preenzyme_post_O2.ll")) as f:
     #     llvm_ir = f.read().encode("utf-8")
+    llvm_ir = replace_hand_optimization(llvm_ir)
     postenzyme = run_safe(
         [
             OPT_12,
@@ -286,7 +312,11 @@ def compile_enzyme(contents, output, emit="object"):
         stdin=contents,
         suppress_stderr=True,
     )
-    preenzyme = replace_hand_optimization(preenzyme.decode("utf-8")).encode("utf-8")
+
+    # with open("main_term_preenzyme_unopt.ll", "wb") as f:
+    #     f.write(preenzyme)
+    # print("Wrote out preenzyme")
+    # preenzyme = replace_hand_optimization(preenzyme.decode("utf-8")).encode("utf-8")
     postenzyme = run_safe(
         [OPT_12, "-S", "-load", ENZYME_DYLIB, "-enzyme", "-O3"], stdin=preenzyme
     )
@@ -307,7 +337,9 @@ def compile_c(contents, output):
     )
 
 
-def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
+def link_and_run(
+    objects, binary, link_openblas=True, link_runner_utils=False, monitor=False
+):
     objects = (
         [f"{TMP}/{obj}" for obj in objects]
         + ([OPENBLAS_OBJ] if link_openblas else [])
@@ -316,6 +348,29 @@ def link_and_run(objects, binary, link_openblas=True, link_runner_utils=False):
     run_safe(
         ["gcc"]
         + objects
-        + ["-o", f"{TMP}/{binary}", "-rpath", f"{osp.expanduser('~')}/.local/lib"]
+        + [
+            "-o",
+            f"{TMP}/{binary}",
+            "-rpath",
+            f"{osp.expanduser('~')}/.local/lib",
+        ]
     )
-    return run_safe([f"{TMP}/{binary}"])
+    p = subprocess.Popen(
+        [f"{TMP}/{binary}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    if monitor:
+        with open(".secretpass", "rb") as f:
+            passwd = f.read()
+        usage = run_safe(["sudo", "-S", MONITOR_BIN, str(p.pid)], stdin=passwd).decode(
+            "utf-8"
+        )
+        usage_dict = {
+            kv.split(":")[0].strip(): int(kv.split(":")[1].strip())
+            for kv in usage.split(",")
+        }
+    p.wait()
+    assert p.returncode == 0, f"Process exited with nonzero exit. stdout: {p.stdout.read()} stderr: {p.stderr.read()}"
+    stdout = p.stdout.read()
+    if monitor:
+        return stdout, usage_dict
+    return stdout

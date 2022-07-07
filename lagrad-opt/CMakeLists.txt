@@ -6,9 +6,9 @@ set(LIBS
         MLIROptLib
         MLIRStandalone
         )
-add_llvm_executable(standalone-opt standalone-opt.cpp)
+add_llvm_executable(lagrad-opt lagrad-opt.cpp)
 
-llvm_update_compile_flags(standalone-opt)
-target_link_libraries(standalone-opt PRIVATE ${LIBS})
+llvm_update_compile_flags(lagrad-opt)
+target_link_libraries(lagrad-opt PRIVATE ${LIBS})
 
-mlir_check_all_link_libraries(standalone-opt)
+mlir_check_all_link_libraries(lagrad-opt)

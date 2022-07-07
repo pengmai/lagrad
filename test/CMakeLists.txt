@@ -7,7 +7,7 @@ configure_lit_site_cfg(
 
 set(STANDALONE_TEST_DEPENDS
         FileCheck count not
-        standalone-opt
+        lagrad-opt
         standalone-translate
         )
 

@@ -9,6 +9,6 @@ BUFFERIZE="-tensor-constant-bufferize -tensor-bufferize -standalone-bufferize -l
 LOWER_TO_LOOPS="-convert-linalg-to-affine-loops -lower-affine"
 LOWER_TO_LLVM="-convert-scf-to-std -convert-linalg-to-llvm -convert-math-to-llvm -convert-math-to-libm -convert-memref-to-llvm -convert-std-to-llvm -reconcile-unrealized-casts -llvm-legalize-for-export"
 JIT="mlir-cpu-runner -entry-point-result=void -shared-libs=$UTILS"
-# ./build/bin/standalone-opt $1 -take-grads -canonicalize $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS
-./build/bin/standalone-opt "${1:-/dev/stdin}" -take-grads -canonicalize $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS $LOWER_TO_LLVM | $JIT
-# ./build/bin/standalone-opt $1 $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS $LOWER_TO_LLVM | $JIT
+# ./build/bin/lagrad-opt $1 -take-grads -canonicalize $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS
+./build/bin/lagrad-opt "${1:-/dev/stdin}" -take-grads -canonicalize $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS $LOWER_TO_LLVM | $JIT
+# ./build/bin/lagrad-opt $1 $PREPROCESS $BUFFERIZE $LOWER_TO_LOOPS $LOWER_TO_LLVM | $JIT

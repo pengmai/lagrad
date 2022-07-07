@@ -1,4 +1,4 @@
-"""An entrypoint into the standalone-opt compiler."""
+"""An entrypoint into the lagrad-opt compiler."""
 
 import os.path as osp
 import subprocess
@@ -13,6 +13,7 @@ MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
     "-tensor-constant-bufferize",
+    "-std-bufferize",
     "-tensor-bufferize",
     "-standalone-bufferize",
     "-linalg-bufferize",
@@ -63,7 +64,7 @@ TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
 def run_opt(contents: bytes, args: List[str]) -> bytes:
     try:
         opt_p = subprocess.run(
-            [f"{BIN}/standalone-opt"] + args,
+            [f"{BIN}/lagrad-opt"] + args,
             input=contents,
             capture_output=True,
             check=True,
@@ -213,7 +214,8 @@ def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str
             "-loop-invariant-code-motion",
             "-take-grads",
             "-canonicalize",
-            "-standalone-dce",
+            "-linalg-canonicalize",
+            # "-standalone-dce",
             "-convert-elementwise-to-linalg",
         ]
         + BUFFERIZE
