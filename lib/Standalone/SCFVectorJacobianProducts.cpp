@@ -249,17 +249,6 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
           }
         }
 
-        // Replace values from the original loop with values from the cloned
-        // loop
-        for (auto *clop : clonedOps) {
-          for (size_t i = 0; i < clop->getNumOperands(); i++) {
-            auto operand = clop->getOperand(i);
-            if (oldToCloned[operand]) {
-              clop->setOperand(i, oldToCloned[operand]);
-            }
-          }
-        }
-
         DenseMap<Value, Value> env;
         for (size_t i = 0; i < inputOperands.size(); i++) {
           env[inputOperands[i]] =
