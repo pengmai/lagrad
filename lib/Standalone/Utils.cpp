@@ -447,8 +447,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     return;
   }
 
-  size_t op_index = 0;
-  for (Value operand : op->getOperands()) {
+  for (size_t op_index = 0; op_index < op->getNumOperands(); op_index++) {
+    Value operand = op->getOperand(op_index);
     // TODO: This is a bandaid over proper activity analysis
     if (!isFloatOrFloatTensor(operand.getType())) {
       continue;
@@ -496,12 +496,12 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       auto selectOp = dyn_cast<mlir::SelectOp>(op);
       // Assume that the gradient is zero for the branch not taken.
       // Not sure if this is true in general.
-      if (op_index == 0) {
+      if (op_index == 1) {
         // true branch
         auto zero = getZero(op->getLoc(), operand, rewriter);
         vjp_value = rewriter.create<SelectOp>(
             op->getLoc(), selectOp.condition(), vjp_value, zero);
-      } else if (op_index == 1) {
+      } else if (op_index == 2) {
         // false branch
         auto zero = getZero(op->getLoc(), operand, rewriter);
         vjp_value = rewriter.create<SelectOp>(
@@ -665,7 +665,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
                                    rewriter);
     } else if (opName == "linalg.dot") {
-      if (op_index > 1)
+      if (op_index > 1 || !ctx.activeValues.contains(operand))
         continue;
 
       SmallVector<AffineMap, 6> indexing_maps(
@@ -675,11 +675,12 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       indexing_maps[2] = indexing_maps[2].getSubMap({0});
       auto library_call =
           op_index == 0 ? "sdot_grad_first" : "sdot_grad_second";
+      auto output = getZero(operand.getLoc(), operand, rewriter);
       auto adjoint = rewriter.create<linalg::GenericOp>(
           operand.getLoc(), /*resultTensorTypes=*/operand.getType(),
           /*inputs=*/
           ValueRange({vjp_value, op->getOperand(1 - op_index)}),
-          /*outputs=*/ValueRange({operand}), indexing_maps,
+          /*outputs=*/ValueRange({output}), indexing_maps,
           /*iteratorTypes=*/
           SmallVector<StringRef>({getParallelIteratorTypeName()}),
           /*doc=*/"Copy and scalar multiplication",
@@ -869,7 +870,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     } else {
       env[operand] = addInPlace(vjp_value, env[operand], rewriter);
     }
-    op_index++;
   }
 }
 
@@ -945,6 +945,7 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
           if (rop->getName().getStringRef() == "linalg.yield") {
             bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
             rewriter.setInsertionPointAfter(rop);
+            // rop->erase();
             rewriter.eraseOp(rop);
           } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
@@ -972,6 +973,16 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
           rewriter.create<linalg::YieldOp>(loc, bbEnv[new_operand]);
         }
       });
+
+  // if (ctx.debug_names.count(op.getResult(0)) &&
+  //     ctx.debug_names[op.getResult(0)] == "%ynorm") {
+  //   llvm::errs() << "Looking at adjoint for "
+  //                << ctx.debug_names[op.getResult(0)] << "\n";
+  //   for (auto &bodyOp : adjoint.getBodyRegion().getOps()) {
+  //     llvm::errs() << "* " << bodyOp << "\n";
+  //   }
+  // }
+
   return adjoint.getResult(0);
 }
 

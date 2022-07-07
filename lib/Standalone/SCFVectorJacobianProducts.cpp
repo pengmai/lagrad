@@ -18,7 +18,7 @@ void DEPRECATEDpopulatePrimalCache(
 
       // For LSTMs, we're representing the state as a 3d tensor.
       // if (rankedType.getRank() == 1 || rankedType.getRank() == 3) {
-      // valuesToCache.push_back(iterOp);
+      valuesToCache.push_back(iterOp);
       // }
     }
   }
