@@ -107,8 +107,6 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
   auto primalOps = forOp.getLoopBody().getOps();
-  SmallVector<std::pair<Value, Value>> iterArgsToCached;
-  DEPRECATEDpopulatePrimalCache(forOp, rewriter, iterArgsToCached);
   SmallVector<Value> operandsWithIV{
       forOp.getInductionVar(),
       // This is only valid under certain conditions, i.e. if the result was
@@ -182,59 +180,72 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         }
 
         // Emit reads to the cached values
-        // TODO: watch out for nested for ops that we're emitting the reads in
-        // the right place
         for (auto tbrPair : ctx.tbrCachedVals) {
           auto tbrVal = tbrPair.first;
           auto cache = tbrPair.second;
-          if (auto rtt =
-                  tbrVal.getType().dyn_cast_or_null<RankedTensorType>()) {
-            auto slice_layout =
-                getRankReduceSubviewLayout(rtt.getRank(), rewriter);
-            auto resultType = MemRefType::get(
-                rtt.getShape(), rtt.getElementType(), slice_layout);
-            auto rctx = rewriter.getContext();
-            auto intToAttr = [&](int64_t i) {
-              return IntegerAttr::get(IntegerType::get(rctx, 64), i);
-            };
+          // If tbrVal doesn't have a defining op, assume it's a region arg of
+          // an scf.for op.
+          auto parent =
+              tbrVal.getDefiningOp()
+                  ? tbrVal.getDefiningOp()->getParentOfType<scf::ForOp>()
+                  : cast<scf::ForOp>(tbrVal.getParentRegion()->getParentOp());
+          if (parent == forOp) {
             SmallVector<Value> induction_vars;
-            // watch for nesting here
-            induction_vars.push_back(idx);
-
-            SmallVector<Attribute> staticOffsets;
-            SmallVector<Attribute> staticSizes;
-            SmallVector<Attribute> staticStrides;
-            for (size_t i = 0; i < induction_vars.size(); i++) {
-              staticOffsets.push_back(
-                  IntegerAttr::get(IntegerType::get(rctx, 64),
-                                   -9223372036854775808ULL)); // dynamic size
-              staticSizes.push_back(intToAttr(1));
-              staticStrides.push_back(intToAttr(1));
+            while (parent) {
+              induction_vars.push_back(parent.getInductionVar());
+              parent = parent->getParentOfType<scf::ForOp>();
             }
-            for (int i = 0; i < rtt.getRank(); i++) {
-              staticOffsets.push_back(intToAttr(0));
-              staticSizes.push_back(intToAttr(rtt.getShape()[i]));
-              staticStrides.push_back(intToAttr(1));
+            if (auto rtt =
+                    tbrVal.getType().dyn_cast_or_null<RankedTensorType>()) {
+              auto slice_layout =
+                  getRankReduceSubviewLayout(rtt.getRank(), rewriter);
+              auto resultType = MemRefType::get(
+                  rtt.getShape(), rtt.getElementType(), slice_layout);
+              auto rctx = rewriter.getContext();
+              auto intToAttr = [&](int64_t i) {
+                return IntegerAttr::get(IntegerType::get(rctx, 64), i);
+              };
+              SmallVector<Attribute> staticOffsets;
+              SmallVector<Attribute> staticSizes;
+              SmallVector<Attribute> staticStrides;
+              for (size_t i = 0; i < induction_vars.size(); i++) {
+                staticOffsets.push_back(
+                    IntegerAttr::get(IntegerType::get(rctx, 64),
+                                     -9223372036854775808ULL)); // dynamic size
+                staticSizes.push_back(intToAttr(1));
+                staticStrides.push_back(intToAttr(1));
+              }
+              for (int i = 0; i < rtt.getRank(); i++) {
+                staticOffsets.push_back(intToAttr(0));
+                staticSizes.push_back(intToAttr(rtt.getShape()[i]));
+                staticStrides.push_back(intToAttr(1));
+              }
+              auto staticOffset = ArrayAttr::get(rctx, staticOffsets);
+              auto staticSize = ArrayAttr::get(rctx, staticSizes);
+              auto staticStride = ArrayAttr::get(rctx, staticStrides);
+              auto view = builder.create<memref::SubViewOp>(
+                  loc, resultType, cache,
+                  /*dynamic shapes=*/induction_vars, ValueRange(), ValueRange(),
+                  /*staticShapes=*/staticOffset, staticSize, staticStride);
+              ctx.debug_names[view] =
+                  "<read view for caching " + ctx.debug_names[tbrVal] + ">";
+              auto casted = builder.create<memref::CastOp>(
+                  loc, view.getResult(),
+                  MemRefType::get(rtt.getShape(), rtt.getElementType()));
+              ctx.debug_names[casted] =
+                  "<casted memref for reading " + ctx.debug_names[tbrVal] + ">";
+              auto loaded =
+                  builder.create<memref::TensorLoadOp>(loc, casted.getResult());
+              ctx.debug_names[loaded] =
+                  "<loaded tensor from cached " + ctx.debug_names[tbrVal] + ">";
+              oldToCloned[tbrVal] = loaded;
+            } else {
+              auto loaded =
+                  builder.create<memref::LoadOp>(loc, cache, induction_vars);
+              ctx.debug_names[loaded] =
+                  "<loaded scalar from cached " + ctx.debug_names[tbrVal] + ">";
+              oldToCloned[tbrVal] = loaded;
             }
-            auto staticOffset = ArrayAttr::get(rctx, staticOffsets);
-            auto staticSize = ArrayAttr::get(rctx, staticSizes);
-            auto staticStride = ArrayAttr::get(rctx, staticStrides);
-            auto view = builder.create<memref::SubViewOp>(
-                loc, resultType, cache,
-                /*dynamic shapes=*/induction_vars, ValueRange(), ValueRange(),
-                /*staticShapes=*/staticOffset, staticSize, staticStride);
-            ctx.debug_names[view] =
-                "<read view for caching " + ctx.debug_names[tbrVal] + ">";
-            auto casted = builder.create<memref::CastOp>(
-                loc, view.getResult(),
-                MemRefType::get(rtt.getShape(), rtt.getElementType()));
-            ctx.debug_names[casted] =
-                "<casted memref for reading " + ctx.debug_names[tbrVal] + ">";
-            auto loaded =
-                builder.create<memref::TensorLoadOp>(loc, casted.getResult());
-            ctx.debug_names[loaded] =
-                "<loaded tensor from cached " + ctx.debug_names[tbrVal] + ">";
-            oldToCloned[tbrVal] = loaded;
           }
         }
 
@@ -330,11 +341,11 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
         rewriter.create<scf::YieldOp>(loc, adjointResults);
       });
   // Replace ops referring to the old arguments to the new operands
-  for (auto &op : adjointFor.getBodyRegion().getOps()) {
-    for (size_t i = 0; i < op.getNumOperands(); i++)
-      if (oldToCloned[op.getOperand(i)])
-        op.setOperand(i, oldToCloned[op.getOperand(i)]);
-  }
+  adjointFor.walk([&](Operation *op) {
+    for (size_t i = 0; i < op->getNumOperands(); i++)
+      if (oldToCloned[op->getOperand(i)])
+        op->setOperand(i, oldToCloned[op->getOperand(i)]);
+  });
 
   // The output argument is a special case here. The gradient of the primal
   // result should always be the first adjoint result by construction.
@@ -387,7 +398,6 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
                                /*init=*/true);
     iterArgsInit.push_back(space);
   }
-  // llvm::errs() << "iter args init length: " << iterArgsInit.size() << "\n";
   auto adjointFor = rewriter.create<scf::ForOp>(
       forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
       iterArgsInit,
@@ -499,25 +509,11 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
           auto op = *it;
           auto opName = op->getName().getStringRef();
           if (opName == "scf.yield") {
-            // llvm::errs() << "\narg types:\n";
-            // for (auto arg : iterArgs) {
-            //   llvm::errs() << arg.getType() << " ";
-            // }
-            // llvm::errs() << "\n";
             for (size_t i = 0; i < op->getNumOperands(); i++) {
               Value operand = op->getOperand(i);
               if (i == result_idx) {
                 env[operand] = iterArgs[0];
               } else if (isFloatOrFloatTensor(operand.getType())) {
-                // llvm::errs() << "num operands: " << op->getNumOperands()
-                //              << "\nnum iter args: " << iterArgs.size() <<
-                //              "\n";
-                // llvm::errs()
-                //     << "idx: " << iterArgs.size() - op->getNumOperands() + i
-                //     << " iterArg type: "
-                //     << iterArgs[iterArgs.size() - op->getNumOperands() + i]
-                //            .getType()
-                //     << " operand type: " << operand.getType() << "\n";
                 env[operand] =
                     iterArgs[iterArgs.size() - op->getNumOperands() + i];
                 assert(operand.getType() == env[operand].getType() &&

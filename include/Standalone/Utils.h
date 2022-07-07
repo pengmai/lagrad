@@ -7,17 +7,23 @@
 
 namespace mlir {
 
+using ValueSet = llvm::SmallDenseSet<Value>;
+
 class LAGradContext {
 public:
   explicit LAGradContext(ModuleOp m) : moduleOp(m) {}
   ModuleOp moduleOp;
-  llvm::SmallDenseMap<Value, std::string> debug_names;
-  llvm::SmallDenseSet<Value> activeValues;
+  DenseMap<Value, std::string> debug_names;
+  ValueSet activeValues;
+  ValueSet toBeRecorded;
+  DenseMap<Value, Value> tbrCachedVals;
 };
 
 bool isFloatOrFloatTensor(Type typ);
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
+
+void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out);
 
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
                           ConversionPatternRewriter &rewriter);
@@ -37,7 +43,8 @@ Value onesLike(Location loc, Value operand, OpBuilder &builder, bool init);
 
 Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 
-Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init);
+Value getZero(Location loc, Value operand, OpBuilder &rewriter,
+              bool init = false);
 
 void collectFreeVars(Block *parentBlock, Region &region,
                      SmallVector<Value> &out);
