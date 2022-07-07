@@ -3,13 +3,11 @@
 #include "mlir/Dialect/SCF/SCF.h"
 #include <algorithm>
 #include <string>
-#define VERBOSITY 1
+#define VERBOSITY 0
 
 using namespace mlir;
 
-namespace {
-using ValueSet = llvm::SmallDenseSet<Value>;
-
+namespace mlir {
 void runTopDownDFS(LAGradContext &ctx, SmallVector<Value> &frontier,
                    ValueSet &out) {
   while (!frontier.empty()) {
@@ -90,7 +88,8 @@ void runTopDownDFS(LAGradContext &ctx, SmallVector<Value> &frontier,
 void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
   while (!frontier.empty()) {
     Value val = frontier.pop_back_val();
-    if (!out.contains(val) && isFloatOrFloatTensor(val.getType())) {
+    // if (!out.contains(val) && isFloatOrFloatTensor(val.getType())) {
+    if (!out.contains(val)) {
       out.insert(val);
       if (auto definingOp = val.getDefiningOp()) {
         if (dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
@@ -446,7 +445,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
     }
   }
 }
-} // namespace
+} // namespace mlir
 
 void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
                                ArrayAttr gradientsOf) {

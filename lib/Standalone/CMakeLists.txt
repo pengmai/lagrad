@@ -14,6 +14,7 @@ add_mlir_dialect_library(MLIRStandalone
         LoopAllocHoisting.cpp
         LinalgCanonicalize.cpp
         PrimalCaching.cpp
+        SCFVectorJacobianProducts.cpp
         Utils.cpp
         DebugNames.cpp
 

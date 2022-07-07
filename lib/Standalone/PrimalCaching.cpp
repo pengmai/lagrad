@@ -43,6 +43,8 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
       shape.insert(shape.end(), rtt.getShape().begin(), rtt.getShape().end());
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, rtt.getElementType()), dynamicSizes);
+      ctx.debug_names[cache] =
+          "<primal cache for " + ctx.debug_names[tbrVal] + ">";
 
       rewriter.setInsertionPointAfterValue(tbrVal);
       // Write to the cache
@@ -75,8 +77,12 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
           loc, resultType, cache,
           /*dynamic shapes=*/induction_vars, ValueRange(), ValueRange(),
           /*staticShapes=*/staticOffset, staticSize, staticStride);
+      ctx.debug_names[view] =
+          "<write view for caching " + ctx.debug_names[tbrVal] + ">";
       auto memref = rewriter.create<memref::BufferCastOp>(
           loc, MemRefType::get(rtt.getShape(), rtt.getElementType()), tbrVal);
+      ctx.debug_names[memref] =
+          "<casted memref for writing " + ctx.debug_names[tbrVal] + ">";
       rewriter.create<linalg::CopyOp>(loc, memref, view);
       ctx.tbrCachedVals[tbrVal] = cache;
     }
