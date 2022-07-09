@@ -44,7 +44,8 @@ AffineMap getRankReduceSubviewLayout(int64_t resultRank,
 SmallVector<mlir::Operation *>
 cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 OpBuilder &builder, ValueRange regionArgs,
-                SmallVector<Value> bbOperands, bool offsetInputs = true) {
+                SmallVector<Value> bbOperands, bool offsetInputs,
+                LAGradContext *ctx) {
   SmallVector<mlir::Operation *> newRegionOps;
   DenseMap<Value, Value> old_to_new;
   for (size_t i = 0; i < bbOperands.size(); i++) {
@@ -61,6 +62,12 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
 
   for (auto &op : bbOps) {
     auto clonedOp = builder.clone(op);
+    if (ctx) {
+      for (auto tup : llvm::zip(op.getResults(), clonedOp->getResults())) {
+        ctx->debug_names[std::get<1>(tup)] =
+            "<cloned " + ctx->debug_names[std::get<0>(tup)] + ">";
+      }
+    }
     // Need to perform this old_to_new remapping for nested regions/blocks
     clonedOp->walk([&](Operation *nestedOp) {
       for (size_t i = 0; i < nestedOp->getNumOperands(); i++) {
@@ -264,8 +271,8 @@ Value constLike(Location loc, Value operand, double scalar,
   return nullptr;
 }
 
-void collectFreeVars(Block *parentBlock, Region &region,
-                     llvm::SmallDenseSet<Value> &out) {
+void collectFreeVarsImpl(SmallVector<Block *> &parentBlocks, Region &region,
+                         llvm::SmallDenseSet<Value> &out) {
   for (auto &op : region.getOps()) {
     for (auto operand : op.getOperands()) {
       if (!isFloatOrFloatTensor(operand.getType())) {
@@ -275,16 +282,26 @@ void collectFreeVars(Block *parentBlock, Region &region,
       if (dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
         continue;
       }
-      if (operand.getParentBlock() != parentBlock && !out.contains(operand)) {
+      if (llvm::none_of(parentBlocks, [&](Block *parentBlock) {
+            return operand.getParentBlock() == parentBlock;
+          })) {
         out.insert(operand);
       }
     }
     for (auto &childRegion : op.getRegions()) {
       for (auto &childBlock : childRegion.getBlocks()) {
-        collectFreeVars(&childBlock, childRegion, out);
+        SmallVector<Block *> newBlocks{parentBlocks};
+        parentBlocks.push_back(&childBlock);
+        collectFreeVarsImpl(newBlocks, childRegion, out);
       }
     }
   }
+}
+
+void collectFreeVars(Block *parentBlock, Region &region,
+                     llvm::SmallDenseSet<Value> &out) {
+  SmallVector<Block *> parentBlocks{parentBlock};
+  collectFreeVarsImpl(parentBlocks, region, out);
 }
 
 // This is definitely a bandaid behind an explosion of complexity in the
@@ -424,7 +441,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     auto vjp_value = env[result];
     env[forOp.getIterOperands()[result_idx]] = env[result];
     assert(vjp_value && "vjp value for scf.for op was not found");
-    llvm::SmallDenseSet<Value> freeOperands;
+    ValueSet freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
     auto free_operand_vec = llvm::to_vector<4>(freeOperands);
@@ -665,6 +682,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
                                    rewriter);
     } else if (opName == "linalg.dot") {
+      if (op_index > 1)
+        continue;
       if (op_index > 1 || !ctx.activeValues.contains(operand))
         continue;
 

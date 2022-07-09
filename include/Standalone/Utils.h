@@ -37,7 +37,8 @@ void runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
 SmallVector<Operation *>
 cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 OpBuilder &builder, ValueRange regionArgs,
-                SmallVector<Value> bbOperands, bool offsetInputs);
+                SmallVector<Value> bbOperands, bool offsetInputs = true,
+                LAGradContext *ctx = nullptr);
 
 Value onesLike(Location loc, Value operand, OpBuilder &builder, bool init);
 

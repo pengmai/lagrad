@@ -100,10 +100,10 @@ void DEPRECATEDpopulatePrimalCache(
   }
 }
 
-void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
-                  ValueRange free_operands, Value vjp_value, size_t result_idx,
-                  DenseMap<Value, Value> &outer_env,
-                  ConversionPatternRewriter &rewriter) {
+void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
+                    ValueRange free_operands, Value vjp_value,
+                    size_t result_idx, DenseMap<Value, Value> &outer_env,
+                    ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
   auto primalOps = forOp.getLoopBody().getOps();
@@ -265,9 +265,10 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
                   forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
             vjp_op = iterArg;
           } else if (isFloatOrFloatTensor(iterArg.getType())) {
-            // Need to map again from gradient spaces from op operands to iter args.
-            // This definitely feels brittle and should be cleaned up.
-            env[iterArg] = env[forOp.getOpOperandForRegionIterArg(iterArg).get()];
+            // Need to map again from gradient spaces from op operands to iter
+            // args. This definitely feels brittle and should be cleaned up.
+            env[iterArg] =
+                env[forOp.getOpOperandForRegionIterArg(iterArg).get()];
             inputRegionArgs.push_back(iterArg);
           }
         }
@@ -472,7 +473,7 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
         }
         auto primalRegionOps = cloneBasicBlock(
             primalOps, builder, /*new=*/regionArgs, /*old=*/operandsWithIV,
-            /*offsetInputs=*/false);
+            /*offsetInputs=*/false, &ctx);
 
         DenseMap<Value, Value> env;
         for (size_t i = 0; i < inputOperands.size(); i++) {
@@ -557,12 +558,12 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
   }
 }
 
-void reverseForOp_DISABLED(scf::ForOp forOp, LAGradContext &ctx,
-                           ValueRange free_operands, Value vjp_value,
-                           size_t result_idx, DenseMap<Value, Value> &outer_env,
-                           ConversionPatternRewriter &rewriter) {
-  // reverseForOpV1(forOp, ctx, free_operands, vjp_value, result_idx, outer_env,
-  //                rewriter);
+void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
+                  ValueRange free_operands, Value vjp_value, size_t result_idx,
+                  DenseMap<Value, Value> &outer_env,
+                  ConversionPatternRewriter &rewriter) {
+  reverseForOpV2(forOp, ctx, free_operands, vjp_value, result_idx, outer_env,
+                 rewriter);
 }
 
 } // namespace mlir
