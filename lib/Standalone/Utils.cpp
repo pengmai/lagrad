@@ -994,7 +994,12 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
       });
 
   for (auto &bodyOp : adjoint.getBodyRegion().getOps()) {
-    if (bodyOp.getNumResults() > 0 && bodyOp.use_empty()) {
+    // Ugly, but necessary to do some form of cleanup here because non-active
+    // primal ops might no longer be in scope if the generic ops are inside a
+    // loop. scf.if ops inside the generic body cause this to segfault for some
+    // reason.
+    if (bodyOp.getNumResults() > 0 && bodyOp.use_empty() &&
+        !dyn_cast_or_null<scf::IfOp>(&bodyOp)) {
       rewriter.eraseOp(&bodyOp);
     }
   }
