@@ -945,8 +945,8 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
           if (rop->getName().getStringRef() == "linalg.yield") {
             bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
             rewriter.setInsertionPointAfter(rop);
-            // rop->erase();
-            rewriter.eraseOp(rop);
+            rop->erase();
+            // rewriter.eraseOp(rop);
           } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
           } else {
@@ -974,14 +974,11 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
         }
       });
 
-  // if (ctx.debug_names.count(op.getResult(0)) &&
-  //     ctx.debug_names[op.getResult(0)] == "%ynorm") {
-  //   llvm::errs() << "Looking at adjoint for "
-  //                << ctx.debug_names[op.getResult(0)] << "\n";
-  //   for (auto &bodyOp : adjoint.getBodyRegion().getOps()) {
-  //     llvm::errs() << "* " << bodyOp << "\n";
-  //   }
-  // }
+  for (auto &bodyOp : adjoint.getBodyRegion().getOps()) {
+    if (bodyOp.getNumResults() > 0 && bodyOp.use_empty()) {
+      rewriter.eraseOp(&bodyOp);
+    }
+  }
 
   return adjoint.getResult(0);
 }

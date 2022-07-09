@@ -264,11 +264,10 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
               forOp.getRegionIterArgForOpOperand(
                   forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
             vjp_op = iterArg;
-          }
-          if (isFloatOrFloatTensor(iterArg.getType()) &&
-              iterArg != forOp.getRegionIterArgForOpOperand(
-                             forOp.getOpOperandForResult(
-                                 forOp.results()[result_idx]))) {
+          } else if (isFloatOrFloatTensor(iterArg.getType())) {
+            // Need to map again from gradient spaces from op operands to iter args.
+            // This definitely feels brittle and should be cleaned up.
+            env[iterArg] = env[forOp.getOpOperandForRegionIterArg(iterArg).get()];
             inputRegionArgs.push_back(iterArg);
           }
         }
@@ -557,4 +556,13 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
     outer_env[free_operand] = result_vjp;
   }
 }
+
+void reverseForOp_DISABLED(scf::ForOp forOp, LAGradContext &ctx,
+                           ValueRange free_operands, Value vjp_value,
+                           size_t result_idx, DenseMap<Value, Value> &outer_env,
+                           ConversionPatternRewriter &rewriter) {
+  // reverseForOpV1(forOp, ctx, free_operands, vjp_value, result_idx, outer_env,
+  //                rewriter);
+}
+
 } // namespace mlir
