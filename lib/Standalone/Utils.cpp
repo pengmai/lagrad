@@ -66,6 +66,9 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
       for (auto tup : llvm::zip(op.getResults(), clonedOp->getResults())) {
         ctx->debug_names[std::get<1>(tup)] =
             "<cloned " + ctx->debug_names[std::get<0>(tup)] + ">";
+        if (ctx->activeValues.contains(std::get<0>(tup))) {
+          ctx->activeValues.insert(std::get<1>(tup));
+        }
       }
     }
     // Need to perform this old_to_new remapping for nested regions/blocks
@@ -948,6 +951,8 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
     genericOperands.push_back(arg);
   }
 
+  Operation *yieldOp = nullptr;
+
   auto adjoint = rewriter.create<linalg::GenericOp>(
       operand.getLoc(), /*resultTensorType=*/outputShape,
       /*inputs=*/inputs, /*outputs=*/ValueRange({output}),
@@ -964,8 +969,9 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
           if (rop->getName().getStringRef() == "linalg.yield") {
             bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
             rewriter.setInsertionPointAfter(rop);
-            rop->erase();
-            // rewriter.eraseOp(rop);
+            // rop->erase();
+            rewriter.eraseOp(rop);
+            yieldOp = rop;
           } else if (rop->getName().getStringRef() == "arith.cmpf") {
             continue;
           } else {
@@ -998,9 +1004,10 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
     // primal ops might no longer be in scope if the generic ops are inside a
     // loop. scf.if ops inside the generic body cause this to segfault for some
     // reason.
-    if (bodyOp.getNumResults() > 0 && bodyOp.use_empty() &&
-        !dyn_cast_or_null<scf::IfOp>(&bodyOp)) {
-      rewriter.eraseOp(&bodyOp);
+    for (auto *user : bodyOp.getUsers()) {
+      if (bodyOp.getNumResults() > 0 && bodyOp.hasOneUse() && user == yieldOp) {
+        rewriter.eraseOp(&bodyOp);
+      }
     }
   }
 
@@ -1013,8 +1020,8 @@ Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
   auto reverseIfBlock = [&](Region &ifRegion) {
     return [&](OpBuilder &builder, Location loc) {
       PatternRewriter::InsertionGuard insertionGuard(rewriter);
-      auto primalRegionOps =
-          cloneBasicBlock(ifRegion.getOps(), builder, {}, {});
+      auto primalRegionOps = cloneBasicBlock(ifRegion.getOps(), builder, {}, {},
+                                             /*offsetInputs=*/false, &ctx);
       DenseMap<Value, Value> env;
       for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
            it++) {

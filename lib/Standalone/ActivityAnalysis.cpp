@@ -468,7 +468,8 @@ void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
     }
   }
   if (VERBOSITY >= 2) {
-    llvm::errs() << "active values: (" << ctx.activeValues.size() << "):\n";
+    llvm::errs() << "active values for function " << primalFunc.getName()
+                 << " (" << ctx.activeValues.size() << "):\n";
     printSet(ctx, ctx.activeValues);
   }
   runEffectiveUseAnalysis(ctx, primalFunc);

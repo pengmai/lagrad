@@ -354,6 +354,7 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
                     ValueRange free_operands, Value vjp_value,
                     size_t result_idx, DenseMap<Value, Value> &outer_env,
                     ConversionPatternRewriter &rewriter) {
+  forOp.emitWarning() << "Using old style scf.for differentiation";
   PatternRewriter::InsertionGuard insertionGuard(rewriter);
   // Record the ops to clone before augmenting the primal with the caches.
   auto primalOps = forOp.getLoopBody().getOps();
