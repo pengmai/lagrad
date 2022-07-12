@@ -12,7 +12,7 @@ void runTopDownDFS(LAGradContext &ctx, SmallVector<Value> &frontier,
                    ValueSet &out) {
   while (!frontier.empty()) {
     Value val = frontier.pop_back_val();
-    if (!out.contains(val) && isFloatOrFloatTensor(val.getType())) {
+    if (!out.contains(val)) {
       out.insert(val);
       for (auto user : val.getUsers()) {
         if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(user)) {
@@ -327,18 +327,29 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto extractOp = dyn_cast_or_null<tensor::ExtractOp>(&op)) {
       ValueSet extractAdjU;
       setUnion(extractAdjU, adjU[extractOp.tensor()]);
+      for (auto idx : extractOp.indices()) {
+        extractAdjU.insert(idx);
+      }
       adjU[extractOp.getResult()] = extractAdjU;
     } else if (auto insertOp = dyn_cast_or_null<tensor::InsertOp>(&op)) {
       if (ctx.activeValues.contains(insertOp.scalar())) {
         ValueSet insertAdjU;
         setUnion(insertAdjU, adjU[insertOp.scalar()]);
         setUnion(insertAdjU, adjU[insertOp.dest()]);
+        for (auto idx : insertOp.indices()) {
+          insertAdjU.insert(idx);
+        }
         adjU[insertOp.getResult()] = insertAdjU;
       }
     } else if (auto extractSliceOp =
                    dyn_cast_or_null<tensor::ExtractSliceOp>(&op)) {
       ValueSet extractSliceAdjU;
       setUnion(extractSliceAdjU, adjU[extractSliceOp.source()]);
+      for (auto offs : extractSliceOp.getMixedOffsets()) {
+        if (auto val = offs.dyn_cast<Value>()) {
+          extractSliceAdjU.insert(val);
+        }
+      }
       adjU[extractSliceOp.getResult()] = extractSliceAdjU;
     } else if (auto insertSliceOp =
                    dyn_cast_or_null<tensor::InsertSliceOp>(&op)) {
@@ -346,6 +357,11 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
         ValueSet insertSliceAdjU;
         setUnion(insertSliceAdjU, adjU[insertSliceOp.source()]);
         setUnion(insertSliceAdjU, adjU[insertSliceOp.dest()]);
+        for (auto offs : insertSliceOp.getMixedOffsets()) {
+          if (auto val = offs.dyn_cast<Value>()) {
+            insertSliceAdjU.insert(val);
+          }
+        }
         adjU[insertSliceOp.getResult()] = insertSliceAdjU;
       }
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
@@ -422,9 +438,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
       ValueSet derivedFromIterArgs;
       SmallVector<Value> frontier;
       for (auto arg : forOp.getRegionIterArgs()) {
-        if (ctx.activeValues.contains(arg)) {
-          frontier.push_back(arg);
-        }
+        frontier.push_back(arg);
       }
       runTopDownDFS(ctx, frontier, derivedFromIterArgs);
       if (VERBOSITY >= 2) {

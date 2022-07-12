@@ -274,9 +274,9 @@ Value constLike(Location loc, Value operand, double scalar,
   return nullptr;
 }
 
-void collectFreeVarsImpl(SmallVector<Block *> &parentBlocks, Region &region,
-                         llvm::SmallDenseSet<Value> &out) {
-  for (auto &op : region.getOps()) {
+void collectFreeVarsImpl(SmallVector<Block *> &parentBlocks, ValueSet &out) {
+  assert(!parentBlocks.empty() && "parentBlocks was empty");
+  for (auto &op : parentBlocks.back()->getOperations()) {
     for (auto operand : op.getOperands()) {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
@@ -294,17 +294,17 @@ void collectFreeVarsImpl(SmallVector<Block *> &parentBlocks, Region &region,
     for (auto &childRegion : op.getRegions()) {
       for (auto &childBlock : childRegion.getBlocks()) {
         SmallVector<Block *> newBlocks{parentBlocks};
-        parentBlocks.push_back(&childBlock);
-        collectFreeVarsImpl(newBlocks, childRegion, out);
+        newBlocks.push_back(&childBlock);
+        collectFreeVarsImpl(newBlocks, out);
       }
     }
   }
 }
 
-void collectFreeVars(Block *parentBlock, Region &region,
-                     llvm::SmallDenseSet<Value> &out) {
+// TODO: delete the region argument from here
+void collectFreeVars(Block *parentBlock, Region &region, ValueSet &out) {
   SmallVector<Block *> parentBlocks{parentBlock};
-  collectFreeVarsImpl(parentBlocks, region, out);
+  collectFreeVarsImpl(parentBlocks, out);
 }
 
 // This is definitely a bandaid behind an explosion of complexity in the
@@ -1012,45 +1012,6 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
   }
 
   return adjoint.getResult(0);
-}
-
-Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
-                  Value vjp_value, DenseMap<Value, Value> outer_env,
-                  ConversionPatternRewriter &rewriter) {
-  auto reverseIfBlock = [&](Region &ifRegion) {
-    return [&](OpBuilder &builder, Location loc) {
-      PatternRewriter::InsertionGuard insertionGuard(rewriter);
-      auto primalRegionOps = cloneBasicBlock(ifRegion.getOps(), builder, {}, {},
-                                             /*offsetInputs=*/false, &ctx);
-      DenseMap<Value, Value> env;
-      for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
-           it++) {
-        auto op = *it;
-        auto opName = op->getName().getStringRef();
-        if (opName == "scf.yield") {
-          Value operand = op->getOperand(0);
-          env[operand] = vjp_value;
-          rewriter.setInsertionPointAfter(op);
-          rewriter.eraseOp(op);
-        } else {
-          populateVJP(op, ctx, env, rewriter);
-        }
-      }
-      // The free operand might only appear in one block but not the other.
-      if (!env[freeOperand]) {
-        rewriter.create<scf::YieldOp>(loc, getZero(loc, freeOperand, rewriter));
-      } else {
-        rewriter.create<scf::YieldOp>(loc, env[freeOperand]);
-      }
-    };
-  };
-
-  auto adjointIf = rewriter.create<scf::IfOp>(
-      ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
-      /*cond=*/ifOp.condition(),
-      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
-      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
-  return adjointIf.getResult(0);
 }
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,

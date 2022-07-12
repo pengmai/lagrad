@@ -47,8 +47,7 @@ Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 Value getZero(Location loc, Value operand, OpBuilder &rewriter,
               bool init = false);
 
-void collectFreeVars(Block *parentBlock, Region &region,
-                     SmallVector<Value> &out);
+void collectFreeVars(Block *parentBlock, Region &region, ValueSet &out);
 
 void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter);
 

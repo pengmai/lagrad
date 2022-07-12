@@ -86,9 +86,6 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
       rewriter.create<linalg::CopyOp>(loc, memref, view);
       ctx.tbrCachedVals[tbrVal] = cache;
     } else {
-      assert(tbrVal.getType().isa<FloatType>() &&
-             "Expected TBR value to be a float");
-
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, tbrVal.getType()), dynamicSizes);
       ctx.debug_names[cache] =

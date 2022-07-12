@@ -153,7 +153,7 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
 
         SmallVector<Operation *> clonedOps;
         oldToCloned[forOp.getInductionVar()] = idx;
-        // Cloned ops that don't depend on the region iter args
+        // Clone ops that don't depend on the region iter args
         for (auto &pop : primalOps) {
           if (pop.getNumResults() > 0) {
             SmallVector<Value> frontier{pop.getResults()};
@@ -557,6 +557,138 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
     // will add to that space.
     outer_env[free_operand] = result_vjp;
   }
+}
+
+Value reverseIfOpV2(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
+                    Value vjp_value, DenseMap<Value, Value> outer_env,
+                    ConversionPatternRewriter &rewriter) {
+  // Find parent iter args to determine which primal ops can be safely cloned
+  // without dominance issues.
+  ValueSet parentIterArgs;
+  auto parent = ifOp->getParentOfType<scf::ForOp>();
+  while (parent) {
+    for (auto iterArg : parent.getRegionIterArgs()) {
+      parentIterArgs.insert(iterArg);
+    }
+    parent = parent->getParentOfType<scf::ForOp>();
+  }
+
+  SmallVector<Value> caches;
+  // Ignore any values that depend directly on the caches
+  for (auto pair : ctx.tbrCachedVals) {
+    caches.push_back(pair.second);
+  }
+
+  DenseMap<Value, Value> oldToCloned;
+  auto reverseIfBlock = [&](Region &ifRegion) {
+    return [&](OpBuilder &builder, Location loc) {
+      PatternRewriter::InsertionGuard insertionGuard(rewriter);
+      SmallVector<Operation *> clonedOps;
+      // Clone ops that don't depend on the region iter args
+      for (auto &pop : ifRegion.getOps()) {
+        if (pop.getNumResults() > 0) {
+          SmallVector<Value> frontier{pop.getResults()};
+          ValueSet deps;
+          runBottomUpDFS(frontier, deps);
+          auto inDependSet = [&](Value v) { return deps.contains(v); };
+          if (!(llvm::any_of(caches, inDependSet) ||
+                llvm::any_of(parentIterArgs, inDependSet))) {
+            auto cloned = builder.clone(pop);
+            clonedOps.push_back(cloned);
+            for (auto tup : llvm::zip(pop.getResults(), cloned->getResults())) {
+              oldToCloned[std::get<0>(tup)] = std::get<1>(tup);
+              ctx.debug_names[std::get<1>(tup)] =
+                  "<cloned " + ctx.debug_names[std::get<0>(tup)] + ">";
+            }
+          }
+        }
+      }
+
+      DenseMap<Value, Value> env;
+      SmallVector<Operation *> reversedPrimalOps;
+      for (auto &pop : ifRegion.getOps()) {
+        reversedPrimalOps.push_back(&pop);
+      }
+
+      for (auto it = reversedPrimalOps.rbegin(); it != reversedPrimalOps.rend();
+           it++) {
+        auto &op = **it;
+        if (auto yieldOp = dyn_cast_or_null<scf::YieldOp>(&op)) {
+          assert(yieldOp.getNumOperands() == 1 &&
+                 "expected scf.yield in scf.if to have one operand");
+          Value operand = yieldOp.getOperand(0);
+          env[operand] = vjp_value;
+          rewriter.setInsertionPoint(builder.getBlock(),
+                                     builder.getInsertionPoint());
+        } else {
+          populateVJP(&op, ctx, env, rewriter);
+        }
+      }
+      // The free operand might only appear in one block but not the other.
+      if (!env[freeOperand]) {
+        rewriter.create<scf::YieldOp>(loc, getZero(loc, freeOperand, rewriter));
+      } else {
+        rewriter.create<scf::YieldOp>(loc, env[freeOperand]);
+      }
+    };
+  };
+  auto adjointIf = rewriter.create<scf::IfOp>(
+      ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
+      /*cond=*/ifOp.condition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+  // Replace ops referring to the old arguments to the new operands
+  adjointIf.walk([&](Operation *op) {
+    for (size_t i = 0; i < op->getNumOperands(); i++)
+      if (oldToCloned[op->getOperand(i)])
+        op->setOperand(i, oldToCloned[op->getOperand(i)]);
+  });
+  return adjointIf.getResult(0);
+}
+
+Value reverseIfOpV1(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
+                    Value vjp_value, DenseMap<Value, Value> outer_env,
+                    ConversionPatternRewriter &rewriter) {
+  auto reverseIfBlock = [&](Region &ifRegion) {
+    return [&](OpBuilder &builder, Location loc) {
+      PatternRewriter::InsertionGuard insertionGuard(rewriter);
+      auto primalRegionOps = cloneBasicBlock(ifRegion.getOps(), builder, {}, {},
+                                             /*offsetInputs=*/false, &ctx);
+      DenseMap<Value, Value> env;
+      for (auto it = primalRegionOps.rbegin(); it != primalRegionOps.rend();
+           it++) {
+        auto op = *it;
+        auto opName = op->getName().getStringRef();
+        if (opName == "scf.yield") {
+          Value operand = op->getOperand(0);
+          env[operand] = vjp_value;
+          rewriter.setInsertionPointAfter(op);
+          rewriter.eraseOp(op);
+        } else {
+          populateVJP(op, ctx, env, rewriter);
+        }
+      }
+      // The free operand might only appear in one block but not the other.
+      if (!env[freeOperand]) {
+        rewriter.create<scf::YieldOp>(loc, getZero(loc, freeOperand, rewriter));
+      } else {
+        rewriter.create<scf::YieldOp>(loc, env[freeOperand]);
+      }
+    };
+  };
+
+  auto adjointIf = rewriter.create<scf::IfOp>(
+      ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
+      /*cond=*/ifOp.condition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+  return adjointIf.getResult(0);
+}
+
+Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
+                  Value vjp_value, DenseMap<Value, Value> outer_env,
+                  ConversionPatternRewriter &rewriter) {
+  return reverseIfOpV2(ifOp, ctx, freeOperand, vjp_value, outer_env, rewriter);
 }
 
 void reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
