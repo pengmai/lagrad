@@ -22,10 +22,11 @@ bool isIntOrIntTensor(Type typ) {
 
 AffineMap getRankReduceSubviewLayout(int64_t resultRank,
                                      ConversionPatternRewriter &rewriter) {
-  if (resultRank == 1) {
-    return AffineMap::get(
-        1, 1, rewriter.getAffineDimExpr(0) + rewriter.getAffineSymbolExpr(0));
-  }
+  // if (resultRank == 1) {
+  //   return AffineMap::get(
+  //       1, 1, rewriter.getAffineDimExpr(0) +
+  //       rewriter.getAffineSymbolExpr(0));
+  // }
   AffineExpr expr;
   for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
     if (exprIdx == resultRank - 1) {
@@ -131,15 +132,12 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
 
   // env maps values to their gradient signals. x -> x_bar
   llvm::DenseMap<Value, Value> env;
-  llvm::SmallDenseSet<Value> active;
-
   PatternRewriter::InsertionGuard insertGuard(rewriter);
   for (auto it = ops.rbegin(); it != ops.rend(); it++) {
     Operation *op = *it;
     auto opName = op->getName().getStringRef();
     if (opName == "std.return") {
       // This is the exit point
-      // runActivityAnalysis(op, funcOp.getArguments(), active);
       rewriter.setInsertionPoint(op);
       assert(op->getNumOperands() == 1 &&
              "Expected function to return 1 value");
@@ -154,9 +152,6 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
     } else if (opName == "arith.cmpf") {
       continue;
     } else if (op->getNumResults() != 0) {
-      // &&
-      //   llvm::any_of(op->getResults(),
-      //                [&](OpResult res) { return active.contains(res); })) {
       populateVJP(op, ctx, env, rewriter);
     }
   }
@@ -1049,7 +1044,8 @@ Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
 
     auto innerGradsOf = ArrayAttr::get(
         context, {IntegerAttr::get(IntegerType::get(context, 64), op_index)});
-
+    runActivityAnalysis(ctx, dFuncOp, innerGradsOf);
+    populatePrimalCaches(ctx, dFuncOp, rewriter);
     dFuncOp = differentiateFunction(dFuncOp, ctx, innerGradsOf, rewriter);
   }
   llvm::SmallVector<Value> operands(op.getOperands());

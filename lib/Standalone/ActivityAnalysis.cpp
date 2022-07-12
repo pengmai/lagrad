@@ -417,9 +417,17 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
 
 void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
   // adjU maps results to sets of effectively used values
+  if (VERBOSITY >= 1) {
+    llvm::errs() << "Running TBR Analysis for func " << primalFunc.getName()
+                 << "\n";
+  }
   llvm::SmallDenseMap<Value, ValueSet> adjU;
   for (auto &op : primalFunc.getCallableRegion()->getOps()) {
     if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
+      // if (VERBOSITY >= 1) {
+      //   llvm::errs() << "Running TBR Analysis for loop "
+      //                << ctx.debug_names[forOp.getResult(0)] << "\n";
+      // }
       ValueSet finalAdjU;
       populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
       if (VERBOSITY >= 3) {

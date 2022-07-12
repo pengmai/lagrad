@@ -10,6 +10,9 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
   for (auto tbrVal : ctx.toBeRecorded) {
     auto &op =
         *(tbrVal.getDefiningOp() ?: tbrVal.getParentRegion()->getParentOp());
+    if (op.getParentOfType<FuncOp>() != primalFunc) {
+      continue;
+    }
     auto loc = op.getLoc();
     // Allocate caches
     // get the dims of the cache to allocate
