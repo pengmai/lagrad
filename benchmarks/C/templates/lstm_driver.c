@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-/* set CHECK_MEM to 0 to measure memory consumption, 1 to measure performance */
+/* set CHECK_MEM to 1 to measure memory consumption, 0 to measure performance */
 #define CHECK_MEM 0
 
 double *deadbeef = (double *)0xdeadbeef;
@@ -159,9 +159,13 @@ unsigned long collect_lagrad_lstm(LSTMInput input, double *state,
                   /*sequence=*/deadbeef, input.sequence, 0, c, b, b, 1);
   gettimeofday(&stop, NULL);
 
-  verify_lstm_jacobian(input.main_sz, input.extra_sz, res.dmain_params.aligned,
-                       res.dextra_params.aligned, ref_jacobian, "LAGrad");
-  // check_mem_usage();
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_lstm_jacobian(input.main_sz, input.extra_sz,
+                         res.dmain_params.aligned, res.dextra_params.aligned,
+                         ref_jacobian, "LAGrad");
+  }
   free(res.dmain_params.aligned);
   free(res.dextra_params.aligned);
   return timediff(start, stop);
@@ -331,10 +335,10 @@ int main() {
     populate_ref_grad(input, state, ref_jacobian);
   }
   lstmBodyFunc funcs[] = {
-      // collect_handrolled_lstm,
+      collect_handrolled_lstm,
       collect_lagrad_lstm,
-      // collect_enzyme_mlir_lstm,
-      // collect_enzyme_c_lstm
+      collect_enzyme_mlir_lstm,
+      collect_enzyme_c_lstm
   };
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
   unsigned long results_df[NUM_RUNS];

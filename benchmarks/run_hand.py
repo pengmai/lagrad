@@ -26,7 +26,7 @@ def main(args):
     lagrad_template = mlir_env.get_template("hand.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
     # data_file = args.data_file
-    data_file = "benchmarks/data/hand/simple_small/hand8_t26_c6400.txt"
+    data_file = "benchmarks/data/hand/simple_small/hand1_t26_c100.txt"
     with open(data_file) as f:
         npts, ntheta = [int(x) for x in f.readline().split()]
         assert ntheta == 26, "Unsupported value for ntheta"

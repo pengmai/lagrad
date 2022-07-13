@@ -1,4 +1,4 @@
-OPT=../../build/bin/standalone-opt
+OPT=../../build/bin/lagrad-opt
 CC=clang
 MLIR_TO_OBJ=mlir-translate -mlir-to-llvmir | llc -filetype=obj
 RUNNER_UTILS=$$HOME/.local/lib/libmlir_runner_utils.dylib

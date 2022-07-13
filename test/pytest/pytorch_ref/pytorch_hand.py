@@ -151,6 +151,34 @@ def get_skinned_vertex_positions(
     return positions3
 
 
+def skinned_vertex_subset(transforms, base_positions, weights):
+    positions = (
+        torch.stack(
+            [
+                transforms[i, :, :] @ base_positions.transpose(0, 1)
+                for i in range(transforms.shape[0])
+            ]
+        )
+        .transpose(0, 2)
+        .transpose(1, 2)
+    )
+
+    positions2 = torch.sum(positions * weights.reshape(weights.shape + (1,)), 1)[:, :3]
+    return positions2
+
+
+def helper_get_transforms(params, base_relatives, parents, inverse_base_absolutes):
+    pose_params = to_pose_params(params, base_relatives.shape[0])
+    relatives = get_posed_relatives(pose_params, base_relatives)
+
+    absolutes = relatives_to_absolutes(relatives, parents)
+
+    transforms = torch.stack(
+        [(absolutes[i] @ inverse_base_absolutes[i]) for i in range(len(absolutes))]
+    )
+    return transforms
+
+
 def hand_objective(
     params,
     nbones,

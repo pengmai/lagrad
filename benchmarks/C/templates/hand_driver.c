@@ -296,50 +296,11 @@ unsigned long enzyme_hand_simple(HandInput *input, double *J, double *ref_J) {
   return timediff(start, stop);
 }
 
-int generate_main() {
-  printf("Generating results for hand tracking\n");
-  HandInput hand_input =
-      read_hand_data("{{model_dir}}", "{{data_file}}", false, true);
-  // HandInput *input = &hand_input;
-  int J_rows = 3 * hand_input.n_pts;
-  double *J = (double *)malloc(J_rows * hand_input.n_theta * sizeof(double));
-  // enzyme_jacobian_simple(&input, J);
-  lagrad_jacobian_simple(&hand_input, J);
+void populate_ref(double *ref_J) {
+  HandInput hand_input = read_hand_data("{{model_dir}}", "{{data_file}}",
+                                        /*complicated=*/0, /*transposed=*/1);
 
-  // printf("Hand Primal\n");
-  // F64Descriptor2D err = mlir_hand_objective(
-  //     /*theta=*/deadbeef, input->theta, 0, input->n_theta, 1,
-  //     /*parents=*/(int32_t *)deadbeef, input->model.parents, 0,
-  //     input->model.n_bones, 1,
-  //     /*base_relatives=*/deadbeef, input->model.base_relatives, 0,
-  //     input->model.n_bones, 4, 4, 16, 4, 1,
-  //     /*inverse_base_absolutes=*/deadbeef,
-  //     input->model.inverse_base_absolutes, 0, input->model.n_bones, 4, 4, 16,
-  //     4, 1,
-  //     /*base_positions=*/deadbeef, input->model.base_positions, 0,
-  //     input->model.n_vertices, 4, 4, 1,
-  //     /*weights=*/deadbeef, input->model.weights, 0, input->model.n_vertices,
-  //     input->model.n_bones, input->model.n_bones, 1,
-  //     /*correspondences=*/(int32_t *)deadbeef, input->correspondences, 0,
-  //     input->n_pts, 1,
-  //     /*points=*/deadbeef, input->points, 0, input->n_pts, 3, 3, 1);
-  // print_d_arr_2d(err.aligned, err.size_0, err.size_1);
-  // printf("Hand primal shape: %lld %lld\n", err.size_0, err.size_1);
-
-  // size_t ncols_to_print = 3;
-  // for (size_t i = 0; i < 3; i++) {
-  //   for (size_t j = 0; j < ncols_to_print; j++) {
-  //     printf("%.4e", J[i * 26 + j + (573 * 26)]);
-  //     if (j != ncols_to_print - 1) {
-  //       printf(" ");
-  //     }
-  //   }
-  //   printf("\n");
-  // }
-  serialize_hand_results("{{results_file}}", J, 3 * hand_input.n_pts,
-                         hand_input.n_theta);
-  free(J);
-  return 0;
+  lagrad_jacobian_simple(&hand_input, ref_J);
 }
 
 /*Testing the packed C primal*/
@@ -351,7 +312,7 @@ void c_packed_hand_objective(int npts, double const *__restrict theta,
                              double const *__restrict weights,
                              int32_t *correspondences, double *points,
                              double *err);
-int main() {
+int check_main() {
   HandInput hand_input =
       read_hand_data("{{model_dir}}", "{{data_file}}", false, true);
   double *err = malloc(hand_input.n_pts * 3 * sizeof(double));
@@ -382,9 +343,10 @@ int main() {
   }
 
   printf("Total error between MLIR and C packed: %.4e\n", discrep);
+  return 0;
 }
 
-int benchmark_main() {
+int main() {
   /* Preamble */
   HandInput input =
       read_hand_data("{{model_dir}}", "{{data_file}}", false, true);
@@ -406,7 +368,7 @@ int benchmark_main() {
   //                                     .points = &points};
   int J_rows = 3 * input.n_pts;
   double *ref_J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
-  parse_hand_results("{{results_file}}", ref_J, J_rows, input.n_theta);
+  populate_ref(ref_J);
   double *J = (double *)malloc(J_rows * input.n_theta * sizeof(double));
 
   unsigned long *results_df =

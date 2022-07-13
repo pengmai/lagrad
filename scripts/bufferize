@@ -1,4 +1,17 @@
 #!/bin/bash
 
-PASSES="-tensor-constant-bufferize -std-bufferize -tensor-bufferize -standalone-bufferize -linalg-bufferize -scf-bufferize -func-bufferize -finalizing-bufferize -buffer-hoisting -buffer-loop-hoisting -standalone-loop-hoisting -promote-buffers-to-stack -canonicalize"
+PASSES="-tensor-constant-bufferize \
+-std-bufferize \
+-tensor-bufferize \
+-standalone-bufferize \
+-linalg-bufferize \
+-scf-bufferize \
+-func-bufferize \
+-finalizing-bufferize \
+-buffer-hoisting \
+-buffer-loop-hoisting \
+-standalone-loop-hoisting \
+-promote-buffers-to-stack \
+-buffer-deallocation \
+-canonicalize"
 ./build/bin/lagrad-opt "${1:-/dev/stdin}" $PASSES

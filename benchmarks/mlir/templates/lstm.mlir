@@ -9,6 +9,23 @@ func private @msigmoid(%x: f64) -> f64 {
   return %frac : f64
 }
 
+func private @tsigmoid(%x: tensor<{{b}}xf64>) -> tensor<{{b}}xf64> {
+  %one = arith.constant 1.0 : f64
+  %zerot = arith.constant dense<0.0> : tensor<{{b}}xf64>
+  %ts = linalg.generic
+    { indexing_maps = [#map, #map], iterator_types = ["parallel"] }
+    ins(%x : tensor<{{b}}xf64>)
+    outs(%zerot : tensor<{{b}}xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
+    %nx = arith.negf %arg0 : f64
+    %exp = math.exp %nx : f64
+    %denom = arith.addf %one, %exp : f64
+    %frac = arith.divf %one, %denom : f64
+    linalg.yield %frac : f64
+  } -> tensor<{{b}}xf64>
+  return %ts : tensor<{{b}}xf64>
+}
+
 func @mlogsumexp(%t: tensor<{{b}}xf64>) -> f64 {
   %out_init = arith.constant dense<0.0> : tensor<f64>
   %lse = linalg.generic
@@ -30,7 +47,7 @@ func @mlogsumexp(%t: tensor<{{b}}xf64>) -> f64 {
   return %lse_l : f64
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+// func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
 func @mlstm_objective(
   %main_params: tensor<{{l}}x2x4x{{b}}xf64>,
@@ -69,91 +86,110 @@ func @mlstm_objective(
       %cell   = tensor.extract_slice %state[%iv, 1, 0] [1, 1, {{b}}] [1, 1, 1] : tensor<{{l}}x2x{{b}}xf64> to tensor<{{b}}xf64>
 
       // inlined lstm_model
-      %forget = linalg.generic
-        {
-          indexing_maps = [#map, #map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(%input, %fweight, %fbias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-        %0 = arith.mulf %arg0, %arg1 : f64
-        %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
-        linalg.yield %2 : f64
-      } -> tensor<{{b}}xf64>
-      %ingate = linalg.generic
-        {
-          indexing_maps = [#map, #map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(%hidden, %iweight, %ibias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-        %0 = arith.mulf %arg0, %arg1 : f64
-        %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
-        linalg.yield %2 : f64
-      } -> tensor<{{b}}xf64>
-      %outgate = linalg.generic
-       {
-          indexing_maps = [#map, #map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(%input, %oweight, %obias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-        %0 = arith.mulf %arg0, %arg1 : f64
-        %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
-        linalg.yield %2 : f64
-      } -> tensor<{{b}}xf64>
-      %change = linalg.generic
-        {
-          indexing_maps = [#map, #map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(%hidden, %cweight, %cbias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-        %0 = arith.mulf %arg0, %arg1 : f64
-        %1 = arith.addf %0, %arg2 : f64
-        %2 = math.tanh %1 : f64
-        linalg.yield %2 : f64
-      } -> tensor<{{b}}xf64>
+      // %forget = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(%input, %fweight, %fbias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
+      //   %0 = arith.mulf %arg0, %arg1 : f64
+      //   %1 = arith.addf %0, %arg2 : f64
+      //   %2 = call @msigmoid(%1) : (f64) -> f64
+      //   linalg.yield %2 : f64
+      // } -> tensor<{{b}}xf64>
+      %forget0 = arith.mulf %input, %fweight : tensor<{{b}}xf64>
+      %forget1 = arith.addf %forget0, %fbias : tensor<{{b}}xf64>
+      %forget = call @tsigmoid(%forget1) : (tensor<{{b}}xf64>) -> tensor<{{b}}xf64>
 
-      %cell_new = linalg.generic
-        {
-          indexing_maps = [#map, #map, #map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(
-          %cell,
-          %forget,
-          %ingate,
-          %change : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>
-        )
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64, %arg4: f64):
-        %0 = arith.mulf %arg0, %arg1 : f64
-        %1 = arith.mulf %arg2, %arg3 : f64
-        %2 = arith.addf %0, %1 : f64
-        linalg.yield %2 : f64
-      } -> tensor<{{b}}xf64>
+      // %ingate = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(%hidden, %iweight, %ibias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
+      //   %0 = arith.mulf %arg0, %arg1 : f64
+      //   %1 = arith.addf %0, %arg2 : f64
+      //   %2 = call @msigmoid(%1) : (f64) -> f64
+      //   linalg.yield %2 : f64
+      // } -> tensor<{{b}}xf64>
+      %ingate0 = arith.mulf %hidden, %iweight : tensor<{{b}}xf64>
+      %ingate1 = arith.addf %ingate0, %ibias : tensor<{{b}}xf64>
+      %ingate = call @tsigmoid(%ingate1) : (tensor<{{b}}xf64>) -> tensor<{{b}}xf64>
+
+      // %outgate = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(%input, %oweight, %obias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
+      //   %0 = arith.mulf %arg0, %arg1 : f64
+      //   %1 = arith.addf %0, %arg2 : f64
+      //   %2 = call @msigmoid(%1) : (f64) -> f64
+      //   linalg.yield %2 : f64
+      // } -> tensor<{{b}}xf64>
+      %outgate0 = arith.mulf %input, %oweight : tensor<{{b}}xf64>
+      %outgate1 = arith.addf %outgate0, %obias : tensor<{{b}}xf64>
+      %outgate = call @tsigmoid(%outgate1) : (tensor<{{b}}xf64>) -> tensor<{{b}}xf64>
+      // %change = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(%hidden, %cweight, %cbias : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
+      //   %0 = arith.mulf %arg0, %arg1 : f64
+      //   %1 = arith.addf %0, %arg2 : f64
+      //   %2 = math.tanh %1 : f64
+      //   linalg.yield %2 : f64
+      // } -> tensor<{{b}}xf64>
+      %change0 = arith.mulf %hidden, %cweight : tensor<{{b}}xf64>
+      %change1 = arith.addf %change0, %cbias : tensor<{{b}}xf64>
+      %change = math.tanh %change1 : tensor<{{b}}xf64>
+
+      // %cell_new = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(
+      //     %cell,
+      //     %forget,
+      //     %ingate,
+      //     %change : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>
+      //   )
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64, %arg4: f64):
+      //   %0 = arith.mulf %arg0, %arg1 : f64
+      //   %1 = arith.mulf %arg2, %arg3 : f64
+      //   %2 = arith.addf %0, %1 : f64
+      //   linalg.yield %2 : f64
+      // } -> tensor<{{b}}xf64>
+      %cell_new0 = arith.mulf %cell, %forget : tensor<{{b}}xf64>
+      %cell_new1 = arith.mulf %ingate, %change : tensor<{{b}}xf64>
+      %cell_new = arith.addf %cell_new0, %cell_new1 : tensor<{{b}}xf64>
 
       %state_0 = tensor.insert_slice %cell_new into %state[%iv, 1, 0] [1, 1, {{b}}] [1, 1, 1] : tensor<{{b}}xf64> into tensor<{{l}}x2x{{b}}xf64>
-      %hidden_next = linalg.generic
-        {
-          indexing_maps = [#map, #map, #map],
-          iterator_types = ["parallel"]
-        }
-        ins(%outgate, %cell_new : tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-        outs(%zero_b : tensor<{{b}}xf64>) {
-      ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-        %0 = math.tanh %arg1 : f64
-        %1 = arith.mulf %arg0, %0 : f64
-        linalg.yield %1 : f64
-      } -> tensor<{{b}}xf64>
+      // %hidden_next = linalg.generic
+      //   {
+      //     indexing_maps = [#map, #map, #map],
+      //     iterator_types = ["parallel"]
+      //   }
+      //   ins(%outgate, %cell_new : tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+      //   outs(%zero_b : tensor<{{b}}xf64>) {
+      // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+      //   %0 = math.tanh %arg1 : f64
+      //   %1 = arith.mulf %arg0, %0 : f64
+      //   linalg.yield %1 : f64
+      // } -> tensor<{{b}}xf64>
+      %hidden_next0 = math.tanh %cell_new : tensor<{{b}}xf64>
+      %hidden_next = arith.mulf %outgate, %hidden_next0 : tensor<{{b}}xf64>
       %state_next = tensor.insert_slice %hidden_next into %state_0[%iv, 0, 0] [1, 1, {{b}}] [1, 1, 1] : tensor<{{b}}xf64> into tensor<{{l}}x2x{{b}}xf64>
 
       // end inlined lstm_model
@@ -162,18 +198,20 @@ func @mlstm_objective(
 
     %w2_1 = tensor.extract_slice %extra_params[1, 0] [1, {{b}}] [1, 1] : tensor<3x{{b}}xf64> to tensor<{{b}}xf64>
     %w2_2 = tensor.extract_slice %extra_params[2, 0] [1, {{b}}] [1, 1] : tensor<3x{{b}}xf64> to tensor<{{b}}xf64>
-    %ypred = linalg.generic
-      {
-        indexing_maps = [#map, #map, #map, #map],
-        iterator_types = ["parallel"]
-      }
-      ins(%xp#0, %w2_1, %w2_2 : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
-      outs(%zero_b : tensor<{{b}}xf64>) {
-    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
-      %0 = arith.mulf %arg0, %arg1 : f64
-      %1 = arith.addf %0, %arg2 : f64
-      linalg.yield %1 : f64
-    } -> tensor<{{b}}xf64>
+    // %ypred = linalg.generic
+    //   {
+    //     indexing_maps = [#map, #map, #map, #map],
+    //     iterator_types = ["parallel"]
+    //   }
+    //   ins(%xp#0, %w2_1, %w2_2 : tensor<{{b}}xf64>, tensor<{{b}}xf64>, tensor<{{b}}xf64>)
+    //   outs(%zero_b : tensor<{{b}}xf64>) {
+    // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
+    //   %0 = arith.mulf %arg0, %arg1 : f64
+    //   %1 = arith.addf %0, %arg2 : f64
+    //   linalg.yield %1 : f64
+    // } -> tensor<{{b}}xf64>
+    %ypred0 = arith.mulf %xp#0, %w2_1 : tensor<{{b}}xf64>
+    %ypred = arith.addf %ypred0, %w2_2 : tensor<{{b}}xf64>
 
     // end inlined lstm predict
     %lse = call @mlogsumexp(%ypred) : (tensor<{{b}}xf64>) -> f64

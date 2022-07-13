@@ -21,7 +21,7 @@ def main(args):
     helpers_templ = c_env.get_template("mlir_c_abi.c")
     lagrad_templ = mlir_env.get_template("lstm.mlir")
     hand_buf_templ = mlir_env.get_template("lstm_hand_bufferized.mlir")
-    # lagrad_hand_diff_templ = mlir_env.get_template("lstm_hand_differentiated.mlir")
+    lagrad_hand_diff_templ = mlir_env.get_template("lstm_hand_differentiated.mlir")
     # data_file = "benchmarks/data/lstm/lstm_l4_c4096.txt"
     data_file = args.data_file
     with open(data_file, "r") as f:
@@ -40,9 +40,9 @@ def main(args):
 
     if args.print:
         # print(hand_buf_templ.render(**config))
-        print(lagrad_templ.render(**config))
+        # print(lagrad_templ.render(**config))
         # print(enzyme_mlir_templ.render(**config))
-        # print(lagrad_hand_diff_templ.render(**config))
+        print(lagrad_hand_diff_templ.render(**config))
         return
 
     compile_mlir(hand_buf_templ.render(**config).encode("utf-8"), "lstm_handbuf.o")
@@ -65,13 +65,20 @@ def main(args):
             "lstm_enzyme_c.o",
             # "lstm_cpp_ref.o",
             "lstm_enzyme_mlir.o",
+            "memusage.o",
         ],
         "lstm_driver.out",
         link_runner_utils=True,
-    ).decode("utf-8")
+        monitor=False
+    )
+    stdout = stdout.decode("utf-8")
+    # print(memdict)
+    # print(stdout)
+    # return
     try:
         lines = stdout.splitlines()
         keys = ["Handrolled", "LAGrad", "Enzyme/MLIR", "Enzyme/C"]
+        # keys = ["Handrolled", "LAGrad"]
         assert len(keys) == len(
             lines
         ), f"expected # of apps to match {len(keys)} vs {len(lines)}"

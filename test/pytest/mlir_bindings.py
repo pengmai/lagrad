@@ -237,7 +237,7 @@ mlirlib.mlir_hand_objective.restype = F64Descriptor2D
 mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
 mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
 
-DISABLE_LSTM = False
+DISABLE_LSTM = True
 if not DISABLE_LSTM:
     mlirlib.lagrad_lstm_model.argtypes = (
         memref_2d + memref_2d + memref_1d + memref_1d + memref_1d
@@ -261,6 +261,12 @@ def wrap(mlir_func):
 
 lagrad_ba_compute_reproj_error = wrap(mlirlib.lagrad_compute_reproj_error)
 lagrad_ba_compute_w_error = wrap(mlirlib.lagrad_compute_w_error)
+
+
+def notimplemented(*_):
+    raise NotImplementedError()
+
+
 hand_to_pose_params = wrap(mlirlib.mto_pose_params)
 lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
 hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
@@ -271,11 +277,8 @@ mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
 lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
 mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
 lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
+# lagrad_hand_objective = notimplemented
 if DISABLE_LSTM:
-
-    def notimplemented(*_):
-        raise NotImplemented
-
     lagrad_lstm_model = notimplemented
     lagrad_lstm_predict = notimplemented
     lagrad_lstm_objective = notimplemented
