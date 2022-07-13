@@ -28,7 +28,8 @@ public:
   matchAndRewrite(tensor::InsertOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     memref::TensorLoadOp loaded;
-    if (in_place) {
+    constexpr bool bufferize_insert_in_place = true;
+    if (bufferize_insert_in_place) {
       // This first implementation updates the tensor in place rather than
       // returning a copy per the spec. Watch out for bugs this may cause.
       rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),

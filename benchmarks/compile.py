@@ -135,7 +135,7 @@ def compile_mlir(contents, output, lower_type="loops", comprehensive_bufferize=F
             "-canonicalize",
             "-inline",
             "-linalg-canonicalize",
-            # "-standalone-dce",
+            "-standalone-dce",
             "-convert-elementwise-to-linalg",
             "-convert-linalg-triangular-to-loops",
             # "-linalg-fuse-elementwise-ops",
