@@ -25,16 +25,21 @@ def main(args):
     enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
     lagrad_template = mlir_env.get_template("hand.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
+    data_file = "benchmarks/data/hand/simple_small/hand1_t26_c100.txt"
+    with open(data_file, "r") as f:
+        npts, ntheta = [int(x) for x in f.readline().split()]
+        assert ntheta == 26, "unsupported value for ntheta"
 
     nbones = 22
     nverts = 544
-    npts = 100
     config = {
         "nbones": nbones,
         "ntheta": 26,
         "nverts": nverts,
         "npts": npts,
         "primal_shape": f"{npts}x3",
+        "model_dir": "benchmarks/data/hand/simple_small/model",
+        "data_file": data_file,
     }
 
     if args.print:
@@ -49,7 +54,7 @@ def main(args):
     )
     compile_c(driver_template.render(**config).encode("utf-8"), "hand_driver.o")
     compile_c(helper_template.render(**config).encode("utf-8"), "mlir_c_abi.o")
-    compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
+    # compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
     compile_mlir(lagrad_template.render(**config).encode("utf-8"), "hand_lagrad.o")
     stdout = link_and_run(
         [

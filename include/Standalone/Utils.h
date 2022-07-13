@@ -54,10 +54,10 @@ Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
                   Value vjp_value, DenseMap<Value, Value> outer_env,
                   ConversionPatternRewriter &rewriter);
 
-ValueRange reverseForOp(scf::ForOp forOp, LAGradContext &ctx,
-                        ValueRange free_operand, Value vjp_value,
-                        size_t result_idx, DenseMap<Value, Value> outer_env,
-                        ConversionPatternRewriter &rewriter);
+void reverseForOp(scf::ForOp forOp, LAGradContext &ctx, ValueRange free_operand,
+                  Value vjp_value, size_t result_idx,
+                  DenseMap<Value, Value> &outer_env,
+                  ConversionPatternRewriter &rewriter);
 
 Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
                              Value vjp_value, OpBuilder &builder);
