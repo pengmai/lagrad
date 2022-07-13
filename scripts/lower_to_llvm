@@ -1,0 +1,13 @@
+#!/bin/bash
+
+PASSES="-convert-linalg-to-loops \
+-lower-affine \
+-convert-scf-to-std \
+-convert-memref-to-llvm \
+-convert-math-to-llvm \
+-convert-math-to-libm \
+-convert-std-to-llvm \
+-reconcile-unrealized-casts \
+-llvm-legalize-for-export"
+
+./build/bin/lagrad-opt "${1:-/dev/stdin}" $PASSES

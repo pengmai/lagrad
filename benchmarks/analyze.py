@@ -29,6 +29,15 @@ def plot_hand_absolute_runtimes(means, deviations, ax):
     ax.legend()
 
 
+def plot_lstm_absolute_runtimes(means, deviations, ax):
+    for key in ["LAGrad", "Enzyme/MLIR", "Enzyme/C", "Handrolled"]:
+        ax.errorbar(means["sizes"], means[key], deviations[key], label=key)
+    ax.set_title("Absolute Runtimes for LSTMs: LAGrad vs Enzyme (MLIR and C)")
+    ax.set_ylabel("Runtime (s)")
+    ax.set_xlabel("Number of independent variables x sequence length")
+    ax.legend()
+
+
 def plot_gmm_absolute_runtimes(means, deviations, ax, title=""):
     for key in ["LAGrad", "Enzyme/MLIR", "Enzyme/C"]:
         ax.errorbar(means["sizes"], means[key], deviations[key], label=key)
@@ -100,6 +109,20 @@ def process_gmm(results_file):
     return means, deviations
 
 
+def process_lstm(results_file):
+    filepat = re.compile(r"lstm_l(?P<l>\d+)_c(?P<c>\d+).txt")
+    df = pd.read_csv(results_file, header=[0, 1], index_col=0, skiprows=1)
+    df = df[1:]
+    means = df.mean().unstack() / 1e6
+    deviations = df.std().unstack() / 1e6
+    sizes = means.index.str.extract(filepat).apply(pd.to_numeric)
+    sizes.index = means.index
+    means["sizes"] = sizes.l * 8 * sizes.c
+    deviations["sizes"] = means["sizes"]
+    means, deviations = means.sort_values("sizes"), deviations.sort_values("sizes")
+    return means, deviations
+
+
 def smarter_round(sig):
     def rounder(x):
         return "{:.3f}".format(x)
@@ -156,6 +179,7 @@ def hand_results_to_latex(means: pd.DataFrame, stds):
     tablestr = tablestr.replace("\n", "\\\\\n\\hline\n")
     print(tablestr)
 
+
 def plot_gmm_results(tri_results_file, full_results_file):
     gmeans, gdev = process_gmm(tri_results_file)
     gfullmeans, gfulldev = process_gmm(full_results_file)
@@ -164,8 +188,21 @@ def plot_gmm_results(tri_results_file, full_results_file):
     # gcompdev["LAGrad"] = np.nan
     fig, ax = plt.subplots(1, 1)
     for key, color in zip(["LAGrad", "Enzyme/MLIR", "Enzyme/C"], ["C0", "C1", "C2"]):
-        ax.errorbar(gmeans["sizes"], gmeans[key], gdev[key], label=f"{key} Triangular", ls="dashed", color=color)
-        ax.errorbar(gfullmeans["sizes"], gfullmeans[key], gfulldev[key], label=f"{key} Full", color=color)
+        ax.errorbar(
+            gmeans["sizes"],
+            gmeans[key],
+            gdev[key],
+            label=f"{key} Triangular",
+            ls="dashed",
+            color=color,
+        )
+        ax.errorbar(
+            gfullmeans["sizes"],
+            gfullmeans[key],
+            gfulldev[key],
+            label=f"{key} Full",
+            color=color,
+        )
 
     # ax.set_title(
     #     "Absolute Runtimes for Gaussian Mixture Models: LAGrad vs Enzyme (MLIR and C)"
@@ -183,19 +220,26 @@ def plot_gmm_results(tri_results_file, full_results_file):
     fig.suptitle("Absolute runtimes for Gaussian Mixture Models")
     plt.show()
 
+
 if __name__ == "__main__":
     BA_RESULTS_FILE = "detailed_results/ba_detailed_results.csv"
     HAND_RESULTS_FILE = "detailed_results/hand_detailed_results.csv"
     GMM_TRI_RESULTS_FILE = "detailed_results/gmm_tri_detailed_results.csv"
     GMM_FULL_RESULTS_FILE = "detailed_results/gmm_full_detailed_results.csv"
     GMM_COMP_RESULTS_FILE = "detailed_results/gmm_detailed_results.csv"
+    LSTM_RESULTS_FILE = "detailed_results/lstm_detailed_results.csv"
     bmeans, bdev = process_ba(BA_RESULTS_FILE)
     # print(tablestr)
     # print(bmeans, bdev)
     hmeans, hdev = process_hand(HAND_RESULTS_FILE)
+    lmeans, ldev = process_lstm(LSTM_RESULTS_FILE)
+
+    fix, ax = plt.subplots(1, 1)
+    plot_lstm_absolute_runtimes(lmeans, ldev, ax)
+    plt.show()
     # hand_results_to_latex(hmeans, hdev)
 
-    plot_gmm_results(GMM_TRI_RESULTS_FILE, GMM_FULL_RESULTS_FILE)
+    # plot_gmm_results(GMM_TRI_RESULTS_FILE, GMM_FULL_RESULTS_FILE)
 
     # fig, (ax1, ax2) = plt.subplots(1, 2)
     # plot_ba_absolute_runtimes(bmeans, bdev, ax1)

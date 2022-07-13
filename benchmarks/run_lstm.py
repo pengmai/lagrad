@@ -56,7 +56,13 @@ def main(args):
         emit="obj",
     )
 
-    stdout = link_and_run(
+    mem_df = pd.read_csv(
+        "detailed_results/lstm_memusage.tsv",
+        sep="\t",
+        index_col=[0, 1],
+    )
+
+    stdout, memdict = link_and_run(
         [
             "lstm_driver.o",
             "mlir_c_abi.o",
@@ -69,12 +75,17 @@ def main(args):
         ],
         "lstm_driver.out",
         link_runner_utils=True,
-        monitor=False
+        monitor=True,
     )
     stdout = stdout.decode("utf-8")
-    # print(memdict)
-    # print(stdout)
-    # return
+    print(memdict)
+    dataset = data_file.split("/")[-1]
+    key = "Enzyme/C"
+    mem_df.loc[dataset, key]["max_rss"] = memdict["max rss"]
+    mem_df.loc[dataset, key]["vsize"] = memdict["max vsize"]
+    mem_df.to_csv("detailed_results/lstm_memusage.tsv", sep="\t")
+    print(stdout)
+    return
     try:
         lines = stdout.splitlines()
         keys = ["Handrolled", "LAGrad", "Enzyme/MLIR", "Enzyme/C"]
