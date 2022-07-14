@@ -44,6 +44,9 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
     }
     if (auto rtt = tbrVal.getType().dyn_cast_or_null<RankedTensorType>()) {
       shape.insert(shape.end(), rtt.getShape().begin(), rtt.getShape().end());
+
+      auto tcache = rewriter.create<linalg::InitTensorOp>(
+          loc, dynamicSizes, shape, rtt.getElementType());
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, rtt.getElementType()), dynamicSizes);
       ctx.debug_names[cache] =
@@ -88,6 +91,55 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
           "<casted memref for writing " + ctx.debug_names[tbrVal] + ">";
       rewriter.create<linalg::CopyOp>(loc, memref, view);
       ctx.tbrCachedVals[tbrVal] = cache;
+
+      auto updated_cache = rewriter.create<tensor::InsertSliceOp>(
+          loc, /*resultType=*/tcache.getType(), /*source=*/tbrVal,
+          /*dest=*/tcache,
+          /*dynamic shapes=*/induction_vars, ValueRange(), ValueRange(),
+          /*static shapes=*/staticOffset, staticSize, staticStride);
+      using llvm::errs;
+      if (auto *parentOp = updated_cache->getParentOp()) {
+        // if (auto ifOp = dyn_cast<scf::IfOp>(parentOp)) {
+        //   assert(ifOp.getNumResults() == 1 &&
+        //          "Expected primal if op to have one result");
+        //   rewriter.setInsertionPoint(ifOp);
+        //   SmallVector<Type> resultTypes{ifOp.getResultTypes()};
+        //   resultTypes.push_back(tbrVal.getType());
+        //   auto newIfOp = rewriter.create<scf::IfOp>(ifOp.getLoc(), resultTypes,
+        //                                             ifOp.condition(),
+        //                                             /*withElseRegion=*/true);
+        //   rewriter.mergeBlocks(ifOp.thenBlock(), newIfOp.thenBlock(), {});
+        //   rewriter.mergeBlocks(ifOp.elseBlock(), newIfOp.elseBlock(), {});
+        //   rewriter.updateRootInPlace(ifOp, [&]() {
+        //     for (auto user : ifOp->getUsers()) {
+        //       for (size_t i = 0; i < user->getNumOperands(); i++) {
+        //         if (user->getOperand(i) == ifOp.getResult(0)) {
+        //           user->setOperand(i, newIfOp.getResult(0));
+        //         }
+        //       }
+        //     }
+        //     ifOp.erase();
+        //   });
+        //   rewriter.setInsertionPoint(newIfOp.thenYield());
+        //   auto zero = getZero(loc, tbrVal, rewriter);
+        //   auto thenYield = newIfOp.thenYield();
+        //   SmallVector<Value> yieldOperands{thenYield.getOperands()};
+        //   yieldOperands.push_back(zero);
+        //   rewriter.create<scf::YieldOp>(thenYield.getLoc(), yieldOperands);
+        //   rewriter.eraseOp(thenYield);
+
+          // rewriter.setInsertionPoint(newIfOp.elseYield());
+          // zero = getZero(loc, tbrVal, rewriter);
+          // auto elseYield = newIfOp.elseYield();
+          // yieldOperands.clear();
+          // yieldOperands.insert(yieldOperands.end(),
+          //                      elseYield.getOperands().begin(),
+          //                      elseYield.getOperands().end());
+          // yieldOperands.push_back(zero);
+          // rewriter.create<scf::YieldOp>(elseYield.getLoc(), yieldOperands);
+          // rewriter.eraseOp(elseYield);
+        // }
+      }
     } else {
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, tbrVal.getType()), dynamicSizes);
