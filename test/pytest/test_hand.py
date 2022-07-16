@@ -11,6 +11,7 @@ from pytorch_ref.pytorch_hand import (
     helper_get_transforms,
     skinned_vertex_subset,
     hand_objective,
+    hand_objective_complicated,
 )
 from pytorch_ref.utils import torch_jacobian
 from mlir_bindings import (
@@ -23,22 +24,30 @@ from mlir_bindings import (
     mlir_HELPER_get_transforms,
     lagrad_skinned_vertex_subset,
     mlir_hand_objective,
+    mlir_hand_objective_complicated,
     lagrad_hand_objective,
+    lagrad_hand_objective_complicated,
 )
 from toolchain import jit_file
 from stdout_parser import extract_1d, extract_2d
 
-HAND_DATA_DIR = (
-    pathlib.Path(__file__).parents[2] / "benchmarks" / "data" / "hand" / "simple_small"
-)
-MODEL_DIR = HAND_DATA_DIR / "model"
+HAND_DATA_DIR = pathlib.Path(__file__).parents[2] / "benchmarks" / "data" / "hand"
+MODEL_DIR = HAND_DATA_DIR / "simple_small" / "model"
 HAND_DATA_FILE = HAND_DATA_DIR / "test.txt"
+HAND_COMPLICATED_FILE = HAND_DATA_DIR / "hand_complicated.txt"
+# HAND_COMPLICATED_FILE = HAND_DATA_DIR / "complicated_small" / "hand1_t26_c100.txt"
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 
 
 @pytest.fixture(scope="module")
 def hand_input():
     inp = read_hand_instance(MODEL_DIR, HAND_DATA_FILE, read_us=False)
+    return inp
+
+
+@pytest.fixture(scope="module")
+def hand_input_complicated():
+    inp = read_hand_instance(MODEL_DIR, HAND_COMPLICATED_FILE, read_us=True)
     return inp
 
 
@@ -232,5 +241,79 @@ def test_hand_objective_simple(hand_input: HandInput):
         stride = hand_input.data.points.shape[1]
         g[i // stride, i % stride] = 1.0
         lagrad_J[i, :] = lagrad_hand_objective(*(mparams + (g,)))
+    assert mprimal == pytest.approx(torch_primal.detach())
+    assert lagrad_J == pytest.approx(torch_J)
+
+
+def test_hand_objective_complicated(hand_input_complicated: HandInput):
+    tinputs = torch.from_numpy(
+        np.append(hand_input_complicated.us.flatten(), hand_input_complicated.theta)
+    )
+    tinputs.requires_grad = True
+    model = hand_input_complicated.data.model
+    tparams = [
+        (torch.from_numpy(arg) if isinstance(arg, np.ndarray) else arg)
+        for arg in [
+            model.bone_count,
+            model.parents,
+            model.base_relatives,
+            model.inverse_base_absolutes,
+            model.base_positions,
+            model.weights,
+            model.is_mirrored,
+            hand_input_complicated.data.points,
+            hand_input_complicated.data.correspondences,
+            model.triangles,
+        ]
+    ]
+
+    torch_primal, J = torch_jacobian(
+        hand_objective_complicated, (tinputs,), tparams, False
+    )
+    # getting us part of jacobian
+    # Note: jacobian has the following structure:
+    #
+    #   [us_part theta_part]
+    #
+    # where in us part is a block diagonal matrix with blocks of
+    # size [3, 2]
+    n_rows, n_cols = J.shape
+    # print(J[-1])
+    us_J = torch.empty([n_rows, 2])
+    for i in range(n_rows // 3):
+        for k in range(3):
+            us_J[3 * i + k] = J[3 * i + k][2 * i : 2 * i + 2]
+    us_count = 2 * n_rows // 3
+    theta_count = n_cols - us_count
+    theta_J = torch.empty([n_rows, theta_count])
+    for i in range(n_rows):
+        theta_J[i] = J[i][us_count:]
+
+    torch_J = torch.cat((us_J, theta_J), 1)
+
+    mparams = (
+        hand_input_complicated.theta,
+        hand_input_complicated.us,
+        model.parents.astype(np.int32),
+        # MLIR is implemented assuming these matrices are column-major.
+        np.ascontiguousarray(model.base_relatives.transpose(0, 2, 1)),
+        np.ascontiguousarray(model.inverse_base_absolutes.transpose(0, 2, 1)),
+        model.base_positions,
+        model.weights,
+        model.triangles.astype(np.int32),
+        hand_input_complicated.data.correspondences.astype(np.int32),
+        hand_input_complicated.data.points,
+    )
+    mprimal = mlir_hand_objective_complicated(*mparams)
+
+    err_size = np.prod(hand_input_complicated.data.points.shape)
+    lagrad_J = np.empty((err_size, hand_input_complicated.theta.shape[0] + 2))
+    for i in range(err_size):
+        g = np.zeros_like(hand_input_complicated.data.points)
+        stride = hand_input_complicated.data.points.shape[1]
+        g[i // stride, i % stride] = 1.0
+        lagrad_J[i, 2:], dus = lagrad_hand_objective_complicated(*(mparams + (g,)))
+        lagrad_J[i, :2] = dus[i // 3]
+
     assert mprimal == pytest.approx(torch_primal.detach())
     assert lagrad_J == pytest.approx(torch_J)

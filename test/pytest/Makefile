@@ -47,6 +47,7 @@ tmp/hand_get_posed_relatives.o\
 tmp/hand_relatives_to_absolutes.o\
 tmp/skinned_vertex_subset.o\
 tmp/hand_objective.o\
+tmp/hand_objective_complicated.o\
 tmp/lstm_model.o\
 tmp/lstm_predict.o\
 tmp/lstm_objective.o
@@ -75,6 +76,9 @@ tmp/skinned_vertex_subset.o: $(MLIR_SRC)/hand/skinned_vertex_subset.mlir $(OPT)
 HAND_VERSION=$(MLIR_SRC)/hand/hand_objective.mlir
 tmp/hand_objective.o: $(HAND_VERSION) $(OPT)
 	$(OPT) $(HAND_VERSION) $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_objective.o
+
+tmp/hand_objective_complicated.o: $(MLIR_SRC)/hand/hand_objective_complicated.mlir
+	$(OPT) $(MLIR_SRC)/hand/hand_objective_complicated.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_objective_complicated.o
 
 tmp/lstm_model.o: $(MLIR_SRC)/lstm/lstm_model.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/lstm/lstm_model.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/lstm_model.o

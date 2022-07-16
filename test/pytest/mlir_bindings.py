@@ -107,6 +107,10 @@ memref_2d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
 ] + [ctypes.c_longlong] * 5
+memref_2d_int = [
+    np.ctypeslib.ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),
+    np.ctypeslib.ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),
+] + [ctypes.c_longlong] * 5
 memref_3d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=3, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=3, flags="C_CONTIGUOUS"),
@@ -157,6 +161,10 @@ class BAReprojGrad(ctypes.Structure):
         ("dX", F64Descriptor1D),
         ("dw", ctypes.c_double),
     ]
+
+
+class HandComplicatedGrad(ctypes.Structure):
+    _fields_ = [("dtheta", F64Descriptor1D), ("dus", F64Descriptor2D)]
 
 
 class LSTMModelGrad(ctypes.Structure):
@@ -238,6 +246,24 @@ if not DISABLE_HAND:
     mlirlib.mlir_hand_objective.restype = F64Descriptor2D
     mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
     mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
+    hand_complicated_args = (
+        memref_1d
+        + memref_2d
+        + memref_1d_int
+        + memref_3d
+        + memref_3d
+        + memref_2d
+        + memref_2d
+        + memref_2d_int
+        + memref_1d_int
+        + memref_2d
+    )
+    mlirlib.mlir_hand_objective_complicated.argtypes = hand_complicated_args
+    mlirlib.mlir_hand_objective_complicated.restype = F64Descriptor2D
+    mlirlib.lagrad_hand_objective_complicated.argtypes = (
+        hand_complicated_args + memref_2d
+    )
+    mlirlib.lagrad_hand_objective_complicated.restype = HandComplicatedGrad
 
 DISABLE_LSTM = True
 if not DISABLE_LSTM:
@@ -279,7 +305,9 @@ if DISABLE_HAND:
     mlir_HELPER_get_transforms = notimplemented
     lagrad_skinned_vertex_subset = notimplemented
     mlir_hand_objective = notimplemented
+    mlir_hand_objective_complicated = notimplemented
     lagrad_hand_objective = notimplemented
+    lagrad_hand_objective_complicated = notimplemented
 else:
     hand_to_pose_params = wrap(mlirlib.mto_pose_params)
     lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
@@ -290,7 +318,9 @@ else:
     mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
     lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
     mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
+    mlir_hand_objective_complicated = wrap(mlirlib.mlir_hand_objective_complicated)
     lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
+    lagrad_hand_objective_complicated = wrap(mlirlib.lagrad_hand_objective_complicated)
 
 if DISABLE_LSTM:
     lagrad_lstm_model = notimplemented
