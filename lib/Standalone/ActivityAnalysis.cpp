@@ -8,8 +8,7 @@
 using namespace mlir;
 
 namespace mlir {
-void runTopDownDFS(LAGradContext &ctx, SmallVector<Value> &frontier,
-                   ValueSet &out) {
+void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
   while (!frontier.empty()) {
     Value val = frontier.pop_back_val();
     if (!out.contains(val)) {
@@ -162,7 +161,7 @@ void runTopDownAnalysis(LAGradContext &ctx, FuncOp primalFunc,
       frontier.push_back(primalFunc.getArgument(argIndex));
     }
   }
-  runTopDownDFS(ctx, frontier, topDownActive);
+  runTopDownDFS(frontier, topDownActive);
 }
 
 void runBottomUpAnalysis(FuncOp primalFunc, ValueSet &bottomUpActive) {
@@ -448,7 +447,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
       for (auto arg : forOp.getRegionIterArgs()) {
         frontier.push_back(arg);
       }
-      runTopDownDFS(ctx, frontier, derivedFromIterArgs);
+      runTopDownDFS(frontier, derivedFromIterArgs);
       if (VERBOSITY >= 2) {
         llvm::errs() << "derived from iter args:\n";
         printSet(ctx, derivedFromIterArgs);

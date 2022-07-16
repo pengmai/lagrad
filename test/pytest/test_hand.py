@@ -168,11 +168,10 @@ def test_apply_global_transform():
 
 def test_compute_err_simple():
     adjoint = extract_2d(jit_file(f"{MLIR_FILES}/hand/compute_err_simple.mlir"))
-    for i, row in enumerate(adjoint):
-        if i in [10, 16]:
-            assert row == [-1, -1, -1]
-        else:
-            assert row == [0, 0, 0]
+    expected = np.zeros((len(adjoint), 3))
+    expected[10] = -1
+    expected[16] = -1
+    assert adjoint == pytest.approx(expected)
 
 
 def test_relatives_to_absolutes(hand_input: HandInput, posed_relatives):

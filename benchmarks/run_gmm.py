@@ -50,8 +50,8 @@ def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
     blas_wrapper_template = driver_env.get_template("kernels_v2.c")
-    # mlir_template = mlir_env.get_template("gmm.mlir")
-    mlir_template = mlir_env.get_template("gmm_differentiated.mlir")
+    mlir_template = mlir_env.get_template("gmm.mlir")
+    # mlir_template = mlir_env.get_template("gmm_differentiated.mlir")
     mlir_compressed_template = mlir_env.get_template("gmm_compressed.mlir")
     mlir_enzyme_full_template = mlir_env.get_template("gmm_buf_optimized.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_compressed.mlir")
@@ -61,7 +61,7 @@ def main(args):
     # This is crashing Enzyme for some reason.
     # mlir_enzyme_template = mlir_env.get_template("gmm_buf.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
-    data_file = "benchmarks/data/gmm_d10_K25.txt"
+    data_file = "benchmarks/data/gmm/10k/gmm_d128_K5.txt"
     with open(data_file) as f:
         d, k, n = [int(x) for x in f.readline().split()]
 
@@ -71,8 +71,7 @@ def main(args):
         "d": d,
         "tri_size": int(d * (d - 1) / 2),
         "method": "enzyme_mlir_compressed",
-        "data_file": "benchmarks/data/gmm_d10_K25.txt",
-        "results_file": "benchmarks/data/gmm_results.txt",
+        "data_file": data_file,
     }
 
     if args.print:

@@ -8,9 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// #define HAND_DATA_FILE "benchmarks/data/test.txt"
-#define HAND_DATA_FILE "benchmarks/data/hand1_t26_c100.txt"
-
 typedef struct {
   int n_bones, n_vertices;
   const char **bone_names;

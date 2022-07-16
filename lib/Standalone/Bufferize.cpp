@@ -18,7 +18,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
-constexpr bool in_place = false;
+// constexpr bool in_place = false;
 
 namespace {
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
@@ -28,8 +28,19 @@ public:
   matchAndRewrite(tensor::InsertOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     memref::TensorLoadOp loaded;
-    constexpr bool bufferize_insert_in_place = true;
-    if (bufferize_insert_in_place) {
+
+    // This is very naïve.
+    DominanceInfo dom;
+    bool hasUseAfter = false;
+
+    for (auto user : op.dest().getUsers()) {
+      if (dom.properlyDominates(op.getResult(), user)) {
+        hasUseAfter = true;
+      }
+    }
+    // constexpr bool bufferize_insert_in_place = false;
+    // if (bufferize_insert_in_place) {
+    if (!hasUseAfter) {
       // This first implementation updates the tensor in place rather than
       // returning a copy per the spec. Watch out for bugs this may cause.
       rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
@@ -89,7 +100,18 @@ public:
     auto subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(), resultType, adaptor.source(), op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
-    if (in_place) {
+
+    DominanceInfo dom;
+    bool hasWriteAfter = false;
+
+    for (auto user : op.source().getUsers()) {
+      if (dom.properlyDominates(op.getResult(), user) &&
+          (dyn_cast<tensor::InsertSliceOp>(user) ||
+           dyn_cast<tensor::InsertOp>(user))) {
+        hasWriteAfter = true;
+      }
+    }
+    if (!hasWriteAfter) {
       rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
                                                   identityResultType);
     } else {

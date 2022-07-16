@@ -24,6 +24,7 @@ bool isFloatOrFloatTensor(Type typ);
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
 
 void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out);
+void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out);
 
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
                           ConversionPatternRewriter &rewriter);
@@ -74,9 +75,6 @@ void reverseForOp(scf::ForOp forOp, LAGradContext &ctx, ValueRange free_operand,
                   Value vjp_value, size_t result_idx,
                   DenseMap<Value, Value> &outer_env,
                   ConversionPatternRewriter &rewriter);
-
-Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
-                             Value vjp_value, OpBuilder &builder);
 
 Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter);

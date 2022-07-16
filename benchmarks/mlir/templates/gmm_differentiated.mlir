@@ -11,7 +11,7 @@ module  {
     return %cst : f64
   }
 
-  func private @print_memref_f64(memref<*xf64>) -> () attributes {llvm.emit_c_interface}
+  // func private @print_memref_f64(memref<*xf64>) -> () attributes {llvm.emit_c_interface}
   func private @dmatvec(memref<{{d}}x{{d}}xf64>, memref<{{d}}xf64>, memref<{{d}}xf64>) attributes {llvm.emit_c_interface}
 
   func @__grad_mlir_gmm_opt_full(%arg0: memref<{{k}}xf64>, %arg1: memref<{{k}}x{{d}}xf64>, %arg2: memref<{{k}}x{{d}}xf64>, %arg3: memref<{{k}}x{{d}}x{{d}}xf64>, %arg4: memref<{{n}}x{{d}}xf64>, %arg5: f64, %arg6: i64) -> (memref<{{k}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}x{{d}}xf64>) {

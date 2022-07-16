@@ -40,9 +40,9 @@ def main(args):
 
     if args.print:
         # print(hand_buf_templ.render(**config))
-        # print(lagrad_templ.render(**config))
+        print(lagrad_templ.render(**config))
         # print(enzyme_mlir_templ.render(**config))
-        print(lagrad_hand_diff_templ.render(**config))
+        # print(lagrad_hand_diff_templ.render(**config))
         return
 
     compile_mlir(hand_buf_templ.render(**config).encode("utf-8"), "lstm_handbuf.o")
@@ -56,13 +56,13 @@ def main(args):
         emit="obj",
     )
 
-    mem_df = pd.read_csv(
-        "detailed_results/lstm_memusage.tsv",
-        sep="\t",
-        index_col=[0, 1],
-    )
+    # mem_df = pd.read_csv(
+    #     "detailed_results/lstm_memusage.tsv",
+    #     sep="\t",
+    #     index_col=[0, 1],
+    # )
 
-    stdout, memdict = link_and_run(
+    stdout = link_and_run(
         [
             "lstm_driver.o",
             "mlir_c_abi.o",
@@ -75,17 +75,17 @@ def main(args):
         ],
         "lstm_driver.out",
         link_runner_utils=True,
-        monitor=True,
+        monitor=False,
     )
     stdout = stdout.decode("utf-8")
-    print(memdict)
-    dataset = data_file.split("/")[-1]
-    key = "Enzyme/C"
-    mem_df.loc[dataset, key]["max_rss"] = memdict["max rss"]
-    mem_df.loc[dataset, key]["vsize"] = memdict["max vsize"]
-    mem_df.to_csv("detailed_results/lstm_memusage.tsv", sep="\t")
-    print(stdout)
-    return
+    # print(memdict)
+    # dataset = data_file.split("/")[-1]
+    # key = "Enzyme/C"
+    # mem_df.loc[dataset, key]["max_rss"] = memdict["max rss"]
+    # mem_df.loc[dataset, key]["vsize"] = memdict["max vsize"]
+    # mem_df.to_csv("detailed_results/lstm_memusage.tsv", sep="\t")
+    # print(stdout)
+    # return
     try:
         lines = stdout.splitlines()
         keys = ["Handrolled", "LAGrad", "Enzyme/MLIR", "Enzyme/C"]

@@ -204,38 +204,40 @@ mlirlib.lagrad_compute_reproj_error.restype = BAReprojGrad
 mlirlib.lagrad_compute_w_error.argtypes = [ctypes.c_double]
 mlirlib.lagrad_compute_w_error.restype = ctypes.c_double
 
-mlirlib.mto_pose_params.argtypes = memref_1d
-mlirlib.mto_pose_params.restype = F64Descriptor2D
-mlirlib.lagrad_to_pose_params.argtypes = memref_1d
-mlirlib.lagrad_to_pose_params.restype = F64Descriptor1D
-mlirlib.mget_posed_relatives.argtypes = memref_3d + memref_2d
-mlirlib.mget_posed_relatives.restype = F64Descriptor3D
-mlirlib.lagrad_get_posed_relatives.argtypes = memref_3d + memref_2d
-mlirlib.lagrad_get_posed_relatives.restype = F64Descriptor2D
-mlirlib.mrelatives_to_absolutes.argtypes = memref_3d + memref_1d_int
-mlirlib.mrelatives_to_absolutes.restype = F64Descriptor3D
-mlirlib.lagrad_relatives_to_absolutes.argtypes = memref_3d + memref_1d_int
-mlirlib.lagrad_relatives_to_absolutes.restype = F64Descriptor3D
-mlirlib.HELPER_get_transforms.argtypes = (
-    memref_1d + memref_1d_int + memref_3d + memref_3d
-)
-mlirlib.HELPER_get_transforms.restype = F64Descriptor3D
-mlirlib.lagrad_skinned_vertex_subset.argtypes = memref_3d + memref_2d + memref_2d
-mlirlib.lagrad_skinned_vertex_subset.restype = F64Descriptor3D
-hand_objective_args = (
-    memref_1d
-    + memref_1d_int
-    + memref_3d
-    + memref_3d
-    + memref_2d
-    + memref_2d
-    + memref_1d_int
-    + memref_2d
-)
-mlirlib.mlir_hand_objective.argtypes = hand_objective_args
-mlirlib.mlir_hand_objective.restype = F64Descriptor2D
-mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
-mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
+DISABLE_HAND = False
+if not DISABLE_HAND:
+    mlirlib.mto_pose_params.argtypes = memref_1d
+    mlirlib.mto_pose_params.restype = F64Descriptor2D
+    mlirlib.lagrad_to_pose_params.argtypes = memref_1d
+    mlirlib.lagrad_to_pose_params.restype = F64Descriptor1D
+    mlirlib.mget_posed_relatives.argtypes = memref_3d + memref_2d
+    mlirlib.mget_posed_relatives.restype = F64Descriptor3D
+    mlirlib.lagrad_get_posed_relatives.argtypes = memref_3d + memref_2d
+    mlirlib.lagrad_get_posed_relatives.restype = F64Descriptor2D
+    mlirlib.mrelatives_to_absolutes.argtypes = memref_3d + memref_1d_int
+    mlirlib.mrelatives_to_absolutes.restype = F64Descriptor3D
+    mlirlib.lagrad_relatives_to_absolutes.argtypes = memref_3d + memref_1d_int
+    mlirlib.lagrad_relatives_to_absolutes.restype = F64Descriptor3D
+    mlirlib.HELPER_get_transforms.argtypes = (
+        memref_1d + memref_1d_int + memref_3d + memref_3d
+    )
+    mlirlib.HELPER_get_transforms.restype = F64Descriptor3D
+    mlirlib.lagrad_skinned_vertex_subset.argtypes = memref_3d + memref_2d + memref_2d
+    mlirlib.lagrad_skinned_vertex_subset.restype = F64Descriptor3D
+    hand_objective_args = (
+        memref_1d
+        + memref_1d_int
+        + memref_3d
+        + memref_3d
+        + memref_2d
+        + memref_2d
+        + memref_1d_int
+        + memref_2d
+    )
+    mlirlib.mlir_hand_objective.argtypes = hand_objective_args
+    mlirlib.mlir_hand_objective.restype = F64Descriptor2D
+    mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
+    mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
 
 DISABLE_LSTM = True
 if not DISABLE_LSTM:
@@ -267,17 +269,29 @@ def notimplemented(*_):
     raise NotImplementedError()
 
 
-hand_to_pose_params = wrap(mlirlib.mto_pose_params)
-lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
-hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
-lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
-hand_relatives_to_absolutes = wrap(mlirlib.mrelatives_to_absolutes)
-lagrad_relatives_to_absolutes = wrap(mlirlib.lagrad_relatives_to_absolutes)
-mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
-lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
-mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
-lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
-# lagrad_hand_objective = notimplemented
+if DISABLE_HAND:
+    hand_to_pose_params = notimplemented
+    lagrad_hand_to_pose_params = notimplemented
+    hand_get_posed_relatives = notimplemented
+    lagrad_get_posed_relatives = notimplemented
+    hand_relatives_to_absolutes = notimplemented
+    lagrad_relatives_to_absolutes = notimplemented
+    mlir_HELPER_get_transforms = notimplemented
+    lagrad_skinned_vertex_subset = notimplemented
+    mlir_hand_objective = notimplemented
+    lagrad_hand_objective = notimplemented
+else:
+    hand_to_pose_params = wrap(mlirlib.mto_pose_params)
+    lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
+    hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
+    lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
+    hand_relatives_to_absolutes = wrap(mlirlib.mrelatives_to_absolutes)
+    lagrad_relatives_to_absolutes = wrap(mlirlib.lagrad_relatives_to_absolutes)
+    mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
+    lagrad_skinned_vertex_subset = wrap(mlirlib.lagrad_skinned_vertex_subset)
+    mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
+    lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
+
 if DISABLE_LSTM:
     lagrad_lstm_model = notimplemented
     lagrad_lstm_predict = notimplemented

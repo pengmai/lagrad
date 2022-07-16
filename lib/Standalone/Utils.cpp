@@ -22,11 +22,10 @@ bool isIntOrIntTensor(Type typ) {
 
 AffineMap getRankReduceSubviewLayout(int64_t resultRank,
                                      ConversionPatternRewriter &rewriter) {
-  if (resultRank == 1) {
-    return AffineMap::get(
-        1, 1, rewriter.getAffineDimExpr(0) +
-        rewriter.getAffineSymbolExpr(0));
-  }
+  // if (resultRank == 1) {
+  //   return AffineMap::get(
+  //       1, 1, rewriter.getAffineDimExpr(0) + rewriter.getAffineSymbolExpr(0));
+  // }
   AffineExpr expr;
   for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
     if (exprIdx == resultRank - 1) {
@@ -228,6 +227,8 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init) {
   }
   if (operand.getType().isa<ShapedType>()) {
     auto shapedType = operand.getType().dyn_cast<ShapedType>();
+    assert(shapedType.getNumDynamicDims() == 0 &&
+           "expected getZero to have static shape");
     if (init) {
       auto zero = rewriter.create<arith::ConstantOp>(
           loc, FloatAttr::get(shapedType.getElementType(), 0.0));
@@ -442,7 +443,13 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     ValueSet freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
-    auto free_operand_vec = llvm::to_vector<4>(freeOperands);
+    // auto free_operand_vec = llvm::to_vector<4>(freeOperands);
+    SmallVector<Value> free_operand_vec;
+    for (auto v : freeOperands) {
+      if (ctx.activeValues.contains(v)) {
+        free_operand_vec.push_back(v);
+      }
+    }
     reverseForOp(forOp, ctx, free_operand_vec, vjp_value, result_idx, env,
                  rewriter);
     // // only works for GMMs
@@ -1007,25 +1014,6 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
   }
 
   return adjoint.getResult(0);
-}
-
-Value reverseTensorExtractOp(tensor::ExtractOp op, Value operand,
-                             Value vjp_value, OpBuilder &builder) {
-  // Using a constant tensor is causing issues here. We need to
-  // explicitly allocate a space using init_tensor.
-  auto tensorType = op.tensor().getType().dyn_cast<ShapedType>();
-  assert(tensorType.hasStaticShape() &&
-         "only static shapes are currently supported");
-  auto zero = getZero(operand.getLoc(), op.result(), builder);
-  Value space = builder.create<linalg::InitTensorOp>(
-      operand.getLoc(), ValueRange{}, tensorType.getShape(),
-      op.result().getType());
-  if (tensorType.getRank() != 0) {
-    space = builder.create<linalg::FillOp>(operand.getLoc(), zero, space)
-                .getResult(0);
-  }
-  return builder.create<tensor::InsertOp>(op.getLoc(), vjp_value, space,
-                                          op.indices());
 }
 
 Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,

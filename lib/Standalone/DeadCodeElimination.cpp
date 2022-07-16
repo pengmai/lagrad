@@ -3,6 +3,7 @@
  * iteration arguments of scf.for ops will unfortunately persist.
  */
 #include "Standalone/Passes.h"
+#include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -20,12 +21,6 @@
 using namespace mlir;
 
 namespace {
-bool isFloatOrFloatTensor(Type typ) {
-  return typ.isa<FloatType>() ||
-         (typ.isa<RankedTensorType>() &&
-          typ.dyn_cast<RankedTensorType>().getElementType().isa<FloatType>());
-}
-
 /* Collect ops in the body of the for loop*/
 void BFS(ValueRange start, llvm::SmallDenseSet<Value> &liveValues) {
   SmallVector<Value> frontier{start};
@@ -51,11 +46,23 @@ void BFS(ValueRange start, llvm::SmallDenseSet<Value> &liveValues) {
 void populateLiveBodyArgs(scf::ForOp forOp,
                           llvm::SmallDenseSet<Value> &liveValues) {
   auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  for (auto it : llvm::zip(yieldOp.results(), forOp.getResults())) {
+  for (auto it : llvm::zip(yieldOp.results(), forOp.getResults(),
+                           forOp.getRegionIterArgs())) {
     auto yieldResult = std::get<0>(it);
     auto result = std::get<1>(it);
+    auto iterArg = std::get<2>(it);
     if (!result.use_empty()) {
       BFS(yieldResult, liveValues);
+    } else {
+      SmallVector<Value> frontier{iterArg};
+      ValueSet derivedFromIterArg;
+      runTopDownDFS(frontier, derivedFromIterArg);
+      for (auto derived : derivedFromIterArg) {
+        if (dyn_cast_or_null<memref::BufferCastOp>(derived.getDefiningOp())) {
+          liveValues.insert(iterArg);
+          break;
+        }
+      }
     }
   }
   // llvm::errs() << "***LIVE VALUES***:\n";

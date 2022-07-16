@@ -7,6 +7,7 @@ PREPROCESS=\
 -canonicalize\
 -inline\
 -linalg-canonicalize\
+-standalone-dce\
 -symbol-dce\
 -convert-elementwise-to-linalg\
 -convert-linalg-triangular-to-loops\
@@ -62,8 +63,8 @@ tmp/hand_to_pose_params.o: $(MLIR_SRC)/hand/to_pose_params.mlir $(OPT)
 tmp/hand_get_posed_relatives.o: $(MLIR_SRC)/hand/get_posed_relatives.mlir $(OPT)
 	$(OPT) $(MLIR_SRC)/hand/get_posed_relatives.mlir $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_get_posed_relatives.o
 
-# RELSTOABS=$(MLIR_SRC)/hand/DELETEME_rels_to_abs_incorrect.mlir
 RELSTOABS=$(MLIR_SRC)/hand/relatives_to_absolutes.mlir
+# RELSTOABS=$(MLIR_SRC)/hand/relatives_to_absolutes_scratch.mlir
 tmp/hand_relatives_to_absolutes.o: $(RELSTOABS) $(OPT)
 	$(OPT) $(RELSTOABS) $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) | $(MLIR_TO_OBJ) -o tmp/hand_relatives_to_absolutes.o
 

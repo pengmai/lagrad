@@ -614,8 +614,8 @@ Value reverseIfOpV2(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
            it++) {
         auto &op = **it;
         if (auto yieldOp = dyn_cast_or_null<scf::YieldOp>(&op)) {
-          assert(yieldOp.getNumOperands() == 1 &&
-                 "expected scf.yield in scf.if to have one operand");
+          // assert(yieldOp.getNumOperands() == 1 &&
+          //        "expected scf.yield in scf.if to have one operand");
           Value operand = yieldOp.getOperand(0);
           env[operand] = vjp_value;
           rewriter.setInsertionPoint(builder.getBlock(),

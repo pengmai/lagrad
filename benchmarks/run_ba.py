@@ -72,7 +72,6 @@ def main(args):
     n, m, p = mat.group(1), mat.group(2), mat.group(3)
     config = {
         "data_file": f"benchmarks/data/ba/{data_file}",
-        "results_file": f"benchmarks/results/ba/sparsemat_{data_file}",
         "nCamParams": 11,
         "n": n,
         "m": m,
@@ -86,6 +85,7 @@ def main(args):
     mlir_template = mlir_env.get_template("ba.mlir")
     enzyme_template = mlir_env.get_template("ba_enzyme_reproj.mlir")
     enzyme_w_template = mlir_env.get_template("ba_enzyme_w.mlir")
+    enzyme_c_template = c_env.get_template("enzyme_ba.c")
     driver_template = c_env.get_template("ba_driver.c")
     helper_template = c_env.get_template("mlir_c_abi.c")
     if args.print:
@@ -98,6 +98,7 @@ def main(args):
         "enzyme_ba_reproj.o",
         emit="obj",
     )
+    compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "enzyme_c_ba.o")
     compile_mlir_to_enzyme(
         enzyme_w_template.render(**config).encode("utf-8"), "enzyme_ba_w.o", emit="obj"
     )
@@ -108,21 +109,19 @@ def main(args):
             "ba_mlir.o",
             "enzyme_ba_reproj.o",
             "enzyme_ba_w.o",
+            "enzyme_c_ba.o",
             "ba_driver.o",
             "mlir_c_abi.o",
         ],
         "ba_driver.out",
         link_runner_utils=True,
     ).decode("utf-8")
-    print(stdout)
-    return
-    outfile = None
+    # print(stdout)
+    # return
+    # outfile = None
     try:
         lines = stdout.splitlines()
-        keys = [
-            "lagrad_jacobian",
-            "enzyme_jacobian",
-        ]
+        keys = ["lagrad_jacobian", "enzyme_mlir_jacobian", "enzyme_c_jacobian"]
         assert len(keys) == len(
             lines
         ), f"expected # of apps to match {len(keys)} vs {len(lines)}"

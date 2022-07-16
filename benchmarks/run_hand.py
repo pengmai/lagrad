@@ -24,9 +24,10 @@ def main(args):
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
     enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
     lagrad_template = mlir_env.get_template("hand.mlir")
+    # lagrad_template = mlir_env.get_template("hand_differentiated.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
     # data_file = args.data_file
-    data_file = "benchmarks/data/hand/simple_small/hand1_t26_c100.txt"
+    data_file = "benchmarks/data/hand/simple_small/hand8_t26_c6400.txt"
     with open(data_file) as f:
         npts, ntheta = [int(x) for x in f.readline().split()]
         assert ntheta == 26, "Unsupported value for ntheta"
@@ -89,6 +90,9 @@ def main(args):
         )
         print(results)
         print(results[1:].mean())
+        print(
+            f"Speedup: {results[1:].mean()['Enzyme/MLIR'] / results[1:].mean()['LAGrad']}"
+        )
 
         # TODO: Meant to serialize the output results to a file.
         # if outfile:
