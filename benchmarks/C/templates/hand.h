@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-  int n_bones, n_vertices;
+typedef struct HandModel {
+  int n_bones, n_vertices, n_triangles;
   const char **bone_names;
   int *parents;
   double *base_relatives, *inverse_base_absolutes, *base_positions, *weights;
@@ -17,7 +17,7 @@ typedef struct {
   bool is_mirrored;
 } HandModel;
 
-typedef struct {
+typedef struct HandInput {
   HandModel model;
   int *correspondences;
   int n_theta, n_pts;
@@ -28,6 +28,7 @@ typedef struct {
 struct MatrixConverted {
   Matrix *base_relatives, *inverse_base_absolutes, *base_positions, *weights,
       *points;
+  Triangle *triangles;
 };
 
 void transpose_in_place(double *matrix, size_t n) {
@@ -66,6 +67,16 @@ Matrix ptr_to_matrix(double *data, size_t m, size_t n) {
 
   Matrix matrix = {.nrows = m, .ncols = n, .data = mdata};
   return matrix;
+}
+
+Triangle *ptr_to_triangles(int *data, size_t num_triangles) {
+  Triangle *triangles = (Triangle *)malloc(num_triangles * sizeof(Triangle));
+  for (size_t tri = 0; tri < num_triangles; tri++) {
+    triangles[tri].verts[0] = data[tri * 3 + 0];
+    triangles[tri].verts[1] = data[tri * 3 + 1];
+    triangles[tri].verts[2] = data[tri * 3 + 2];
+  }
+  return triangles;
 }
 
 void free_matrix_array(Matrix *matrices, size_t num_matrices) {
@@ -220,6 +231,7 @@ HandModel read_hand_model(const char *model_path, bool transpose) {
 
   HandModel model = {.n_bones = n_bones,
                      .n_vertices = n_vertices,
+                     .n_triangles = n_triangles,
                      .bone_names = bone_names,
                      .parents = parents,
                      .base_relatives = base_relatives,

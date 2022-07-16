@@ -513,16 +513,175 @@ func @mlir_hand_objective(
   return %err : tensor<{{npts}}x3xf64>
 }
 
+func @mlir_hand_objective_complicated(
+  %theta: tensor<{{ntheta}}xf64>,
+  %us: tensor<{{npts}}x2xf64>,
+  %parents: tensor<{{nbones}}xi32>,
+  %base_relatives: tensor<{{nbones}}x4x4xf64>,
+  %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
+  %base_positions: tensor<{{nverts}}x4xf64>,
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>,
+  %triangles: tensor<{{ntriangles}}x3xi32>,
+  %correspondences: tensor<{{npts}}xi32>,
+  %points: tensor<{{npts}}x3xf64>
+) -> tensor<{{npts}}x3xf64> {
+  %pose_params = call @mto_pose_params(%theta) : (tensor<{{ntheta}}xf64>) -> tensor<{{nbones + 3}}x3xf64>
+  // Inlined get_skinned_vertex_positions
+  %relatives = call @mget_posed_relatives(%base_relatives, %pose_params) : (tensor<{{nbones}}x4x4xf64>, tensor<{{nbones + 3}}x3xf64>) -> tensor<{{nbones}}x4x4xf64>
+  %absolutes = call @mrelatives_to_absolutes(%relatives, %parents) : (tensor<{{nbones}}x4x4xf64>, tensor<{{nbones}}xi32>) -> tensor<{{nbones}}x4x4xf64>
+  %transforms_init = arith.constant dense<0.0> : tensor<{{nbones}}x4x4xf64>
+  %transforms = linalg.batch_matmul ins(%inverse_base_absolutes, %absolutes : tensor<{{nbones}}x4x4xf64>, tensor<{{nbones}}x4x4xf64>) outs(%transforms_init: tensor<{{nbones}}x4x4xf64>) -> tensor<{{nbones}}x4x4xf64>
+
+  %positions_init = arith.constant dense<0.0> : tensor<{{nverts}}x3xf64>
+  %zero = arith.constant 0.0 : f64
+  %curr_positions_init = arith.constant dense<0.0> : tensor<{{nverts}}x4xf64>
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %cb = arith.constant {{nbones}} : index
+  %positions = scf.for %iv = %c0 to %cb step %c1 iter_args(%positions_i = %positions_init) -> tensor<{{nverts}}x3xf64> {
+    %transforms_slice = tensor.extract_slice %transforms[%iv, 0, 0] [1, 4, 4] [1, 1, 1] : tensor<{{nbones}}x4x4xf64> to tensor<4x4xf64>
+    %curr_positions = linalg.generic
+      {
+        doc = "Column-major matrix multiplication",
+        indexing_maps = [
+          affine_map<(d0, d1, d2) -> (d2, d0)>,
+          affine_map<(d0, d1, d2) -> (d1, d2)>,
+          affine_map<(d0, d1, d2) -> (d1, d0)>
+        ],
+        iterator_types = ["parallel", "parallel", "reduction"]
+      }
+      ins(%transforms_slice, %base_positions : tensor<4x4xf64>, tensor<{{nverts}}x4xf64>)
+      outs(%curr_positions_init : tensor<{{nverts}}x4xf64>) {
+    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+      %0 = arith.mulf %arg0, %arg1 : f64
+      %1 = arith.addf %0, %arg2 : f64
+      linalg.yield %1 : f64
+    } -> tensor<{{nverts}}x4xf64>
+    %cp_slice = tensor.extract_slice %curr_positions[0, 0] [{{nverts}}, 3] [1, 1] : tensor<{{nverts}}x4xf64> to tensor<{{nverts}}x3xf64>
+    %weight_slice = tensor.extract_slice %weights[0, %iv] [{{nverts}}, 1] [1, 1] : tensor<{{nverts}}x{{nbones}}xf64> to tensor<{{nverts}}xf64>
+
+    %positions_next = linalg.generic
+      {
+        indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>],
+        iterator_types = ["parallel", "parallel"]
+      }
+      ins(%cp_slice, %weight_slice : tensor<{{nverts}}x3xf64>, tensor<{{nverts}}xf64>)
+      outs(%positions_i : tensor<{{nverts}}x3xf64>) {
+    ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+      %0 = arith.mulf %arg0, %arg1 : f64
+      %1 = arith.addf %0, %arg2 : f64
+      linalg.yield %1 : f64
+    } -> tensor<{{nverts}}x3xf64>
+    scf.yield %positions_next : tensor<{{nverts}}x3xf64>
+  }
+  // return %positions : tensor<{{nverts}}x3xf64>
+
+  // Inlined apply_global_transform
+  %angle_axis = tensor.extract_slice %pose_params[0, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %pose_slice = tensor.extract_slice %pose_params[1, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %pose_slice_2 = tensor.extract_slice %pose_params[2, 0] [1, 3] [1, 1] : tensor<{{nbones + 3}}x3xf64> to tensor<3xf64>
+  %R_0 = call @mangle_axis_to_rotation_matrix(%angle_axis) : (tensor<3xf64>) -> tensor<3x3xf64>
+
+  %R_space = arith.constant dense<0.0> : tensor<3x3xf64>
+  %R = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>],
+      iterator_types = ["parallel", "parallel"]
+    }
+    ins(%R_0, %pose_slice : tensor<3x3xf64>, tensor<3xf64>)
+    outs(%R_space : tensor<3x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.mulf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  } -> tensor<3x3xf64>
+
+  %tmp_init = arith.constant dense<0.0> : tensor<{{nverts}}x3xf64>
+  %tmp = linalg.generic
+    {
+      doc = "Column-major matrix multiplication",
+      indexing_maps = [
+        affine_map<(d0, d1, d2) -> (d2, d0)>,
+        affine_map<(d0, d1, d2) -> (d1, d2)>,
+        affine_map<(d0, d1, d2) -> (d1, d0)>
+      ],
+      iterator_types = ["parallel", "parallel", "reduction"]
+    }
+    ins(%R, %positions : tensor<3x3xf64>, tensor<{{nverts}}x3xf64>)
+    outs(%tmp_init : tensor<{{nverts}}x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.mulf %arg0, %arg1 : f64
+    %1 = arith.addf %0, %arg2 : f64
+    linalg.yield %1 : f64
+  } -> tensor<{{nverts}}x3xf64>
+
+  %vertex_positions = linalg.generic
+    {
+      indexing_maps = [
+        affine_map<(d0, d1) -> (d0, d1)>,
+        affine_map<(d0, d1) -> (d1)>,
+        affine_map<(d0, d1) -> (d0, d1)>
+      ],
+      iterator_types = ["parallel", "parallel"]
+    }
+    ins(%tmp, %pose_slice_2 : tensor<{{nverts}}x3xf64>, tensor<3xf64>)
+    outs(%tmp_init : tensor<{{nverts}}x3xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+    %0 = arith.addf %arg0, %arg1 : f64
+    linalg.yield %0 : f64
+  } -> tensor<{{nverts}}x3xf64>
+  // return %vertex_positions : tensor<{{nverts}}x3xf64>
+  // End inline apply_global_transform
+  // End inline get_skinned_vertex_positions
+
+  %err_init = linalg.init_tensor [{{npts}}, 3] : tensor<{{npts}}x3xf64>
+  %one = arith.constant 1.0 : f64
+  %c2 = arith.constant 2 : index
+  %c3 = arith.constant 3 : index
+  %cpts = arith.constant {{npts}} : index
+  %err = scf.for %iv = %c0 to %cpts step %c1 iter_args(%e_outer = %err_init) -> tensor<{{npts}}x3xf64> {
+    %err_partial = scf.for %jv = %c0 to %c3 step %c1 iter_args(%e_inner = %e_outer) -> tensor<{{npts}}x3xf64> {
+      %arg0 = tensor.extract %points[%iv, %jv] : tensor<{{npts}}x3xf64>
+      %corrs_32 = tensor.extract %correspondences[%iv] : tensor<{{npts}}xi32>
+      %corrs = arith.index_cast %corrs_32 : i32 to index
+      %u_0 = tensor.extract %us[%iv, %c0] : tensor<{{npts}}x2xf64>
+      %u_1 = tensor.extract %us[%iv, %c1] : tensor<{{npts}}x2xf64>
+      %usum = arith.addf %u_0, %u_1 : f64
+      %onemu = arith.subf %one, %usum : f64
+      %verts_0_32 = tensor.extract %triangles[%corrs, %c0] : tensor<{{ntriangles}}x3xi32>
+      %verts_1_32 = tensor.extract %triangles[%corrs, %c1] : tensor<{{ntriangles}}x3xi32>
+      %verts_2_32 = tensor.extract %triangles[%corrs, %c2] : tensor<{{ntriangles}}x3xi32>
+      %verts_0 = arith.index_cast %verts_0_32 : i32 to index
+      %verts_1 = arith.index_cast %verts_1_32 : i32 to index
+      %verts_2 = arith.index_cast %verts_2_32 : i32 to index
+      %vp0 = tensor.extract %vertex_positions[%verts_0, %jv] : tensor<{{nverts}}x3xf64>
+      %vp1 = tensor.extract %vertex_positions[%verts_1, %jv] : tensor<{{nverts}}x3xf64>
+      %vp2 = tensor.extract %vertex_positions[%verts_2, %jv] : tensor<{{nverts}}x3xf64>
+
+      %hand_point_coord0 = arith.mulf %u_0, %vp0 : f64
+      %hand_point_coord1 = arith.mulf %u_1, %vp1 : f64
+      %hand_point_coord2 = arith.mulf %onemu, %vp2 : f64
+      %hand_point_coord3 = arith.addf %hand_point_coord0, %hand_point_coord1 : f64
+      %hand_point_coord4 = arith.addf %hand_point_coord3, %hand_point_coord2 : f64
+
+      %0 = arith.subf %arg0, %hand_point_coord4 : f64
+      %e_next = tensor.insert %0 into %e_inner[%iv, %jv] : tensor<{{npts}}x3xf64>
+      scf.yield %e_next : tensor<{{npts}}x3xf64>
+    }
+    scf.yield %err_partial : tensor<{{npts}}x3xf64>
+  }
+  return %err : tensor<{{npts}}x3xf64>
+}
+
 func @lagrad_hand_objective(
-  %theta : tensor<{{ntheta}}xf64>,
+  %theta: tensor<{{ntheta}}xf64>,
   %parents: tensor<{{nbones}}xi32>,
   %base_relatives: tensor<{{nbones}}x4x4xf64>,
   %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
   %base_positions: tensor<{{nverts}}x4xf64>,
   %weights: tensor<{{nverts}}x{{nbones}}xf64>,
   %correspondences: tensor<{{npts}}xi32>,
-  %points : tensor<{{npts}}x3xf64>,
-  %g : tensor<{{npts}}x3xf64>
+  %points: tensor<{{npts}}x3xf64>,
+  %g: tensor<{{npts}}x3xf64>
 ) -> tensor<{{ntheta}}xf64> {
   %f = constant @mlir_hand_objective : (
     tensor<{{ntheta}}xf64>,
@@ -576,4 +735,81 @@ func @lagrad_hand_objective(
     tensor<{{npts}}x3xf64>
   ) -> tensor<{{ntheta}}xf64>
   return %dtheta : tensor<{{ntheta}}xf64>
+}
+
+func @lagrad_hand_objective_complicated(
+  %theta: tensor<{{ntheta}}xf64>,
+  %us: tensor<{{npts}}x2xf64>,
+  %parents: tensor<{{nbones}}xi32>,
+  %base_relatives: tensor<{{nbones}}x4x4xf64>,
+  %inverse_base_absolutes: tensor<{{nbones}}x4x4xf64>,
+  %base_positions: tensor<{{nverts}}x4xf64>,
+  %weights: tensor<{{nverts}}x{{nbones}}xf64>,
+  %triangles: tensor<{{ntriangles}}x3xi32>,
+  %correspondences: tensor<{{npts}}xi32>,
+  %points: tensor<{{npts}}x3xf64>,
+  %g: tensor<{{npts}}x3xf64>
+) -> (tensor<{{ntheta}}xf64>, tensor<{{npts}}x2xf64>) {
+  %f = constant @mlir_hand_objective_complicated : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{npts}}x2xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{ntriangles}}x3xi32>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{npts}}x3xf64>
+  %df = standalone.grad %f {of = [0, 1], grad_signal = true} : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{npts}}x2xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{ntriangles}}x3xi32>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>
+  ) -> tensor<{{npts}}x3xf64>, (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{npts}}x2xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{ntriangles}}x3xi32>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>,
+    tensor<{{npts}}x3xf64>
+  ) -> (tensor<{{ntheta}}xf64>, tensor<{{npts}}x2xf64>)
+  %res:2 = call_indirect %df(
+    %theta,
+    %us,
+    %parents,
+    %base_relatives,
+    %inverse_base_absolutes,
+    %base_positions,
+    %weights,
+    %triangles,
+    %correspondences,
+    %points,
+    %g
+  ) : (
+    tensor<{{ntheta}}xf64>,
+    tensor<{{npts}}x2xf64>,
+    tensor<{{nbones}}xi32>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nbones}}x4x4xf64>,
+    tensor<{{nverts}}x4xf64>,
+    tensor<{{nverts}}x{{nbones}}xf64>,
+    tensor<{{ntriangles}}x3xi32>,
+    tensor<{{npts}}xi32>,
+    tensor<{{npts}}x3xf64>,
+    tensor<{{npts}}x3xf64>
+  ) -> (tensor<{{ntheta}}xf64>, tensor<{{npts}}x2xf64>)
+  return %res#0, %res#1 : tensor<{{ntheta}}xf64>, tensor<{{npts}}x2xf64>
 }

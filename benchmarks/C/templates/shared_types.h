@@ -29,12 +29,12 @@ typedef struct _GMMCompressedGrad {
   F64Descriptor2D dmeans, dqs, dls;
 } GMMCompressedGrad;
 
-typedef struct {
+typedef struct Matrix {
   int nrows;
   int ncols;
   double *data;
 } Matrix;
 
-typedef struct {
+typedef struct Triangle {
   int verts[3];
 } Triangle;

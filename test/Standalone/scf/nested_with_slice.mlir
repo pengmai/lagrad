@@ -10,11 +10,19 @@ func @nested_with_slice(%A: tensor<10x4xf64>, %B: tensor<6x4xf64>) -> f64 {
   %c6 = arith.constant 6 : index
   %c10 = arith.constant 10 : index
   %zero = arith.constant 0.0 : f64
-  %mt_0 = linalg.init_tensor [6] : tensor<6xf64>
-  %mt_space = linalg.fill(%zero, %mt_0) : f64, tensor<6xf64> -> tensor<6xf64>
+  %mt_space = linalg.init_tensor [6] : tensor<6xf64>
   %sumexp_space = arith.constant dense<0.0> : tensor<f64>
   %zerod_space = arith.constant dense<0.0> : tensor<f64>
   %final = scf.for %iv = %c0 to %c10 step %c1 iter_args(%final_iv = %zero) -> f64 {
+    // %main_term = linalg.generic {indexing_maps = [#id_1d], iterator_types = ["parallel"]} outs(%mt_space : tensor<6xf64>) {
+    // ^bb0(%arg0: f64):
+    //   %jv = linalg.index 0 : index
+    //   %A_slice = tensor.extract_slice %A[%iv, 0] [1, 4] [1, 1] : tensor<10x4xf64> to tensor<4xf64>
+    //   %B_slice = tensor.extract_slice %B[%jv, 0] [1, 4] [1, 1] : tensor<6x4xf64> to tensor<4xf64>
+    //   %dotted = linalg.dot ins(%A_slice, %B_slice : tensor<4xf64>, tensor<4xf64>) outs(%zerod_space : tensor<f64>) -> tensor<f64>
+    //   %dval = tensor.extract %dotted[] : tensor<f64>    
+    //   linalg.yield %dval : f64
+    // } -> tensor<6xf64>
     %main_term = scf.for %jv = %c0 to %c6 step %c1 iter_args(%mt_iter = %mt_space) -> tensor<6xf64> {
       %A_slice = tensor.extract_slice %A[%iv, 0] [1, 4] [1, 1] : tensor<10x4xf64> to tensor<4xf64>
       %B_slice = tensor.extract_slice %B[%jv, 0] [1, 4] [1, 1] : tensor<6x4xf64> to tensor<4xf64>

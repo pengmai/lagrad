@@ -197,36 +197,31 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
             }
             if (auto rtt =
                     tbrVal.getType().dyn_cast_or_null<RankedTensorType>()) {
-              auto slice_layout =
-                  getRankReduceSubviewLayout(rtt.getRank(), rewriter);
-              auto resultType = MemRefType::get(
-                  rtt.getShape(), rtt.getElementType(), slice_layout);
               auto rctx = rewriter.getContext();
               auto intToAttr = [&](int64_t i) {
                 return IntegerAttr::get(IntegerType::get(rctx, 64), i);
               };
-              SmallVector<Attribute> staticOffsets;
-              SmallVector<Attribute> staticSizes;
-              SmallVector<Attribute> staticStrides;
+              SmallVector<OpFoldResult> mixedOffsets;
+              SmallVector<OpFoldResult> mixedSizes;
+              SmallVector<OpFoldResult> mixedStrides;
               for (size_t i = 0; i < induction_vars.size(); i++) {
-                staticOffsets.push_back(
-                    IntegerAttr::get(IntegerType::get(rctx, 64),
-                                     -9223372036854775808ULL)); // dynamic size
-                staticSizes.push_back(intToAttr(1));
-                staticStrides.push_back(intToAttr(1));
+                mixedOffsets.push_back(induction_vars[i]);
+                mixedSizes.push_back(intToAttr(1));
+                mixedStrides.push_back(intToAttr(1));
               }
               for (int i = 0; i < rtt.getRank(); i++) {
-                staticOffsets.push_back(intToAttr(0));
-                staticSizes.push_back(intToAttr(rtt.getShape()[i]));
-                staticStrides.push_back(intToAttr(1));
+                mixedOffsets.push_back(intToAttr(0));
+                mixedSizes.push_back(intToAttr(rtt.getShape()[i]));
+                mixedStrides.push_back(intToAttr(1));
               }
-              auto staticOffset = ArrayAttr::get(rctx, staticOffsets);
-              auto staticSize = ArrayAttr::get(rctx, staticSizes);
-              auto staticStride = ArrayAttr::get(rctx, staticStrides);
+              auto resultType =
+                  memref::SubViewOp::inferRankReducedResultType(
+                      rtt.getRank(), cache.getType().cast<MemRefType>(),
+                      mixedOffsets, mixedSizes, mixedStrides)
+                      .cast<MemRefType>();
               auto view = builder.create<memref::SubViewOp>(
-                  loc, resultType, cache,
-                  /*dynamic shapes=*/induction_vars, ValueRange(), ValueRange(),
-                  /*staticShapes=*/staticOffset, staticSize, staticStride);
+                  loc, resultType, cache, mixedOffsets, mixedSizes,
+                  mixedStrides);
               ctx.debug_names[view] =
                   "<read view for caching " + ctx.debug_names[tbrVal] + ">";
               auto casted = builder.create<memref::CastOp>(

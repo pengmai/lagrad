@@ -265,7 +265,7 @@ if not DISABLE_HAND:
     )
     mlirlib.lagrad_hand_objective_complicated.restype = HandComplicatedGrad
 
-DISABLE_LSTM = True
+DISABLE_LSTM = False
 if not DISABLE_LSTM:
     mlirlib.lagrad_lstm_model.argtypes = (
         memref_2d + memref_2d + memref_1d + memref_1d + memref_1d

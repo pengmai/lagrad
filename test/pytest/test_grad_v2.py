@@ -7,7 +7,6 @@ Some files are missing from transferring computers.
 """
 
 import pytest
-import warnings
 import os.path as osp
 import numpy as np
 from jinja2 import Template
@@ -267,10 +266,6 @@ def test_nested_pow_scalar():
 
 
 def test_nested_pow_tensor():
-    warnings.warn(
-        "nested pow test has a subview read issue, need to enable new cache allocations to get the right results"
-    )
-    return
     expected = np.ones(4) * 12 * 1.3 ** 11
     assert np.array(
         extract_1d(jit_file(f"{MLIR_FILES}/cache/nested_pow_tensor.mlir"))

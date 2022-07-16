@@ -90,6 +90,9 @@ public:
       return failure();
     }
 
+    // the getRankReduceSubviewLayout is deprecated but we want to continue
+    // using it to ensure that the resulting layout is fully dynamic for
+    // compatibility with our partial bufferization.
     auto slice_layout = getRankReduceSubviewLayout(resultRank, rewriter);
     auto resultType =
         MemRefType::get(resultTensorType.getShape(),
@@ -134,14 +137,12 @@ public:
   matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     // Update the buffer in place. This is potentially a dangerous operation.
-    auto destType = getTypeConverter()
-                        ->convertType(adaptor.source().getType())
-                        .dyn_cast<MemRefType>();
-
-    auto slice_layout =
-        getRankReduceSubviewLayout(op.getSourceType().getRank(), rewriter);
-    auto sliceType = MemRefType::get(destType.getShape(),
-                                     destType.getElementType(), slice_layout);
+    auto sliceType =
+        memref::SubViewOp::inferRankReducedResultType(
+            op.getSourceType().getRank(),
+            adaptor.dest().getType().cast<MemRefType>(), op.getMixedOffsets(),
+            op.getMixedSizes(), op.getMixedStrides())
+            .cast<MemRefType>();
     // auto make_copy = op->getAttr("make_copy").dyn_cast_or_null<BoolAttr>();
     // if (make_copy && make_copy.getValue()) {
     //   auto dest = rewriter.create<memref::AllocOp>(
