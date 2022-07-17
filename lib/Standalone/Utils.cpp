@@ -22,10 +22,6 @@ bool isIntOrIntTensor(Type typ) {
 
 AffineMap getRankReduceSubviewLayout(int64_t resultRank,
                                      ConversionPatternRewriter &rewriter) {
-  // if (resultRank == 1) {
-  //   return AffineMap::get(
-  //       1, 1, rewriter.getAffineDimExpr(0) + rewriter.getAffineSymbolExpr(0));
-  // }
   AffineExpr expr;
   for (int64_t exprIdx = resultRank - 1; exprIdx >= 0; exprIdx--) {
     if (exprIdx == resultRank - 1) {

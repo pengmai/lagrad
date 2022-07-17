@@ -136,33 +136,22 @@ public:
   LogicalResult
   matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // Update the buffer in place. This is potentially a dangerous operation.
+    DominanceInfo dom;
+    bool hasUseAfter = false;
+
+    for (auto user : op.dest().getUsers()) {
+      if (dom.properlyDominates(op.getResult(), user)) {
+        hasUseAfter = true;
+      }
+    }
+
     auto sliceType =
         memref::SubViewOp::inferRankReducedResultType(
             op.getSourceType().getRank(),
             adaptor.dest().getType().cast<MemRefType>(), op.getMixedOffsets(),
             op.getMixedSizes(), op.getMixedStrides())
             .cast<MemRefType>();
-    // auto make_copy = op->getAttr("make_copy").dyn_cast_or_null<BoolAttr>();
-    // if (make_copy && make_copy.getValue()) {
-    //   auto dest = rewriter.create<memref::AllocOp>(
-    //       op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
-    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
-    //   auto subview = rewriter.create<memref::SubViewOp>(
-    //       op.getLoc(), sliceType, dest, op.getMixedOffsets(),
-    //       op.getMixedSizes(), op.getMixedStrides());
-
-    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(),
-    //   subview); rewriter.replaceOp(op, dest.getResult());
-    // } else {
-    //   auto subview = rewriter.create<memref::SubViewOp>(
-    //       op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
-    //       op.getMixedSizes(), op.getMixedStrides());
-    //   rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(),
-    //   subview); rewriter.replaceOp(op, adaptor.dest());
-    // }
-    auto insert_slice_in_place = true;
-    if (insert_slice_in_place) {
+    if (!hasUseAfter) {
       auto subview = rewriter.create<memref::SubViewOp>(
           op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
           op.getMixedSizes(), op.getMixedStrides());
