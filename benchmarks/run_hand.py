@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import re
 import os
+import pathlib
 from compile import (
     compile_mlir_to_enzyme,
     compile_c,
@@ -22,19 +23,32 @@ def main(args):
     # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
     enzyme_c_packed_template = c_env.get_template("enzyme_hand_packed.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
-    enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
+    # enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
+    enzyme_mlir_template = mlir_env.get_template("hand_complicated_enzyme.mlir")
     lagrad_template = mlir_env.get_template("hand.mlir")
     # lagrad_template = mlir_env.get_template("hand_differentiated.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
     # data_file = args.data_file
-    data_file = "benchmarks/data/hand/hand_complicated.txt"
+    # data_file = "benchmarks/data/hand/hand_complicated.txt"
+    enzyme_home = (
+        pathlib.Path.home()
+        / "Research"
+        / "Enzyme"
+        / "enzyme"
+        / "benchmarks"
+        / "hand"
+        / "data"
+        / "complicated_big"
+    )
     # data_file = "benchmarks/data/hand/complicated_small/hand1_t26_c100.txt"
+    data_file = enzyme_home / "hand1_t26_c100.txt"
+    model_dir = enzyme_home / "model"
     with open(data_file) as f:
         npts, ntheta = [int(x) for x in f.readline().split()]
         assert ntheta == 26, "Unsupported value for ntheta"
-
+    with open(model_dir / "vertices.txt") as f:
+        nverts = sum(1 for _ in f)
     nbones = 22
-    nverts = 544
     config = {
         "nbones": nbones,
         "ntheta": 26,
@@ -42,14 +56,15 @@ def main(args):
         "npts": npts,
         "ntriangles": 1084,
         "primal_shape": f"{npts}x3",
-        "model_dir": "benchmarks/data/hand/simple_small/model",
+        # "model_dir": "benchmarks/data/hand/complicated_small/model",
+        "model_dir": model_dir,
         "data_file": data_file,
         "complicated": True,
     }
 
     if args.print:
-        # print(enzyme_mlir_template.render(**config))
-        print(lagrad_template.render(**config))
+        print(enzyme_mlir_template.render(**config))
+        # print(lagrad_template.render(**config))
         return
 
     compile_mlir_to_enzyme(
@@ -84,6 +99,7 @@ def main(args):
         keys = [
             "LAGrad",
             "Enzyme/MLIR",
+            # "Enzyme/C",
         ]
         assert len(keys) == len(
             lines
@@ -96,13 +112,6 @@ def main(args):
         print(
             f"Speedup: {results[1:].mean()['Enzyme/MLIR'] / results[1:].mean()['LAGrad']}"
         )
-
-        # TODO: Meant to serialize the output results to a file.
-        # if outfile:
-        #     serialized_config = config.copy()
-        #     # results_dict = {"config": serialized_config, "results": results.to_dict()}
-        #     # with open(outfile, "w") as f:
-        #     #     json.dump(results_dict, f)
         return results
     except (json.JSONDecodeError, Exception):
         print("Failed to parse output")

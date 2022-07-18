@@ -88,7 +88,7 @@ void free_matrix_array(Matrix *matrices, size_t num_matrices) {
 
 HandModel read_hand_model(const char *model_path, bool transpose) {
   const char DELIMITER = ':';
-  char filename[80];
+  char filename[100];
   char *currentline = (char *)malloc(100 * sizeof(char));
   FILE *fp;
 

@@ -188,13 +188,15 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
     return output.decode("utf-8")
 
 
-def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
+def compile_mlir_to_enzyme(contents, output="", emit="llvm", hand_complicated=False):
     def replace_hand_optimization(lines: bytes):
         # warnings.warn(
         #     "Running hand tracking memset_pattern replacement for Enzyme/MLIR"
         # )
         memset_pattern = "@.memset_pattern = private unnamed_addr constant [3 x double] [double 1.000000e+00, double 1.000000e+00, double 1.000000e+00], align 16"
         memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %63, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
+        if hand_complicated:
+            memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %77, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
 
         def process_line(line: str):
             if line.lstrip().startswith("call void @memset_pattern16"):
@@ -369,7 +371,9 @@ def link_and_run(
             for kv in usage.split(",")
         }
     p.wait()
-    assert p.returncode == 0, f"Process exited with nonzero exit. stdout: {p.stdout.read()} stderr: {p.stderr.read()}"
+    assert (
+        p.returncode == 0
+    ), f"Process exited with nonzero exit. stdout: {p.stdout.read()} stderr: {p.stderr.read()}"
     stdout = p.stdout.read()
     if monitor:
         return stdout, usage_dict

@@ -1,6 +1,6 @@
-# An out-of-tree MLIR dialect
+# LAGrad
 
-This is an example of an out-of-tree [MLIR](https://mlir.llvm.org/) dialect along with a standalone `opt`-like tool to operate on that dialect.
+An MLIR-based source-to-source automatic differentiation system.
 
 ## Building
 
