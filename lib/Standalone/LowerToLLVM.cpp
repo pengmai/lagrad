@@ -60,10 +60,10 @@ public:
 
     auto sym = getOrInsertAutodiffDecl(rewriter, op, floatType);
     auto const_global = getOrInsertEnzymeConstDecl(rewriter, op);
-    auto llvmI32PtrTy =
-        LLVM::LLVMPointerType::get(IntegerType::get(op->getContext(), 32));
+    auto llvmI8PtrTy =
+        LLVM::LLVMPointerType::get(IntegerType::get(op->getContext(), 8));
     auto enzyme_const_addr = rewriter.create<LLVM::AddressOfOp>(
-        op->getLoc(), llvmI32PtrTy, const_global);
+        op->getLoc(), llvmI8PtrTy, const_global);
 
     // Following the autograd-style API, we want to take the result of the diff
     // operator and replace it with a call to the Enzyme API
@@ -78,7 +78,9 @@ public:
       assert(user && "Expected user to be a CallIndirectOp");
       // Copy over the arguments for the op
       auto arguments = SmallVector<Value>();
-      arguments.push_back(operands[0]);
+      auto castedPrimal = rewriter.create<LLVM::BitcastOp>(
+          op->getLoc(), llvmI8PtrTy, operands[0]);
+      arguments.push_back(castedPrimal);
 
       auto opIt = user->getOperands().drop_front(1);
       size_t arg_index = 0;
@@ -177,11 +179,11 @@ private:
 
     PatternRewriter::InsertionGuard insertGuard(rewriter);
     rewriter.setInsertionPointToStart(moduleOp.getBody());
-    auto llvmI32Ty = IntegerType::get(context, 32);
-    rewriter.create<LLVM::GlobalOp>(moduleOp.getLoc(), llvmI32Ty,
+    auto shortTy = IntegerType::get(context, 8);
+    rewriter.create<LLVM::GlobalOp>(moduleOp.getLoc(), shortTy,
                                     /*isConstant=*/true,
                                     LLVM::Linkage::Linkonce, "enzyme_const",
-                                    IntegerAttr::get(llvmI32Ty, 0));
+                                    IntegerAttr::get(shortTy, 0));
     return SymbolRefAttr::get(context, "enzyme_const");
   }
 
@@ -195,12 +197,10 @@ private:
     }
 
     // Create the function declaration for __enzyme_autodiff
-    LLVMTypeConverter typeConverter(context);
-    auto llvmOriginalFuncType =
-        typeConverter.packFunctionResults(op->getOperand(0).getType());
+    auto voidPtrType = LLVM::LLVMPointerType::get(IntegerType::get(context, 8));
 
-    auto llvmFnType = LLVM::LLVMFunctionType::get(
-        returnType, llvmOriginalFuncType, /*isVarArg=*/true);
+    auto llvmFnType =
+        LLVM::LLVMFunctionType::get(returnType, voidPtrType, /*isVarArg=*/true);
 
     // Insert the autodiff function into the body of the parent module.
     PatternRewriter::InsertionGuard insertGuard(rewriter);

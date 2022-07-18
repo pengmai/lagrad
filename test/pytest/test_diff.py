@@ -11,8 +11,17 @@ def test_square():
     assert extract_scalar(output.decode("utf-8")) == 6.0
 
 
+def test_twofuncs():
+    [line1, line2] = (
+        compile_pipeline(f"{MLIR_FILES}/diff/two_funcs.mlir")
+        .decode("utf-8")
+        .split("Unranked")[1:]
+    )
+    assert extract_scalar(line1) == 6
+    assert extract_scalar(line2) == 27
+
+
 def test_twoargs():
-    # TODO: No way to support derivatives w.r.t. multiple floats
     output = compile_pipeline(f"{MLIR_FILES}/twoargs.mlir")
     assert extract_scalar(output.decode("utf-8")) == 1.4
 
