@@ -182,7 +182,7 @@ void check_gmm_err(size_t d, size_t k, size_t n, double *dalphas,
   }
 
   int icf_sz = d * (d + 1) / 2;
-  int tri_sz = d * (d + 1) / 2;
+  int tri_sz = d * (d - 1) / 2;
   double qs_err = 0.0;
   for (size_t i = 0; i < k; i++) {
     for (size_t j = 0; j < d; j++) {
