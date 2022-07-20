@@ -12,9 +12,23 @@ from compile import (
     link_and_run,
 )
 from jinja2 import Environment, PackageLoader, select_autoescape
+from tqdm import tqdm
 
 mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescape())
 c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
+
+runtime_file = "detailed_results/hand_runtimes.tsv"
+enzyme_home = (
+    pathlib.Path.home()
+    / "Research"
+    / "Enzyme"
+    / "enzyme"
+    / "benchmarks"
+    / "hand"
+    / "data"
+    / "simple_small"
+)
+complicated = "complicated" in str(enzyme_home)
 
 
 def main(args):
@@ -23,25 +37,17 @@ def main(args):
     # enzyme_c_template = c_env.get_template("enzyme_hand_rowmaj.c")
     enzyme_c_packed_template = c_env.get_template("enzyme_hand_packed.c")
     enzyme_c_template = c_env.get_template("enzyme_hand.c")
-    # enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
-    enzyme_mlir_template = mlir_env.get_template("hand_complicated_enzyme.mlir")
+    enzyme_mlir_template = mlir_env.get_template("hand_enzyme.mlir")
+    # enzyme_mlir_template = mlir_env.get_template("hand_complicated_enzyme.mlir")
     lagrad_template = mlir_env.get_template("hand.mlir")
     # lagrad_template = mlir_env.get_template("hand_differentiated.mlir")
     # lagrad_template = mlir_env.get_template("hand_inlined.mlir")
     # data_file = args.data_file
-    # data_file = "benchmarks/data/hand/hand_complicated.txt"
-    enzyme_home = (
-        pathlib.Path.home()
-        / "Research"
-        / "Enzyme"
-        / "enzyme"
-        / "benchmarks"
-        / "hand"
-        / "data"
-        / "complicated_big"
-    )
+    # data_file = "benchmarks/data/hand/test.txt"
+
     # data_file = "benchmarks/data/hand/complicated_small/hand1_t26_c100.txt"
-    data_file = enzyme_home / "hand1_t26_c100.txt"
+    df = pd.read_csv(runtime_file, sep="\t", index_col=[0, 1])
+    data_file = enzyme_home / args.data_file
     model_dir = enzyme_home / "model"
     with open(data_file) as f:
         npts, ntheta = [int(x) for x in f.readline().split()]
@@ -59,12 +65,13 @@ def main(args):
         # "model_dir": "benchmarks/data/hand/complicated_small/model",
         "model_dir": model_dir,
         "data_file": data_file,
-        "complicated": True,
+        "complicated": complicated,
+        "measure_mem": False,
     }
 
     if args.print:
-        print(enzyme_mlir_template.render(**config))
-        # print(lagrad_template.render(**config))
+        # print(enzyme_mlir_template.render(**config))
+        print(lagrad_template.render(**config))
         return
 
     compile_mlir_to_enzyme(
@@ -80,7 +87,7 @@ def main(args):
     # )
     # compile_enzyme(enzyme_c_template.render(**config).encode("utf-8"), "hand_enzyme.o")
     compile_mlir(lagrad_template.render(**config).encode("utf-8"), "hand_lagrad.o")
-    stdout = link_and_run(
+    result = link_and_run(
         [
             "hand_driver.o",
             "mlir_c_abi.o",
@@ -92,10 +99,11 @@ def main(args):
         ],
         "hand_driver.out",
         link_runner_utils=True,
-    ).decode("utf-8")
+        monitor=False,
+    )
 
     try:
-        lines = stdout.splitlines()
+        lines = result.stdout.splitlines()
         keys = [
             "LAGrad",
             "Enzyme/MLIR",
@@ -107,15 +115,18 @@ def main(args):
         results = pd.DataFrame.from_dict(
             {key: json.loads(line) for key, line in zip(keys, lines)}
         )
-        print(results)
-        print(results[1:].mean())
-        print(
-            f"Speedup: {results[1:].mean()['Enzyme/MLIR'] / results[1:].mean()['LAGrad']}"
-        )
-        return results
-    except (json.JSONDecodeError, Exception):
+        for key in results.columns:
+            df.loc[args.data_file, key] = results[key].array
+        # print(results[1:].mean())
+        # print(
+        #     f"Speedup: {results[1:].mean()['Enzyme/MLIR'] / results[1:].mean()['LAGrad']}"
+        # )
+        df.to_csv(runtime_file, sep="\t")
+        return str(df.loc[args.data_file])
+    except (json.JSONDecodeError, Exception) as e:
+        print(e)
         print("Failed to parse output")
-        print(stdout)
+        print(result.stdout)
 
 
 def get_datasets(data_dir):
@@ -143,10 +154,11 @@ if __name__ == "__main__":
     data_dir = "benchmarks/data/hand/simple_small"
     datasets = get_datasets(data_dir)
 
-    # with tqdm(datasets) as t:
-    #     for dataset in t:
-    #         t.write(f"Benchmarking {dataset}")
-    #         args.data_file = f"{data_dir}/{dataset}"
-    #         t.write(main(args))
+    with tqdm(datasets) as t:
+        for dataset in t:
+            t.write(f"Benchmarking {dataset}")
+            args.data_file = dataset
+            t.write(main(args))
 
-    main(args)
+    # args.data_file = "hand1_t26_c100.txt"
+    # main(args)

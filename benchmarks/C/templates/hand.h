@@ -47,25 +47,13 @@ Matrix *ptr_to_matrices(double *data, size_t num_matrices, size_t m, size_t n) {
   for (size_t mat = 0; mat < num_matrices; mat++) {
     matrices[mat].nrows = m;
     matrices[mat].ncols = n;
-    matrices[mat].data = (double *)malloc(m * n * sizeof(double));
-    for (size_t i = 0; i < m; i++) {
-      for (size_t j = 0; j < n; j++) {
-        matrices[mat].data[i * n + j] = data[mat * stride + i * n + j];
-      }
-    }
+    matrices[mat].data = &data[mat * stride];
   }
   return matrices;
 }
 
 Matrix ptr_to_matrix(double *data, size_t m, size_t n) {
-  double *mdata = (double *)malloc(m * n * sizeof(double));
-  for (size_t i = 0; i < m; i++) {
-    for (size_t j = 0; j < n; j++) {
-      mdata[i * n + j] = data[i * n + j];
-    }
-  }
-
-  Matrix matrix = {.nrows = m, .ncols = n, .data = mdata};
+  Matrix matrix = {.nrows = m, .ncols = n, .data = data};
   return matrix;
 }
 
@@ -80,9 +68,9 @@ Triangle *ptr_to_triangles(int *data, size_t num_triangles) {
 }
 
 void free_matrix_array(Matrix *matrices, size_t num_matrices) {
-  for (size_t i = 0; i < num_matrices; i++) {
-    free(matrices[i].data);
-  }
+  // for (size_t i = 0; i < num_matrices; i++) {
+  //   free(matrices[i].data);
+  // }
   free(matrices);
 }
 
