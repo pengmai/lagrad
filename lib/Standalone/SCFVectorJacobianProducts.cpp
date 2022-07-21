@@ -1,6 +1,8 @@
 #include "Standalone/Utils.h"
+
 namespace mlir {
 using namespace mlir;
+using llvm::errs;
 void DEPRECATEDpopulatePrimalCache(
     scf::ForOp forOp, ConversionPatternRewriter &rewriter,
     SmallVector<std::pair<Value, Value>> &val_to_cached) {
@@ -18,7 +20,7 @@ void DEPRECATEDpopulatePrimalCache(
 
       // For LSTMs, we're representing the state as a 3d tensor.
       // if (rankedType.getRank() == 1 || rankedType.getRank() == 3) {
-      valuesToCache.push_back(iterOp);
+      // valuesToCache.push_back(iterOp);
       // }
     }
   }
@@ -133,6 +135,10 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
                      ? outer_env[input_operand]
                      : getZero(input_operand.getLoc(), input_operand, rewriter,
                                /*init=*/true);
+    if (auto *op = space.getDefiningOp()) {
+      op->setAttr("gradient space for " + ctx.debug_names[input_operand],
+                  UnitAttr::get(op->getContext()));
+    }
     iterArgsInit.push_back(space);
   }
 
@@ -151,35 +157,11 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
         SmallVector<Value> replacedPrimalIterArgs;
         Value vjp_op = nullptr;
 
-        SmallVector<Operation *> clonedOps;
         oldToCloned[forOp.getInductionVar()] = idx;
-        // Clone ops that don't depend on the region iter args
-        for (auto &pop : primalOps) {
-          if (pop.getNumResults() > 0) {
-            SmallVector<Value> frontier{pop.getResults()};
-            SmallVector<Value> caches;
-            ValueSet deps;
-            runBottomUpDFS(frontier, deps);
-            // Ignore any values that depend directly on the caches
-            for (auto pair : ctx.tbrCachedVals) {
-              caches.push_back(pair.second);
-            }
-            auto inDependSet = [&](Value v) { return deps.contains(v); };
-            if (!(llvm::any_of(forOp.getRegionIterArgs(), inDependSet) ||
-                  llvm::any_of(caches, inDependSet))) {
-              auto cloned = builder.clone(pop);
-              clonedOps.push_back(cloned);
-              for (auto tup :
-                   llvm::zip(pop.getResults(), cloned->getResults())) {
-                oldToCloned[std::get<0>(tup)] = std::get<1>(tup);
-                ctx.debug_names[std::get<1>(tup)] =
-                    "<cloned " + ctx.debug_names[std::get<0>(tup)] + ">";
-              }
-            }
-          }
-        }
-
         // Emit reads to the cached values
+        auto markAsCache = [&](Operation *op) {
+          op->setAttr("lagrad_cache", UnitAttr::get(op->getContext()));
+        };
         for (auto tbrPair : ctx.tbrCachedVals) {
           auto tbrVal = tbrPair.first;
           auto cache = tbrPair.second;
@@ -222,24 +204,50 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
               auto view = builder.create<memref::SubViewOp>(
                   loc, resultType, cache, mixedOffsets, mixedSizes,
                   mixedStrides);
+              markAsCache(view);
               ctx.debug_names[view] =
                   "<read view for caching " + ctx.debug_names[tbrVal] + ">";
               auto casted = builder.create<memref::CastOp>(
                   loc, view.getResult(),
                   MemRefType::get(rtt.getShape(), rtt.getElementType()));
+              markAsCache(casted);
               ctx.debug_names[casted] =
                   "<casted memref for reading " + ctx.debug_names[tbrVal] + ">";
               auto loaded =
                   builder.create<memref::TensorLoadOp>(loc, casted.getResult());
+              markAsCache(loaded);
               ctx.debug_names[loaded] =
                   "<loaded tensor from cached " + ctx.debug_names[tbrVal] + ">";
               oldToCloned[tbrVal] = loaded;
             } else {
               auto loaded =
                   builder.create<memref::LoadOp>(loc, cache, induction_vars);
+              markAsCache(loaded);
               ctx.debug_names[loaded] =
                   "<loaded scalar from cached " + ctx.debug_names[tbrVal] + ">";
               oldToCloned[tbrVal] = loaded;
+            }
+          }
+        }
+
+        // Clone ops that don't depend on the region iter args
+        for (auto &pop : primalOps) {
+          if (!pop.hasAttr("lagrad_cache") && pop.getNumResults() > 0) {
+            SmallVector<Value> frontier{pop.getResults()};
+            ValueSet deps;
+            runBottomUpDFS(frontier, deps);
+            auto inDependSet = [&](Value v) { return deps.contains(v); };
+            if (llvm::none_of(
+                    pop.getResults(),
+                    [&](Value v) { return ctx.toBeRecorded.contains(v); }) &&
+                llvm::none_of(forOp.getRegionIterArgs(), inDependSet)) {
+              auto cloned = builder.clone(pop);
+              for (auto tup :
+                   llvm::zip(pop.getResults(), cloned->getResults())) {
+                oldToCloned[std::get<0>(tup)] = std::get<1>(tup);
+                ctx.debug_names[std::get<1>(tup)] =
+                    "<cloned " + ctx.debug_names[std::get<0>(tup)] + ">";
+              }
             }
           }
         }
@@ -578,7 +586,6 @@ Value reverseIfOpV2(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
   auto reverseIfBlock = [&](Region &ifRegion) {
     return [&](OpBuilder &builder, Location loc) {
       PatternRewriter::InsertionGuard insertionGuard(rewriter);
-      SmallVector<Operation *> clonedOps;
       // Clone ops that don't depend on the region iter args
       for (auto &pop : ifRegion.getOps()) {
         if (pop.getNumResults() > 0) {
@@ -589,7 +596,6 @@ Value reverseIfOpV2(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
           if (!(llvm::any_of(caches, inDependSet) ||
                 llvm::any_of(parentIterArgs, inDependSet))) {
             auto cloned = builder.clone(pop);
-            clonedOps.push_back(cloned);
             for (auto tup : llvm::zip(pop.getResults(), cloned->getResults())) {
               oldToCloned[std::get<0>(tup)] = std::get<1>(tup);
               ctx.debug_names[std::get<1>(tup)] =

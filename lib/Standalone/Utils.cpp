@@ -559,6 +559,19 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       // This is a bit of a math trick. Note the result is sqrt(operand)
       vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                  op->getResult(0));
+    } else if (opName == "math.powf") {
+      if (op_index > 0) {
+        // TODO: Add support for the RHS powf derivative
+        continue;
+      }
+      auto powFOp = cast<math::PowFOp>(op);
+      auto loc = op->getLoc();
+      auto one = onesLike(loc, operand, rewriter);
+      vjp_value = rewriter.create<arith::MulFOp>(
+          loc, powFOp.rhs(),
+          rewriter.create<math::PowFOp>(
+              loc, powFOp.lhs(),
+              rewriter.create<arith::SubFOp>(loc, powFOp.rhs(), one)));
     } else if (opName == "std.call") {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
