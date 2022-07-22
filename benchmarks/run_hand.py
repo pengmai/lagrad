@@ -18,6 +18,7 @@ mlir_env = Environment(loader=PackageLoader("mlir"), autoescape=select_autoescap
 c_env = Environment(loader=PackageLoader("C"), autoescape=select_autoescape())
 
 runtime_file = "detailed_results/hand_runtimes.tsv"
+mem_file = "detailed_results/hand_memusage.tsv"
 enzyme_home = (
     pathlib.Path.home()
     / "Research"
@@ -46,7 +47,8 @@ def main(args):
     # data_file = "benchmarks/data/hand/test.txt"
 
     # data_file = "benchmarks/data/hand/complicated_small/hand1_t26_c100.txt"
-    df = pd.read_csv(runtime_file, sep="\t", index_col=[0, 1])
+    # df = pd.read_csv(runtime_file, sep="\t", index_col=[0, 1])
+    df = pd.read_csv(mem_file, sep="\t", index_col=[0, 1])
     data_file = enzyme_home / args.data_file
     model_dir = enzyme_home / "model"
     with open(data_file) as f:
@@ -66,7 +68,7 @@ def main(args):
         "model_dir": model_dir,
         "data_file": data_file,
         "complicated": complicated,
-        "measure_mem": False,
+        "measure_mem": True,
     }
 
     if args.print:
@@ -99,8 +101,13 @@ def main(args):
         ],
         "hand_driver.out",
         link_runner_utils=True,
-        monitor=False,
+        monitor=True,
     )
+    key = "Enzyme/MLIR"
+    df.loc[args.data_file, key]["max_rss"] = result.memdict.max_rss
+    df.loc[args.data_file, key]["vsize"] = result.memdict.max_vsize
+    df.to_csv(mem_file, sep="\t")
+    return result.stdout
 
     try:
         lines = result.stdout.splitlines()

@@ -6,9 +6,8 @@ from compile import (
     compile_mlir,
     link_and_run,
 )
-from datetime import datetime
+import pathlib
 from jinja2 import Environment, PackageLoader, select_autoescape
-import os.path as osp
 import json
 import pandas as pd
 
@@ -49,11 +48,12 @@ def adbench_main(args):
 def main(args):
     driver_template = driver_env.get_template("gmm_driver.c")
     helpers_template = driver_env.get_template("mlir_c_abi.c")
-    blas_wrapper_template = driver_env.get_template("kernels_v2.c")
+    blas_wrapper_template = driver_env.get_template("blas_wrapper.c")
     mlir_template = mlir_env.get_template("gmm.mlir")
     # mlir_template = mlir_env.get_template("gmm_differentiated.mlir")
     mlir_compressed_template = mlir_env.get_template("gmm_compressed.mlir")
     mlir_enzyme_full_template = mlir_env.get_template("gmm_buf_optimized.mlir")
+    cblas_primal = driver_env.get_template("gmm_blas.c")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_compressed.mlir")
     # mlir_enzyme_template = mlir_env.get_template("gmm_tensor_bufferized_opt.mlir")
 
@@ -61,7 +61,23 @@ def main(args):
     # This is crashing Enzyme for some reason.
     # mlir_enzyme_template = mlir_env.get_template("gmm_buf.mlir")
     enzyme_template = driver_env.get_template("enzyme_gmm.c")
-    data_file = "benchmarks/data/gmm/10k/gmm_d128_K5.txt"
+    # data_file = (
+    #     pathlib.Path() / "benchmarks" / "data" / "gmm" / "10k" / "gmm_d128_K5.txt"
+    # )
+    data_file = (
+        pathlib.Path.home()
+        / "Research"
+        / "Enzyme"
+        / "enzyme"
+        / "benchmarks"
+        / "gmm"
+        / "data"
+        / "1k"
+        / "gmm_d128_K200.txt"
+    )
+    # data_file = (
+    #     pathlib.Path() / "benchmarks" / "data" / "gmm" / "10k" / "gmm_d10_K25.txt"
+    # )
     with open(data_file) as f:
         d, k, n = [int(x) for x in f.readline().split()]
 
@@ -88,6 +104,7 @@ def main(args):
         helpers_template.render(**config).encode("utf-8"),
         "helpers.o",
     )
+    compile_c(cblas_primal.render().encode("utf-8"), "gmm_blas_primal.o")
     compile_enzyme(enzyme_template.render(**config).encode("utf-8"), "gmm_enzyme.o")
     compile_mlir(mlir_template.render(**config).encode("utf-8"), "gmm_kernel.o")
     # compile_mlir(
@@ -100,11 +117,12 @@ def main(args):
         emit="obj",
     )
 
-    stdout = link_and_run(
+    result = link_and_run(
         [
             "gmm_driver.o",
             "helpers.o",
             "blas_wrapper.o",
+            "gmm_blas_primal.o",
             "gmm_enzyme.o",
             "gmm_kernel.o",
             "gmm_compressed_kernel.o",
@@ -113,8 +131,8 @@ def main(args):
         "gmm_driver.out",
         link_runner_utils=True,
         link_openblas=True,
-    ).decode("utf-8")
-    print(stdout)
+    )
+    print(result.stdout)
     return
 
     try:

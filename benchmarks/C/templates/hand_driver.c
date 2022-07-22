@@ -5,8 +5,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define NUM_RUNS 6
-int CHECK_MEM = 0;
+#define NUM_RUNS 1
+int CHECK_MEM;
 double *deadbeef = (double *)0xdeadbeef;
 RunProcDyn rpd;
 void check_mem_usage() {
@@ -319,8 +319,8 @@ void lagrad_jacobian_complicated(HandInput *input, double *J) {
 
 void enzyme_jacobian_simple(HandInput *input, double *J) {
   int err_size = 3 * input->n_pts;
+  double *derr = (double *)malloc(err_size * sizeof(double));
   for (size_t i = 0; i < err_size; i++) {
-    double *derr = (double *)malloc(err_size * sizeof(double));
     for (size_t j = 0; j < err_size; j++) {
       derr[j] = (i == j) ? 1.0 : 0.0;
     }
@@ -345,8 +345,8 @@ void enzyme_jacobian_simple(HandInput *input, double *J) {
       J[i * input->n_theta + j] = dtheta.aligned[j];
     }
     free(dtheta.aligned);
-    free(derr);
   }
+  free(derr);
 }
 
 void enzyme_mlir_jacobian_complicated(HandInput *input, double *J) {
@@ -444,8 +444,12 @@ unsigned long lagrad_hand_simple(HandInput *input, double *J, double *ref_J) {
   gettimeofday(&start, NULL);
   lagrad_jacobian_simple(input, J);
   gettimeofday(&stop, NULL);
-  verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta,
-                      "LAGrad Simple");
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta,
+                        "LAGrad Simple");
+  }
   return timediff(start, stop);
 }
 
@@ -469,8 +473,12 @@ unsigned long enzyme_hand_simple(HandInput *input, double *J, double *ref_J) {
   gettimeofday(&start, NULL);
   enzyme_jacobian_simple(input, J);
   gettimeofday(&stop, NULL);
-  verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta,
-                      "Enzyme/MLIR");
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta,
+                        "Enzyme/MLIR");
+  }
   return timediff(start, stop);
 }
 
@@ -614,7 +622,10 @@ int main() {
   double *J = (double *)malloc(J_rows * J_cols * sizeof(double));
 
   unsigned long results_df[NUM_RUNS];
-  bodyFunc funcs[] = {lagrad_hand_simple, enzyme_hand_simple};
+  bodyFunc funcs[] = {
+      // lagrad_hand_simple,
+      enzyme_hand_simple
+  };
   // bodyFunc funcs[] = {lagrad_hand_complicated, enzyme_mlir_hand_complicated};
   size_t num_apps = sizeof(funcs) / sizeof(funcs[0]);
   for (size_t app = 0; app < num_apps; app++) {
@@ -626,7 +637,8 @@ int main() {
 
   // for (size_t run = 0; run < NUM_RUNS; run++) {
   //   if (complicated) {
-  //     results_df[run] = enzyme_C_hand_complicated(&input, &converted, J, ref_J);
+  //     results_df[run] = enzyme_C_hand_complicated(&input, &converted, J,
+  //     ref_J);
   //   } else {
   //     results_df[run] = enzyme_C_hand_simple(&input, &converted, J, ref_J);
   //   }

@@ -68,39 +68,46 @@ module  {
         // Subtract
         %x_slice = tensor.extract_slice %x[%ix, 0] [1, {{d}}] [1, 1] : tensor<{{n}}x{{d}}xf64> to tensor<{{d}}xf64>
         %means_slice = tensor.extract_slice %means[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
-        %xcentered = linalg.generic
-          {indexing_maps = [#map9, #map9, #map9], iterator_types = ["parallel"]}
-          ins(%x_slice, %means_slice : tensor<{{d}}xf64>, tensor<{{d}}xf64>)
-          outs(%len_d_zero : tensor<{{d}}xf64>) {
-        ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-          %0 = arith.subf %arg0, %arg1 : f64
-          linalg.yield %0 : f64
-        } -> tensor<{{d}}xf64>
+        %xcentered = arith.subf %x_slice, %means_slice {lagrad_should_cache} : tensor<{{d}}xf64>
+        // %xcentered = linalg.generic
+        //   {indexing_maps = [#map9, #map9, #map9], iterator_types = ["parallel"]}
+        //   ins(%x_slice, %means_slice : tensor<{{d}}xf64>, tensor<{{d}}xf64>)
+        //   outs(%len_d_zero : tensor<{{d}}xf64>) {
+        // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+        //   %0 = arith.subf %arg0, %arg1 : f64
+        //   linalg.yield %0 : f64
+        // } -> tensor<{{d}}xf64>
 
         %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
         %Ltri_slice = tensor.extract_slice %Ls[%ik, 0, 0] [1, {{d}}, {{d}}] [1, 1, 1] : tensor<{{k}}x{{d}}x{{d}}xf64> to tensor<{{d}}x{{d}}xf64, "ltri">
 
         // inlined Qtimesx
+        %p0 = arith.cmpi eq, %ix, %c0 : index
+        %p1 = arith.cmpi eq, %ik, %c0 : index
+        %p = arith.andi %p0, %p1 : i1
         // Elementwise multiplication
         %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
 
         // The triangular matrix-vector multiplication
-        %out_1 = linalg.generic
-          {
-            indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>, affine_map<(d0, d1) -> (d0)>],
-            iterator_types = ["parallel", "reduction"]
-          }
-          ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>)
-          outs(%len_d_zero : tensor<{{d}}xf64>) {
-        ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-          %0 = arith.mulf %arg0, %arg1 : f64
-          %1 = arith.addf %0, %arg2 : f64
-          linalg.yield %1 : f64
-        } -> tensor<{{d}}xf64>
+        // %out_1 = linalg.generic
+        //   {
+        //     doc = "Triangular Matrix-Vector Multiplication",
+        //     indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>, affine_map<(d0, d1) -> (d0)>],
+        //     iterator_types = ["parallel", "reduction"],
+        //     lagrad_should_cache
+        //   }
+        //   ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>)
+        //   outs(%out_0 : tensor<{{d}}xf64>) {
+        // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+        //   %0 = arith.mulf %arg0, %arg1 : f64
+        //   %1 = arith.addf %0, %arg2 : f64
+        //   linalg.yield %1 : f64
+        // } -> tensor<{{d}}xf64>
 
-        // %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
-        %Qxcentered = arith.addf %out_0, %out_1 : tensor<{{d}}xf64>
-
+        %Qxcentered = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "ltri">, tensor<{{d}}xf64>) outs(%out_0 : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        // %Qxcentered = arith.addf %out_0, %out_1 {lagrad_should_cache} : tensor<{{d}}xf64>
+        // %Qxcentered_squared = arith.mulf %Qxcentered, %Qxcentered {lagrad_should_cache} : tensor<{{d}}xf64>
+        // %msqnorm_t = linalg.dot ins(%Qxcentered, %Qxcentered : tensor<{{d}}xf64>, tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) -> tensor<f64>
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
         ^bb0(%arg0: f64, %arg1: f64):
           %0 = arith.mulf %arg0, %arg0 : f64
@@ -115,7 +122,7 @@ module  {
         %main_term_ik = arith.subf %sum_aq, %hmsqnorm : f64
         %main_term_next = tensor.insert %main_term_ik into %mt_iter[%ik] : tensor<{{k}}xf64>
         scf.yield %main_term_next : tensor<{{k}}xf64>
-      }
+      } {lagrad_should_cache}
 
       // logsumexp %alphas inlined
       // find the max
@@ -128,11 +135,7 @@ module  {
         outs(%max_init : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-        %next = scf.if %p -> (f64) {
-          scf.yield %arg0 : f64
-        } else {
-          scf.yield %arg1 : f64
-        }
+        %next = select %p, %arg0, %arg1 : f64
         linalg.yield %next : f64
       } -> tensor<f64>
 
@@ -167,11 +170,7 @@ module  {
       outs(%amax_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = scf.if %p -> (f64) {
-        scf.yield %arg0 : f64
-      } else {
-        scf.yield %arg1 : f64
-      }
+      %next = select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
@@ -204,10 +203,10 @@ module  {
     %lwishpri = scf.for %ik = %c0 to %ck step %c1 iter_args(%out_iter = %zero) -> (f64) {
       %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
       // Inlined msqnorm
-      %fro_0 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qdiags_slice : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
+      %Qsquared = arith.mulf %Qdiags_slice, %Qdiags_slice {lagrad_should_cache} : tensor<{{d}}xf64>
+      %fro_0 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qsquared : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
-        %0 = arith.mulf %arg0, %arg0 : f64
-        %1 = arith.addf %0, %arg1 : f64
+        %1 = arith.addf %arg0, %arg1 : f64
         linalg.yield %1 : f64
       } -> tensor<f64>
       %frobenius_0 = tensor.extract %fro_0[] : tensor<f64>

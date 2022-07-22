@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/time.h>
 
-#define NUM_RUNS 3
+#define NUM_RUNS 6
 
 typedef struct {
   double *data;
@@ -337,8 +337,27 @@ unsigned long enzyme_gmm_compressed_primal(GMMInput gmm_input,
                                            double *temp_icf) {
   struct timeval start, stop;
   gettimeofday(&start, NULL);
-  enzyme_gmm_primal(gmm_input);
+  double res = enzyme_gmm_primal(gmm_input);
   gettimeofday(&stop, NULL);
+  printf("C compressed primal: %.4e\n", res);
+  return timediff(start, stop);
+}
+
+extern void blas_gmm_objective(int d, int k, int n, double *alphas,
+                               double *means, double *Qs, double *Ls, double *x,
+                               double wishart_gamma, int wishart_m,
+                               double *err);
+
+unsigned long blas_gmm_primal(GMMInput gmm, double *ref_alphas,
+                              double *ref_means, double *ref_icf,
+                              double *temp_icf) {
+  struct timeval start, stop;
+  double res;
+  gettimeofday(&start, NULL);
+  blas_gmm_objective(gmm.d, gmm.k, gmm.n, gmm.alphas, gmm.means, gmm.Qs, gmm.Ls,
+                     gmm.x, gmm.wishart_gamma, gmm.wishart_m, &res);
+  gettimeofday(&stop, NULL);
+  printf("BLAS full primal: %.4e\n", res);
   return timediff(start, stop);
 }
 
@@ -389,7 +408,7 @@ unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
       /*wishart_gamma=*/gmm_input.wishart_gamma,
       /*wishart_m=*/gmm_input.wishart_m);
   gettimeofday(&stop, NULL);
-  printf("MLIR full primal: %f\n", res);
+  printf("MLIR full primal: %.4e\n", res);
   return timediff(start, stop);
 }
 
@@ -559,14 +578,16 @@ int main() {
   int d = gmm_input.d;
   int k = gmm_input.k;
   int n = gmm_input.n;
+  printf("d: %d, k: %d, n: %d\n", d, k, n);
   int icf_size = d * (d + 1) / 2;
 
   bodyFunc funcs[] = {
       // enzyme_gmm_full_primal,
       // enzyme_gmm_full_adjoint,
-      // enzyme_gmm_compressed_primal,
+      enzyme_gmm_compressed_primal,
+      // blas_gmm_primal,
 
-      enzyme_gmm_compressed_adjoint,
+      // enzyme_gmm_compressed_adjoint,
 
       // enzyme_mlir_gmm_full_adjoint,
       // mlir_optimized_full_primal,
@@ -575,8 +596,8 @@ int main() {
       // mlir_optimized_compressed_primal,
       // mlir_optimized_compressed_adjoint,
 
-      // lagrad_gmm_full_primal,
-      lagrad_gmm_full_adjoint,
+      lagrad_gmm_full_primal,
+      // lagrad_gmm_full_adjoint,
       // lagrad_gmm_tri_primal,
       // lagrad_gmm_tri_adjoint,
       // lagrad_gmm_compressed_primal,
@@ -590,6 +611,9 @@ int main() {
   double *ref_icf = calloc(k * icf_size, sizeof(double));
   double *temp_icf = calloc(k * icf_size, sizeof(double));
   populate_ref(&gmm_input, ref_alphas, ref_means, ref_icf);
+  // print_d_arr(ref_alphas, k);
+  // print_d_arr_2d(ref_means, k, d);
+  // print_d_arr_2d(ref_icf, k, icf_size);
 
   for (size_t app = 0; app < num_apps; app++) {
     for (size_t run = 0; run < NUM_RUNS; run++) {

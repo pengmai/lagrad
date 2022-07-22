@@ -1,3 +1,5 @@
+import re
+from dataclasses import dataclass
 import warnings
 import subprocess
 import os.path as osp
@@ -60,6 +62,7 @@ BUFFERIZE = [
     "-canonicalize",
 ]
 LOWER_TO_LOOPS = [
+    "-convert-linalg-to-library",
     "-convert-linalg-to-loops",
     # "-convert-linalg-to-affine-loops",
     # "-affine-loop-unroll",
@@ -188,20 +191,24 @@ def jit_mlir(contents, lower_type="loops", print_loops=False):
     return output.decode("utf-8")
 
 
-def compile_mlir_to_enzyme(contents, output="", emit="llvm", hand_complicated=False):
+def compile_mlir_to_enzyme(contents, output="", emit="llvm"):
     def replace_hand_optimization(lines: bytes):
         # warnings.warn(
         #     "Running hand tracking memset_pattern replacement for Enzyme/MLIR"
         # )
         memset_pattern = "@.memset_pattern = private unnamed_addr constant [3 x double] [double 1.000000e+00, double 1.000000e+00, double 1.000000e+00], align 16"
-        memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %63, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
-        if hand_complicated:
-            memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %77, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
+        memset_call = (
+            lambda ssa_val: f"  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) {ssa_val}, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
+        )
+        call_pat = re.compile(r"\s+call void @memset_pattern16\(i8\* (%\d+)")
+        # if hand_complicated:
+        #     memset_call = "  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* nonnull align 8 dereferenceable(24) %77, i8* bitcast ([3 x double]* @.memset_pattern to i8*), i64 24, i1 false)"
 
         def process_line(line: str):
             if line.lstrip().startswith("call void @memset_pattern16"):
-                return memset_call
-            elif line.startswith("@.memset_pattern ="):
+                ssa_val = call_pat.match(line).group(1)
+                return memset_call(ssa_val)
+            elif line.startswith("@.memset_pattern.1 ="):
                 return memset_pattern
             return line
 
@@ -339,6 +346,18 @@ def compile_c(contents, output):
     )
 
 
+@dataclass
+class MemUsageResult:
+    max_rss: int
+    max_vsize: int
+
+
+@dataclass
+class BenchmarkResult:
+    stdout: str
+    memdict: MemUsageResult
+
+
 def link_and_run(
     objects, binary, link_openblas=True, link_runner_utils=False, monitor=False
 ):
@@ -375,6 +394,14 @@ def link_and_run(
         p.returncode == 0
     ), f"Process exited with nonzero exit. stdout: {p.stdout.read()} stderr: {p.stderr.read()}"
     stdout = p.stdout.read()
-    if monitor:
-        return stdout, usage_dict
-    return stdout
+    result = BenchmarkResult(
+        stdout=stdout.decode("utf-8"),
+        memdict=(
+            MemUsageResult(
+                max_rss=usage_dict["max rss"], max_vsize=usage_dict["max vsize"]
+            )
+            if monitor
+            else None
+        ),
+    )
+    return result
