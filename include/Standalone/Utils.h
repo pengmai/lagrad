@@ -15,6 +15,7 @@ public:
   ModuleOp moduleOp;
   DenseMap<Value, std::string> debug_names;
   ValueSet activeValues;
+  ValueSet effectivelyUsed;
   ValueSet toBeRecorded;
   DenseMap<Value, Value> tbrCachedVals;
 };
@@ -23,7 +24,8 @@ bool isFloatOrFloatTensor(Type typ);
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
 
-void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out);
+void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out,
+                    bool traverseGeneric = true);
 void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out);
 
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,

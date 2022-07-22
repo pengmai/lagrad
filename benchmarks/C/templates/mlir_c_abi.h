@@ -22,6 +22,12 @@ typedef struct {
   double *allocated;
   double *aligned;
   int64_t offset;
+} F64Descriptor0D;
+
+typedef struct {
+  double *allocated;
+  double *aligned;
+  int64_t offset;
   int64_t size;
   int64_t stride;
 } F64Descriptor1D;

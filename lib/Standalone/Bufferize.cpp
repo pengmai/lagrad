@@ -90,13 +90,11 @@ public:
       return failure();
     }
 
-    // the getRankReduceSubviewLayout is deprecated but we want to continue
-    // using it to ensure that the resulting layout is fully dynamic for
-    // compatibility with our partial bufferization.
-    auto slice_layout = getRankReduceSubviewLayout(resultRank, rewriter);
-    auto resultType =
-        MemRefType::get(resultTensorType.getShape(),
-                        resultTensorType.getElementType(), slice_layout);
+    auto resultType = eraseStridedLayout(
+        memref::SubViewOp::inferRankReducedResultType(
+            resultRank, adaptor.source().getType().cast<MemRefType>(),
+            op.getMixedOffsets(), op.getMixedSizes(), op.getMixedStrides())
+            .cast<MemRefType>());
     auto identityResultType =
         getTypeConverter()->convertType(resultTensorType).cast<MemRefType>();
 
