@@ -403,6 +403,8 @@ func @outer_product(%x: tensor<{{d}}xf64>, %y: tensor<{{d}}xf64>, %out_init: ten
   return %out : tensor<{{tri_size}}xf64>
 }
 
+func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+
 func @handwritten_main_term_compressed_grad(
   %alphas: tensor<{{k}}xf64>,
   %means: tensor<{{k}}x{{d}}xf64>,
@@ -599,6 +601,10 @@ func @handwritten_main_term_compressed_grad(
       %dxcentered_0 = arith.mulf %Qdiags_slice, %dQxcentered : tensor<{{d}}xf64>
       %dxcentered = call @vecmat(%dQxcentered, %Ls_slice, %dxcentered_0) : (tensor<{{d}}xf64>, tensor<{{tri_size}}xf64>, tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
 
+      %dLs_slice = tensor.extract_slice %dLs_iter[%kv, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
+      %dLs_slice_next = call @outer_product(%dQxcentered, %xcentered, %dLs_slice) : (tensor<{{d}}xf64>, tensor<{{d}}xf64>, tensor<{{tri_size}}xf64>) -> tensor<{{tri_size}}xf64>
+      %dLs_next = tensor.insert_slice %dLs_slice_next into %dLs_iter[%kv, 0] [1, {{tri_size}}] [1, 1] : tensor<{{tri_size}}xf64> into tensor<{{k}}x{{tri_size}}xf64>
+
       %dmeans_slice = tensor.extract_slice %dmeans_iter[%kv, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
       %dmeans_slice_next = linalg.generic
         { indexing_maps = [#map2, #map2], iterator_types = ["parallel"] }
@@ -622,10 +628,7 @@ func @handwritten_main_term_compressed_grad(
       } -> tensor<{{d}}xf64>
       %dQdiags_next = tensor.insert_slice %dQdiags_slice_next into %dQdiags_iter[%kv, 0] [1, {{d}}] [1, 1] : tensor<{{d}}xf64> into tensor<{{k}}x{{d}}xf64>
 
-      %dLs_slice = tensor.extract_slice %dLs_iter[%kv, 0] [1, {{tri_size}}] [1, 1] : tensor<{{k}}x{{tri_size}}xf64> to tensor<{{tri_size}}xf64>
-      %dLs_slice_next = call @outer_product(%dQxcentered, %xcentered, %dLs_slice) : (tensor<{{d}}xf64>, tensor<{{d}}xf64>, tensor<{{tri_size}}xf64>) -> tensor<{{tri_size}}xf64>
-      %dLs_next = tensor.insert_slice %dLs_slice_next into %dLs_iter[%kv, 0] [1, {{tri_size}}] [1, 1] : tensor<{{tri_size}}xf64> into tensor<{{k}}x{{tri_size}}xf64>
-      scf.yield %dmeans_next, %dQdiags_next, %dLs_iter : tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>
+      scf.yield %dmeans_next, %dQdiags_next, %dLs_next : tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>
     }
     scf.yield %dalphas_next, %dsum_qs_next, %inner_next#0, %inner_next#1, %inner_next#2 : tensor<{{k}}xf64>, tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{tri_size}}xf64>
   }
