@@ -23,12 +23,14 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
                       double *restrict Lsb, double const *restrict x) {
   int64_t tri_size_conv = d * (d - 1) / 2;
   // int64_t conv2_kd = k * d;
-  double *Qdiagsb_ipc21 = calloc(k * d, sizeof(double));
   double *Qdiags_0 = calloc(k * d, sizeof(double));
+  double *Qdiagsb_ipc21 = calloc(k * d, sizeof(double));
   double *sum_qs_1 = calloc(k, sizeof(double));
+  double *sum_qsb_ipc = calloc(k, sizeof(double));
   double *xcentered_2 = calloc(d, sizeof(double));
   // This is %call12
   double *Qxcentered_3 = calloc(d, sizeof(double));
+  double *Qxcenteredb_ipc40 = calloc(d, sizeof(double));
   double *main_term_4 = calloc(k, sizeof(double));
   double *main_termb_ipc116 = calloc(k, sizeof(double));
 
@@ -70,6 +72,8 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
               Ls[ik * tri_size_conv + Lparamsidx] * xcentered_2[i];
         }
       }
+      _cache82[ix * k + ik] = Qxcentered_3[0];
+      printf("storing: %.4e\n", Qxcentered_3[0]);
       memcpy(&_cache98[(ix * k + ik) * (d - 1)], &Qxcentered_3[1], d - 1);
       // end Qtimesx
 
@@ -121,7 +125,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
   double de_31 = 0;
   double de_32 = 0;
   double de_33 = 0;
-  double de_35 = 0;
+  double de35 = 0;
   double de_131 = 0;
   double de_133 = 0;
   double de_139 = 0;
@@ -223,7 +227,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
       double _533 = m_1_ii_de;
       m_1_ii_de = (ik == 0) ? 0.0 : m_1_ii_de;
       de_31 = (ik == 0) ? de_31 + (_unwrap130 == 0 ? _533 : 0.0) : de_31;
-      printf("de_31 : %.4e\n", de_31);
+      // printf("de_31 : %.4e\n", de_31);
     }
     /* invertfor.body.i.i.preheader */
     /* invertfor.end */
@@ -236,8 +240,101 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
 
     double _507 = de_33;
     de_33 += 0;
-    de_35 += _507;
+    de35 += _507;
     de_32 += 0;
+    /* invertfor.end.loopexit */
+    double _493 = pre_146_de;
+    pre_146_de = 0;
+    main_termb_ipc116[0] += _493;
+    /* mergeinvertfor.body23_for.end.loopexit */
+    for (int64_t ik = k - 1; ik >= 0; ik--) {
+      /* invertsqnorm.exit */
+      // DEBUG_POINT_4
+      double _469 = main_termb_ipc116[ik];
+      main_termb_ipc116[ik] = 0;
+      double sub43_de = 0;
+      sub43_de += _469;
+      double _472 = sub43_de;
+      double _473 = -sub43_de;
+      sub43_de = 0;
+
+      double add_de = 0;
+      add_de += _472;
+      double mul42_de = 0;
+      mul42_de += _473;
+
+      double m0differes = mul42_de * 0.5;
+      mul42_de = 0;
+
+      double res_0_lcssa_i_de = 0;
+      res_0_lcssa_i_de += m0differes;
+      double _481 = res_0_lcssa_i_de;
+      res_0_lcssa_i_de = 0;
+
+      double add_i106_de = 0;
+      add_i106_de += _481;
+      double mul_i102_de = 0;
+      mul_i102_de += 0;
+
+      /* invertsqnorm.exit.loopexit */
+      for (int64_t i = d - 2; i >= 0; i--) {
+        /* mergeinvertfor.body.i109_sqnorm.exit.loopexit */
+        /* invertfor.body.i109 */
+        // DEBUG_POINT_5
+        double _412 = add_i106_de;
+        add_i106_de = 0;
+        double res_17_i_de = 0;
+        res_17_i_de += _412;
+        double mul5_i_de = 0;
+        mul5_i_de += _412;
+        double _440 = _cache98[ix * k * (d - 1) + ik * (d - 1) + i];
+        double m0diffe110 = mul5_i_de * _440;
+        mul5_i_de = 0;
+        double de112 = 0;
+        de112 += m0diffe110;
+        de112 += m0diffe110;
+        double _445 = de112;
+        de112 = 0;
+
+        Qxcenteredb_ipc40[i + 1] += _445;
+        double _451 = res_17_i_de;
+        res_17_i_de = 0;
+        mul_i102_de += (i == 0) ? _451 : 0.0;
+        add_i106_de += (i == 0) ? 0 : _451;
+      }
+      /* invertfor.body.i109.preheader */
+      /* invertcQtimesx.exit */
+      // DEBUG_POINT_6
+      double m0diffe91 = mul_i102_de * _cache82[ix * k + ik];
+      mul_i102_de = 0;
+      de35 += m0diffe91;
+      de35 += m0diffe91;
+      double _385 = add_de;
+      add_de = 0;
+      double de93 = 0;
+      de93 += _385;
+      double de94 = 0;
+      de94 += _385;
+      double _390 = de94;
+      de94 = 0;
+      // DEBUG_POINT_7
+      sum_qsb_ipc[ik] += _390;
+      double _395 = de93;
+      de93 = 0;
+      alphasb[ik] += _395;
+      double _400 = de35;
+      de35 = 0;
+
+      double pre_de = 0;
+      pre_de += _400;
+      double de34 = 0;
+      de34 += 0;
+
+      /* invertcQtimesx.exit.loopexit */
+      double _362 = pre_de;
+      pre_de = 0;
+      Qxcenteredb_ipc40[0] += _362;
+    }
   }
 
   free(_cache);
