@@ -4,7 +4,8 @@ target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16
 target triple = "x86_64-apple-macosx10.15.0"
 
 @enzyme_const = external local_unnamed_addr global i32, align 4
-@.mystr = private unnamed_addr constant [13 x i8] c"debug: %.4e\0A\00", align 1
+@.mystr = private unnamed_addr constant [13 x i8] c"index: %lld\0A\00", align 1
+@.flstr = private unnamed_addr constant [13 x i8] c"debug: %.4e\0A\00", align 1
 
 ; Function Attrs: nofree nounwind
 declare noundef i32 @printf(i8* nocapture noundef readonly, ...) local_unnamed_addr #1
@@ -217,6 +218,7 @@ entry:
   call void @llvm.memset.p0i8.i64(i8* nonnull %"call15'mi", i8 0, i64 %mul5, i1 false)
   %"'ipc116" = bitcast i8* %"call15'mi" to double*
   %4 = bitcast i8* %call15 to double*
+  ;; always true (k > 0)
   %cmp37.i = icmp sgt i32 %k, 0
   br i1 %cmp37.i, label %for.body.lr.ph.i, label %preprocess_qs.exit
 
@@ -292,6 +294,7 @@ for.cond19.preheader.lr.ph:                       ; preds = %preprocess_qs.exit
   %17 = add nsw i64 %wide.trip.count.i119, -1
   %18 = add nsw i64 %wide.trip.count.i119, -2
   %19 = add nsw i64 %wide.trip.count.i119, -2
+  ;; k - 2
   %20 = add nsw i64 %wide.trip.count.i.i, -2
   %21 = add nsw i64 %wide.trip.count.i.i, -2
   ; n
@@ -338,7 +341,9 @@ for.cond19.preheader.lr.ph:                       ; preds = %preprocess_qs.exit
   %malloccall135 = tail call noalias nonnull i8* @malloc(i64 %mallocsize134)
   %sub.i135_malloccache = bitcast i8* %malloccall135 to double*
   store double* %sub.i135_malloccache, double** %sub.i135_cache, align 8, !invariant.group !48
+  ;; k - 1 + 2
   %29 = add nuw i64 %21, 1
+  ;; (k - 1) * n
   %30 = mul nuw nsw i64 %29, %22
   %mallocsize140 = mul nuw nsw i64 %30, 8
   %malloccall141 = tail call noalias nonnull i8* @malloc(i64 %mallocsize140)
@@ -617,6 +622,7 @@ for.body.preheader.i:                             ; preds = %arr_max.exit.i
   store double %sub.i135, double* %96, align 8, !invariant.group !57
   %97 = tail call double @llvm.exp.f64(double %sub.i135) #14
   %add.i136 = fadd double %97, 0.000000e+00
+
   br i1 %exitcond.not.i99137, label %log_sum_exp.exit, label %for.body.for.body_crit_edge.i.preheader, !llvm.loop !12
 
 for.body.for.body_crit_edge.i.preheader:          ; preds = %for.body.preheader.i
@@ -631,9 +637,13 @@ for.body.for.body_crit_edge.i:                    ; preds = %for.body.for.body_c
   %.pre.i101 = load double, double* %arrayidx.phi.trans.insert.i, align 8, !tbaa !3
   %sub.i = fsub double %.pre.i101, %m.0.lcssa.i.i
   %98 = load double*, double** %sub.i_cache, align 8, !dereferenceable !51, !invariant.group !49
+  ;; unused, (k - 1) * n
   %99 = mul nuw nsw i64 %29, %22
+  ;; ix * (k - 1)
   %100 = mul nuw nsw i64 %iv3, %29
   %101 = add nuw nsw i64 %iv19, %100
+  ; %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %sub.i)
+  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.mystr, i64 0, i64 0), i64 %iv19)
   %102 = getelementptr inbounds double, double* %98, i64 %101
   store double %sub.i, double* %102, align 8, !invariant.group !58
   %103 = tail call double @llvm.exp.f64(double %sub.i) #14
@@ -1431,29 +1441,38 @@ mergeinvertfor.body23_for.end.loopexit:           ; preds = %invertfor.end.loope
   br label %invertsqnorm.exit
 
 invertfor.end:                                    ; preds = %invertarr_max.exit.i, %invertfor.body.i.i.preheader
+  ;; DEBUG_POINT_3
   %497 = load double, double* %"'de31", align 8
   store double 0.000000e+00, double* %"'de31", align 8
+  ;; always false, true xor true
   %498 = xor i1 %cmp37.i, true
+  ;; unused
   %499 = select fast i1 %cmp37.i, double %497, double 0.000000e+00
   %500 = load double, double* %".pre146'de", align 8
   %501 = fadd fast double %500, %497
+  ;; always true, will add %497
   %502 = select fast i1 %cmp37.i, double %501, double %500
   store double %502, double* %".pre146'de", align 8
+
   %503 = select fast i1 %498, double %497, double 0.000000e+00
   %504 = load double, double* %"'de30", align 8
   %505 = fadd fast double %504, %497
+  ;; always true, won't add anything
   %506 = select fast i1 %cmp37.i, double %504, double %505
   store double %506, double* %"'de30", align 8
   %507 = load double, double* %"'de33", align 8
   store double 0.000000e+00, double* %"'de33", align 8
+  ;; unused, always %507
   %508 = select fast i1 %cmp37.i, double %507, double 0.000000e+00
   %509 = load double, double* %"'de35", align 8
   %510 = fadd fast double %509, %507
   %511 = select fast i1 %cmp37.i, double %510, double %509
   store double %511, double* %"'de35", align 8
+  ; unused
   %512 = select fast i1 %498, double %507, double 0.000000e+00
   %513 = load double, double* %"'de32", align 8
   %514 = fadd fast double %513, %507
+  ;; always true, won't add anything
   %515 = select fast i1 %cmp37.i, double %513, double %514
   store double %515, double* %"'de32", align 8
   br i1 %cmp37.i, label %invertfor.end.loopexit, label %invertfor.cond19.preheader
@@ -1462,11 +1481,14 @@ invertfor.body.i.i.preheader:                     ; preds = %invertfor.body.i.i
   br label %invertfor.end
 
 invertfor.body.i.i:                               ; preds = %mergeinvertfor.body.i.i_arr_max.exit.i.loopexit, %incinvertfor.body.i.i
+  ;; adjoint loop for arr_max
   %516 = load i64, i64* %"iv17'ac", align 8
   %517 = load i64, i64* %"iv3'ac", align 8
+  ;; ik + 1
   %iv.next18_unwrap = add nuw nsw i64 %516, 1
   %518 = icmp eq i64 %_unwrap130, %iv.next18_unwrap
   %519 = load double, double* %"m.1.i.i'de", align 8
+  ;; unused
   %520 = select fast i1 %518, double %519, double 0.000000e+00
   %521 = load double, double* %"'de131", align 8
   %522 = fadd fast double %521, %519
@@ -1474,18 +1496,23 @@ invertfor.body.i.i:                               ; preds = %mergeinvertfor.body
   store double %523, double* %"'de131", align 8
   %524 = load double, double* %"'de131", align 8
   store double 0.000000e+00, double* %"'de131", align 8
+  ;; 'de131 is unused after this point
   %525 = load i64, i64* %"iv17'ac", align 8
   %526 = load i64, i64* %"iv3'ac", align 8
   %"arrayidx1.i.i'ipg_unwrap" = getelementptr inbounds double, double* %"'ipc116", i64 %iv.next18_unwrap
   %527 = load double, double* %"arrayidx1.i.i'ipg_unwrap", align 8
   %528 = fadd fast double %527, %524
   store double %528, double* %"arrayidx1.i.i'ipg_unwrap", align 8
+  ;; unused
   %529 = load double, double* %"m.015.i.i'de", align 8
   %530 = load i64, i64* %"iv17'ac", align 8
+  ;; ik == 0
   %531 = icmp eq i64 %530, 0
+  ;; unused`
   %532 = xor i1 %531, true
   %533 = load double, double* %"m.1.i.i'de", align 8
   %534 = select fast i1 %531, double 0.000000e+00, double %533
+  ;; m1iide = (ik == 0) ? 0 : m1iide
   store double %534, double* %"m.1.i.i'de", align 8
   %535 = icmp eq i64 %_unwrap130, 0
   %536 = select fast i1 %535, double %533, double 0.000000e+00
@@ -1494,6 +1521,8 @@ invertfor.body.i.i:                               ; preds = %mergeinvertfor.body
   %539 = fadd fast double %538, %536
   %540 = select fast i1 %531, double %539, double %538
   store double %540, double* %"'de31", align 8
+
+  %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %540)
   br i1 %531, label %invertfor.body.i.i.preheader, label %incinvertfor.body.i.i
 
 incinvertfor.body.i.i:                            ; preds = %invertfor.body.i.i
@@ -1506,6 +1535,7 @@ invertarr_max.exit.i.loopexit:                    ; preds = %invertarr_max.exit.
   %543 = load i64, i64* %"iv3'ac", align 8
   %conv17_unwrap122 = sext i32 %n to i64
   %_unwrap123 = add nsw i64 %conv17_unwrap122, -1
+  ;; unused
   %544 = add nuw i64 %_unwrap123, 1
   %545 = load i1*, i1** %"cmp2.i.i!manual_lcssa_cache", align 8, !dereferenceable !51, !invariant.group !46
   %546 = load i64, i64* %"iv3'ac", align 8
@@ -1513,8 +1543,11 @@ invertarr_max.exit.i.loopexit:                    ; preds = %invertarr_max.exit.
   %548 = load i1, i1* %547, align 1, !invariant.group !55
   %549 = load i64, i64* %"iv3'ac", align 8
   %wide.trip.count.i.i_unwrap = zext i32 %k to i64
+  ;; k - 2
   %_unwrap124 = add nsw i64 %wide.trip.count.i.i_unwrap, -2
+  ;; k - 1
   %iv.next18_unwrap125 = add nuw nsw i64 %_unwrap124, 1
+  ;; unused
   %550 = add nuw i64 %_unwrap123, 1
   %551 = load i64*, i64** %"!manual_lcssa126_cache", align 8, !dereferenceable !51, !invariant.group !47
   %552 = load i64, i64* %"iv3'ac", align 8
@@ -1525,6 +1558,7 @@ invertarr_max.exit.i.loopexit:                    ; preds = %invertarr_max.exit.
   br label %mergeinvertfor.body.i.i_arr_max.exit.i.loopexit
 
 mergeinvertfor.body.i.i_arr_max.exit.i.loopexit:  ; preds = %invertarr_max.exit.i.loopexit
+  ;; iv17'ac is ik
   store i64 %_unwrap124, i64* %"iv17'ac", align 8
   br label %invertfor.body.i.i
 
@@ -1532,14 +1566,18 @@ invertarr_max.exit.i:                             ; preds = %invertlog_sum_exp.e
   %556 = load double, double* %"m.0.lcssa.i.i'de", align 8
   store double 0.000000e+00, double* %"m.0.lcssa.i.i'de", align 8
   %557 = load i64, i64* %"iv3'ac", align 8
+  ;; always true (k > 1)
   %cmp13.i.i_unwrap = icmp sgt i32 %k, 1
+  ;; always false
   %558 = xor i1 %cmp13.i.i_unwrap, true
+  ; unused
   %559 = select fast i1 %cmp13.i.i_unwrap, double %556, double 0.000000e+00
   %560 = load double, double* %"m.1.i.i'de", align 8
   %561 = fadd fast double %560, %556
   %562 = select fast i1 %cmp13.i.i_unwrap, double %561, double %560
   store double %562, double* %"m.1.i.i'de", align 8
   %563 = select fast i1 %558, double %556, double 0.000000e+00
+
   %564 = load double, double* %"'de31", align 8
   %565 = fadd fast double %564, %556
   %566 = select fast i1 %cmp13.i.i_unwrap, double %564, double %565
@@ -1547,6 +1585,7 @@ invertarr_max.exit.i:                             ; preds = %invertlog_sum_exp.e
   br i1 %cmp13.i.i_unwrap, label %invertarr_max.exit.i.loopexit, label %invertfor.end
 
 invertfor.body.preheader.i:                       ; preds = %staging, %invertfor.body.for.body_crit_edge.i.preheader
+  ;; DEBUG_POINT_2
   %567 = load double, double* %"add.i136'de", align 8
   store double 0.000000e+00, double* %"add.i136'de", align 8
   %568 = load double, double* %"'de133", align 8
@@ -1554,9 +1593,12 @@ invertfor.body.preheader.i:                       ; preds = %staging, %invertfor
   store double %569, double* %"'de133", align 8
   %570 = load double, double* %"'de133", align 8
   store double 0.000000e+00, double* %"'de133", align 8
+  ;; %"'de133" unused after this point
   %571 = load i64, i64* %"iv3'ac", align 8
   %conv17_unwrap137 = sext i32 %n to i64
+  ;; n - 1
   %_unwrap138 = add nsw i64 %conv17_unwrap137, -1
+  ;; unused
   %572 = add nuw i64 %_unwrap138, 1
   %573 = load double*, double** %sub.i135_cache, align 8, !dereferenceable !51, !invariant.group !48
   %574 = load i64, i64* %"iv3'ac", align 8
@@ -1582,6 +1624,7 @@ invertfor.body.for.body_crit_edge.i.preheader:    ; preds = %invertfor.body.for.
   br label %invertfor.body.preheader.i
 
 invertfor.body.for.body_crit_edge.i:              ; preds = %mergeinvertfor.body.for.body_crit_edge.i_log_sum_exp.exit.loopexit, %incinvertfor.body.for.body_crit_edge.i
+  ;; This should be just inside the adjoint k loop for grad_logsumexp
   %587 = load double, double* %"add.i'de", align 8
   store double 0.000000e+00, double* %"add.i'de", align 8
   %588 = load double, double* %"add.i138'de", align 8
@@ -1592,21 +1635,32 @@ invertfor.body.for.body_crit_edge.i:              ; preds = %mergeinvertfor.body
   store double %591, double* %"'de139", align 8
   %592 = load double, double* %"'de139", align 8
   store double 0.000000e+00, double* %"'de139", align 8
+  ;; DEBUG_POINT_0
+  ;; %"'de139" is unused after this
+  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %587)
+  ;; iv19'ac is ik
   %593 = load i64, i64* %"iv19'ac", align 8
   %594 = load i64, i64* %"iv3'ac", align 8
   %conv17_unwrap143 = sext i32 %n to i64
   %_unwrap144 = add nsw i64 %conv17_unwrap143, -1
+  ;; n - 1 + 1
   %595 = add nuw i64 %_unwrap144, 1
   %wide.trip.count.i.i_unwrap145 = zext i32 %k to i64
   %_unwrap146 = add nsw i64 %wide.trip.count.i.i_unwrap145, -2
+  ;; k - 2 + 1
   %596 = add nuw i64 %_unwrap146, 1
+  ;; (k - 1) * n, unused
   %597 = mul nuw nsw i64 %596, %595
   %598 = load double*, double** %sub.i_cache, align 8, !dereferenceable !51, !invariant.group !49
+  ;; iv19 is ik, iv3 is ix
   %599 = load i64, i64* %"iv19'ac", align 8
   %600 = load i64, i64* %"iv3'ac", align 8
+  ;; %601 is unused
   %601 = mul nuw nsw i64 %596, %595
   %602 = mul nuw nsw i64 %600, %596
+  ;; ix * (k - 1) + ik
   %603 = add nuw nsw i64 %599, %602
+
   %604 = getelementptr inbounds double, double* %598, i64 %603
   %605 = load double, double* %604, align 8, !invariant.group !58
   %606 = call fast double @llvm.exp.f64(double %605)
@@ -1627,32 +1681,42 @@ invertfor.body.for.body_crit_edge.i:              ; preds = %mergeinvertfor.body
   store double 0.000000e+00, double* %".pre.i101'de", align 8
   %617 = load i64, i64* %"iv19'ac", align 8
   %618 = load i64, i64* %"iv3'ac", align 8
+  ;; main_termb[ik + 1] += prei101'de
   %iv.next20_unwrap = add nuw nsw i64 %617, 1
   %"arrayidx.phi.trans.insert.i'ipg_unwrap" = getelementptr inbounds double, double* %"'ipc116", i64 %iv.next20_unwrap
   %619 = load double, double* %"arrayidx.phi.trans.insert.i'ipg_unwrap", align 8
   %620 = fadd fast double %619, %616
   store double %620, double* %"arrayidx.phi.trans.insert.i'ipg_unwrap", align 8
+
+  ; %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %620)
+  ;; end of main_termb[ik + 1] += prei101'de
+
   %621 = load double, double* %"add.i138'de", align 8
   store double 0.000000e+00, double* %"add.i138'de", align 8
   %622 = load i64, i64* %"iv19'ac", align 8
+  ;; true iff at the end of the k loop
   %623 = icmp eq i64 %622, 0
   %624 = xor i1 %623, true
+  ;; unused
   %625 = select fast i1 %623, double %621, double 0.000000e+00
   %626 = load double, double* %"add.i136'de", align 8
   %627 = fadd fast double %626, %621
   %628 = select fast i1 %623, double %627, double %626
   store double %628, double* %"add.i136'de", align 8
+  ; unused
   %629 = select fast i1 %624, double %621, double 0.000000e+00
   %630 = load double, double* %"add.i'de", align 8
   %631 = fadd fast double %630, %621
   %632 = select fast i1 %623, double %630, double %631
   store double %632, double* %"add.i'de", align 8
+  ;; DEBUG_POINT_1
   br i1 %623, label %invertfor.body.for.body_crit_edge.i.preheader, label %incinvertfor.body.for.body_crit_edge.i
 
 incinvertfor.body.for.body_crit_edge.i:           ; preds = %invertfor.body.for.body_crit_edge.i
   %633 = load i64, i64* %"iv19'ac", align 8
   %634 = add nsw i64 %633, -1
   store i64 %634, i64* %"iv19'ac", align 8
+  ;; goes back into the k loop for main_termb (grad_logsumexp)
   br label %invertfor.body.for.body_crit_edge.i
 
 invertlog_sum_exp.exit.loopexit:                  ; preds = %staging
@@ -1666,6 +1730,7 @@ mergeinvertfor.body.for.body_crit_edge.i_log_sum_exp.exit.loopexit: ; preds = %i
   br label %invertfor.body.for.body_crit_edge.i
 
 invertlog_sum_exp.exit:                           ; preds = %mergeinvertfor.cond19.preheader_for.end50.loopexit, %incinvertfor.cond19.preheader
+  ;; %636 starts at 1.0
   %636 = load double, double* %"add47'de", align 8
   store double 0.000000e+00, double* %"add47'de", align 8
   %637 = load double, double* %"slse.0143'de", align 8
@@ -1676,15 +1741,20 @@ invertlog_sum_exp.exit:                           ; preds = %mergeinvertfor.cond
   store double %640, double* %"add1.i'de", align 8
   %641 = load double, double* %"add1.i'de", align 8
   store double 0.000000e+00, double* %"add1.i'de", align 8
+  ; %"add1.i'de" is unused after this
+
   %642 = load double, double* %"m.0.lcssa.i.i'de", align 8
   %643 = fadd fast double %642, %641
   store double %643, double* %"m.0.lcssa.i.i'de", align 8
   %644 = load double, double* %"'de150", align 8
   %645 = fadd fast double %644, %641
   store double %645, double* %"'de150", align 8
+  ;; I think %646 is always 1
   %646 = load double, double* %"'de150", align 8
   store double 0.000000e+00, double* %"'de150", align 8
+  ;; %"'de150" unusd after this
   %647 = load i64, i64* %"iv3'ac", align 8
+  ; k == 1 (usually false)
   %exitcond.not.i99137_unwrap = icmp eq i32 %k, 1
   %conv17_unwrap151 = sext i32 %n to i64
   %_unwrap152 = add nsw i64 %conv17_unwrap151, -1
@@ -1694,15 +1764,21 @@ invertlog_sum_exp.exit:                           ; preds = %mergeinvertfor.cond
   %651 = getelementptr inbounds double, double* %649, i64 %650
   %652 = load double, double* %651, align 8, !invariant.group !57
   %653 = tail call double @llvm.exp.f64(double %652) #14
+  ; exp(subicache[ix]) + 0.0
   %add.i136_unwrap = fadd double %653, 0.000000e+00
+  ; n - 1 + 1, looks unused
   %654 = add nuw i64 %_unwrap152, 1
   %655 = load double*, double** %"add.i!manual_lcssa154_cache", align 8, !dereferenceable !51, !invariant.group !50
   %656 = load i64, i64* %"iv3'ac", align 8
   %657 = getelementptr inbounds double, double* %655, i64 %656
+  ; %658 is semx (154cache[ix])
   %658 = load double, double* %657, align 8, !invariant.group !59
+  ; %cmp37.i is always true (k > 0)
   br i1 %cmp37.i, label %invertlog_sum_exp.exit_phisplt, label %invertlog_sum_exp.exit_phirc158
 
+;; This next group of BBs doesn't appear to do anything meaningful
 invertlog_sum_exp.exit_phisplt:                   ; preds = %invertlog_sum_exp.exit
+  ;; Pretty much always false (k == 1)
   br i1 %exitcond.not.i99137_unwrap, label %invertlog_sum_exp.exit_phirc, label %invertlog_sum_exp.exit_phirc153
 
 invertlog_sum_exp.exit_phirc:                     ; preds = %invertlog_sum_exp.exit_phisplt
@@ -1715,34 +1791,53 @@ invertlog_sum_exp.exit_phirc158:                  ; preds = %invertlog_sum_exp.e
   br label %invertlog_sum_exp.exit_phimerge
 
 invertlog_sum_exp.exit_phimerge:                  ; preds = %invertlog_sum_exp.exit_phirc158, %invertlog_sum_exp.exit_phirc153, %invertlog_sum_exp.exit_phirc
+  ;; This will take the value of %658, which starts as semx[ix]
   %659 = phi fast double [ %add.i136_unwrap, %invertlog_sum_exp.exit_phirc ], [ %658, %invertlog_sum_exp.exit_phirc153 ], [ 0.000000e+00, %invertlog_sum_exp.exit_phirc158 ]
+  ;; Looks like log VJP, 1.0 / semx
   %660 = fdiv fast double %646, %659
   %661 = load double, double* %"semx.0.lcssa.i'de", align 8
   %662 = fadd fast double %661, %660
+  ;; 0.0 + 1.0 / semx
   store double %662, double* %"semx.0.lcssa.i'de", align 8
   %663 = load double, double* %"semx.0.lcssa.i'de", align 8
+
+  ; %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %646)
   store double 0.000000e+00, double* %"semx.0.lcssa.i'de", align 8
+  ;; %"semx.0.lcssa.i'de" unused after this.
+
+  ;; always false (xor true, true)
   %anot1_ = xor i1 %cmp37.i, true
+  ;; always false (false && true)
   %andVal0 = and i1 %exitcond.not.i99137_unwrap, %cmp37.i
+  ;; always true (false xor true)
   %bnot1_ = xor i1 %exitcond.not.i99137_unwrap, true
+  ;; always true
   %andVal1 = and i1 %bnot1_, %cmp37.i
+  ;; %664 is unused
   %664 = select fast i1 %andVal1, double %663, double 0.000000e+00
   %665 = load double, double* %"add.i'de", align 8
   %666 = fadd fast double %665, %663
+  ;; storing 1 / semx (154cache[ix])
   %667 = select fast i1 %andVal1, double %666, double %665
+  ;; (starts at 0.0) + 1.0 / 154cache[ix]
   store double %667, double* %"add.i'de", align 8
+  ;; unused
   %668 = select fast i1 %andVal0, double %663, double 0.000000e+00
   %669 = load double, double* %"add.i136'de", align 8
   %670 = fadd fast double %669, %663
   %671 = select fast i1 %andVal0, double %670, double %669
+  ;; Looks like this is zero the first run
   store double %671, double* %"add.i136'de", align 8
+  ;; always true
   br i1 %cmp37.i, label %staging, label %invertarr_max.exit.i
 
 invertfor.end50.loopexit:                         ; preds = %invertfor.end50
+  ; unwrap160 is n - 1
   %_unwrap160 = add nsw i64 %conv17, -1
   br label %mergeinvertfor.cond19.preheader_for.end50.loopexit
 
 mergeinvertfor.cond19.preheader_for.end50.loopexit: ; preds = %invertfor.end50.loopexit
+  ; iv3'ac is n - 1, I think it's ix in reverse
   store i64 %_unwrap160, i64* %"iv3'ac", align 8
   br label %invertlog_sum_exp.exit
 
@@ -1766,10 +1861,10 @@ invertfor.end50:                                  ; preds = %for.end50
   %679 = select fast i1 %cmp140, double %678, double %677
   ;; Now add47.de is 1.0
   store double %679, double* %"add47'de", align 8
-  %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.mystr, i64 0, i64 0), double %679)
   br i1 %cmp140, label %invertfor.end50.loopexit, label %invertpreprocess_qs.exit
 
 staging:                                          ; preds = %invertlog_sum_exp.exit_phimerge
+  ;; false (k == 1)
   br i1 %exitcond.not.i99137_unwrap, label %invertfor.body.preheader.i, label %invertlog_sum_exp.exit.loopexit
 }
 

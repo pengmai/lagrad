@@ -1,9 +1,20 @@
 #include <math.h>
+#include <mlir_c_abi.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern double sqnorm(int n, double const *x);
+// extern double sqnorm(int n, double const *x);
+double sqnorm(int n, double const *x) {
+  int i;
+  double res = x[0] * x[0];
+  for (i = 1; i < n; i++) {
+    res = res + x[i] * x[i];
+  }
+
+  return res;
+}
 
 void main_term_raised(int d, int k, int n, double const *restrict alphas,
                       double *restrict alphasb, double const *restrict means,
@@ -19,13 +30,14 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
   // This is %call12
   double *Qxcentered_3 = calloc(d, sizeof(double));
   double *main_term_4 = calloc(k, sizeof(double));
+  double *main_termb_ipc116 = calloc(k, sizeof(double));
 
   for (int64_t ik = 0; ik < k; ik++) {
     sum_qs_1[ik] = 0;
     for (int64_t i = 0; i < d; i++) {
-      double q = Qs[ik * d + d];
+      double q = Qs[ik * d + i];
       sum_qs_1[ik] += q;
-      Qdiags_0[ik * d + d] = exp(q);
+      Qdiags_0[ik * d + i] = exp(q);
     }
   }
 
@@ -37,6 +49,8 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
   // maual_lcssa126 stores the index of max elements in main_term
   int64_t *manual_lcssa126_cache = calloc(n, sizeof(int64_t));
   double *sub_i135_cache = calloc(n, sizeof(double));
+  double *sub_i_cache = calloc(n * (k - 1), sizeof(double));
+  double *add_imanual_lcssa154_cache = calloc(n, sizeof(double));
   double slse = 0;
   for (int64_t ix = 0; ix < n; ix++) {
     for (int64_t ik = 0; ik < k; ik++) {
@@ -79,17 +93,152 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
     manual_lcssa126_cache[ix] = manual_lcssa126;
 
     // Again not sure how this helps
-    sub_i135_cache[ix] = main_term_4[0] - mx;
-    double semx = exp(main_term_4[0] - mx);
+    double sub_i = main_term_4[0] - mx;
+    sub_i135_cache[ix] = sub_i;
+    double semx = exp(sub_i);
     for (int64_t ik = 1; ik < k; ik++) {
-      semx += exp(main_term_4[ik] - mx);
+      sub_i = main_term_4[ik] - mx;
+      sub_i_cache[ix * (k - 1) + ik - 1] = sub_i;
+      // printf("subi : %.4e at idx %lld\n", sub_i, ix * (k - 1) + ik - 1);
+      semx += exp(sub_i);
     }
+    add_imanual_lcssa154_cache[ix] = semx;
+
+    // printf("mainb: %.4e\n", add_imanual_lcssa154_cache[ix]);
     slse += log(semx) + mx;
   }
   free(sum_qs_1);
   // *err = slse;
 
   /* Beginning of adjoint */
+  double add47_de = 1.0;
+  double add_i136_de = 0.0;
+  double add_i138_de = 0.0;
+  // DON'T GET ADD_I AND ADD_1_I MIXED UP
+  double add_i_de = 0;
+  double add_1_i_de = 0;
+  double de_30 = 0;
+  double de_31 = 0;
+  double de_32 = 0;
+  double de_33 = 0;
+  double de_35 = 0;
+  double de_131 = 0;
+  double de_133 = 0;
+  double de_139 = 0;
+  double de_150 = 0;
+  double sub_i_de = 0;
+  double sub_i135_de = 0;
+  double m_0_lcssa_ii_de = 0;
+  double m_1_ii_de = 0;
+  double pre_i_101_de = 0;
+  double pre_146_de = 0;
+  double slse_143_de = 0;
+  double semx_0_lcssa_i_de = 0;
+  for (int64_t ix = n - 1; ix >= 0; ix--) {
+    // invertlog_sum_exp.exit
+    double _636 = add47_de;
+    // add47_de = 0;
+    slse_143_de += _636;
+    add_1_i_de += _636;
+    double _641 = add_1_i_de;
+    add_1_i_de = 0;
+    m_0_lcssa_ii_de += _641;
+    de_150 += _641;
+    double _646 = de_150;
+    de_150 = 0;
+
+    // invertlog_sum_exp.exit_phimerge
+    semx_0_lcssa_i_de += _646 / add_imanual_lcssa154_cache[ix]; // %660
+    double _663 = semx_0_lcssa_i_de;
+    semx_0_lcssa_i_de = 0;
+
+    add_i_de += _663;
+    add_i136_de += 0.0;
+
+    // %659 will take this value if k == 1, which is always false.
+    // double add_i136_unwrap = exp(sub_i135_cache[ix]) + 0.0;
+
+    for (int64_t ik = k - 2; ik >= 0; ik--) {
+      /* invertlog_sum_exp.exit.loopexit */
+      /* mergeinvertfor.body.for.body_crit_edge.i_log_sum_exp.exit.loopexit
+       * (initializes and assigns ik) */
+      /* invertfor.body.for.body_crit_edge.i */
+      double _587 = add_i_de;
+      add_i_de = 0;
+      add_i138_de += _587;
+      de_139 += _587;
+      double _592 = de_139;
+      de_139 = 0;
+      // DEBUG_POINT_0
+
+      sub_i_de +=
+          _592 *
+          exp(sub_i_cache[ix * (k - 1) + ik]); // sub_i_cache looks correct
+      // printf("mainb: %.4e\n", _587);
+      double _610 = sub_i_de;
+      sub_i_de = 0;
+      pre_i_101_de += _610;
+      m_0_lcssa_ii_de += (-_610); // %611
+      double _616 = pre_i_101_de;
+      pre_i_101_de = 0;
+
+      main_termb_ipc116[ik + 1] += _616;
+      double _621 = add_i138_de;
+      add_i138_de = 0;
+
+      add_i136_de = (ik == 0) ? (add_i136_de + _621) : add_i136_de;
+      add_i_de = (ik == 0) ? add_i_de : (add_i_de + _621);
+      // DEBUG_POINT_1
+    }
+    /* invertfor.body.for.body_crit_edge.i.preheader */
+    /* invertfor.body.preheader.i */
+    // DEBUG_POINT_2
+    double _567 = add_i136_de;
+    add_i136_de = 0;
+    de_133 += _567;
+    double _570 = de_133;
+    de_133 = 0;
+    sub_i135_de += _570 * exp(sub_i135_cache[ix]);
+    double _581 = sub_i135_de;
+    sub_i135_de = 0;
+    de_31 += _581;
+    m_0_lcssa_ii_de += (-_581);
+
+    // printf("mainb: %.4e\n", m_0_lcssa_ii_de);
+    /* invertarr_max.exit.i */
+    double _556 = m_0_lcssa_ii_de;
+    m_0_lcssa_ii_de = 0;
+    m_1_ii_de += _556;
+    de_31 += 0;
+    /* invertarr_max.exit.i.loopexit */
+    int64_t _unwrap130 =
+        cmp2_ii_manual_lcssa_cache[ix] ? k - 1 : manual_lcssa126_cache[ix];
+
+    for (int64_t ik = k - 2; ik >= 0; ik--) {
+      /* mergeinvertfor.body.i.i_arr_max.exit.i.loopexit */
+      de_131 += (_unwrap130 == ik + 1) ? de_131 + m_1_ii_de : de_131;
+      double _524 = de_131;
+      de_131 = 0;
+      main_termb_ipc116[ik + 1] += _524;
+      double _533 = m_1_ii_de;
+      m_1_ii_de = (ik == 0) ? 0.0 : m_1_ii_de;
+      de_31 = (ik == 0) ? de_31 + (_unwrap130 == 0 ? _533 : 0.0) : de_31;
+      printf("de_31 : %.4e\n", de_31);
+    }
+    /* invertfor.body.i.i.preheader */
+    /* invertfor.end */
+
+    // DEBUG_POINT_3
+    double _497 = de_31;
+    de_31 = 0;
+    pre_146_de += _497;
+    de_30 += 0;
+
+    double _507 = de_33;
+    de_33 += 0;
+    de_35 += _507;
+    de_32 += 0;
+  }
 
   free(_cache);
   free(_cache82);
