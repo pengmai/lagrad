@@ -515,7 +515,6 @@ cQtimesx.exit:                                    ; preds = %cQtimesx.exit.loope
   %68 = add nuw nsw i64 %iv5, %67
   %69 = getelementptr inbounds double, double* %65, i64 %68
 
-  ; %printfcall = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %64)
   store double %64, double* %69, align 8, !invariant.group !54
   %"arrayidx38'ipg" = getelementptr inbounds double, double* %"alphas'", i64 %iv5
   %arrayidx38 = getelementptr inbounds double, double* %alphas, i64 %iv5

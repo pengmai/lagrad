@@ -69,10 +69,11 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
         Qxcentered_3[i] = Qdiags_0[ik * d + i] * xcentered_2[i];
       }
       for (int64_t i = 0; i < d; i++) {
-        int Lparamsidx = i * (2 * d - i - 1) / 2;
+        int64_t Lparamsidx = i * (2 * d - i - 1) / 2;
         for (int64_t j = i + 1; j < d; j++) {
           Qxcentered_3[j] +=
               Ls[ik * tri_size_conv + Lparamsidx] * xcentered_2[i];
+        Lparamsidx++;
         }
       }
       _cache82[ix * k + ik] = Qxcentered_3[0];
@@ -181,6 +182,8 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
     // invertlog_sum_exp.exit_phimerge
     semx_0_lcssa_i_de += _646 / add_imanual_lcssa154_cache[ix]; // %660
     double _663 = semx_0_lcssa_i_de;
+
+    // printf("663: %.4e\n", _663);
     semx_0_lcssa_i_de = 0;
 
     add_i_de += _663;
@@ -195,6 +198,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
        * (initializes and assigns ik) */
       /* invertfor.body.for.body_crit_edge.i */
       double _587 = add_i_de;
+
       add_i_de = 0;
       add_i138_de += _587;
       de_139 += _587;
