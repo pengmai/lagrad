@@ -115,9 +115,15 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
     slse += log(semx) + mx;
   }
   free(sum_qs_1);
+  // This needed to be manually inserted
+  free(xcentered_2);
+  free(Qxcentered_3);
+  free(main_term_4);
+  // end of manual insertion
   // *err = slse;
 
   /* Beginning of adjoint */
+  double add8_i_de = 0;
   double add21_i_de = 0;
   double add47_de = 1.0;
   double add_i136_de = 0.0;
@@ -129,6 +135,9 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
   double mul20_i_de = 0;
   double mul42_de = 0;
   double mul_i113_de = 0;
+  double de = 0;
+  double de25 = 0;
+  double de26 = 0;
   double de30 = 0;
   double de31 = 0;
   double de32 = 0;
@@ -320,6 +329,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
       /* invertfor.body.i109.preheader */
       /* invertcQtimesx.exit */
       // DEBUG_POINT_6
+      // looks correct
       double m0diffe91 = mul_i102_de * _cache82[ix * k + ik];
       mul_i102_de = 0;
       de35 += m0diffe91;
@@ -366,7 +376,6 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
             de62 += _308;
             mul20_i_de += _308;
             double m0diffe71 = mul20_i_de * _cache[ix * k * d + ik * d + i];
-            printf("read cache: %.4e\n", _cache[ix * k * d + ik * d + i]);
             int64_t Lidx = (2 * d + (((int32_t)i) ^ -1)) * i / 2 + j;
             double m1diffe78 = mul20_i_de * Ls[ik * tri_size_conv + Lidx];
             mul20_i_de = 0;
@@ -378,7 +387,6 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
             double _354 = de62;
             de62 = 0;
             Qxcenteredb_ipc40[i + 1 + j] += _354;
-            // printf("_cache: %lld\n", i);
           }
           /* invertfor.body13.lr.ph.i */
           double _295 = de59;
@@ -392,8 +400,8 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
       for (int64_t i = d - 1; i >= 0; i--) {
         /* invertfor.body.i114 */
         // DEBUG_POINT_9
-        double _231 = Qxcenteredb_ipc40[0];
-        Qxcenteredb_ipc40[0] = 0;
+        double _231 = Qxcenteredb_ipc40[i];
+        Qxcenteredb_ipc40[i] = 0;
         mul_i113_de += _231;
         double m0diffe = mul_i113_de * _cache[ix * k * d + ik * d + i];
         double m1diffe = mul_i113_de * Qdiags_0[ik * d + i];
@@ -443,10 +451,53 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
     add47_de += (ix == 0) ? 0.0 : _184;
   }
   /* invertfor.cond19.preheader.lr.ph */
-
   free(_cache);
   free(_cache82);
   free(_cache98);
+  free(cmp2_ii_manual_lcssa_cache);
+  free(manual_lcssa126_cache);
+  free(sub_i135_cache);
+  free(sub_i_cache);
+  free(add_imanual_lcssa154_cache);
+
+  /* invertpreprocess_qs.exit */
+  /* invertpreprocess_qs.exit.loopexit */
+  for (int64_t ik = k - 1; ik >= 0; ik--) {
+    /* invertfor.inc15.i */
+    // DEBUG_POINT_12
+    /* invertfor.inc15.i.loopexit */
+    double _146 = sum_qsb_ipc[ik];
+    sum_qsb_ipc[ik] = 0;
+    add8_i_de += _146;
+    for (int64_t i = d - 1; i >= 0; i--) {
+      /* invertfor.body3.i */
+      double _115 = Qdiagsb_ipc21[ik * d + i];
+      Qdiagsb_ipc21[ik * d + i] = 0;
+      de += _115;
+      double _118 = de;
+      de = 0;
+      de25 += _118 * exp(Qs[ik * d + i]);
+      double _125 = add8_i_de;
+      add8_i_de = 0;
+      de26 += _125;
+      de25 += _125;
+      double _130 = de25;
+      de25 = 0;
+      Qsb[ik * d + i] += _130;
+      double _135 = de26;
+      de26 = 0;
+      add8_i_de += (i == 0) ? 0.0 : _135;
+    }
+    /* invertfor.body3.lr.ph.i */
+    /* invertfor.body.i */
+    sum_qsb_ipc[ik] = 0;
+  }
+  /* invertfor.body.lr.ph.i */
+  /* invertentry */
+  free(main_termb_ipc116);
+  free(Qxcenteredb_ipc40);
+  free(xcenteredb_ipc37);
+  free(sum_qsb_ipc);
   free(Qdiagsb_ipc21);
   free(Qdiags_0);
 }

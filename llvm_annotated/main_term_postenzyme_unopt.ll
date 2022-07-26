@@ -6,6 +6,7 @@ target triple = "x86_64-apple-macosx10.15.0"
 @enzyme_const = external local_unnamed_addr global i32, align 4
 @.mystr = private unnamed_addr constant [13 x i8] c"index: %lld\0A\00", align 1
 @.flstr = private unnamed_addr constant [13 x i8] c"debug: %.4e\0A\00", align 1
+@.354str = private unnamed_addr constant [13 x i8] c"ll354: %.4e\0A\00", align 1
 
 ; Function Attrs: nofree nounwind
 declare noundef i32 @printf(i8* nocapture noundef readonly, ...) local_unnamed_addr #1
@@ -718,21 +719,28 @@ invertfor.body3.lr.ph.i:                          ; preds = %invertfor.body3.i
   br label %invertfor.body.i
 
 invertfor.body3.i:                                ; preds = %mergeinvertfor.body3.i_for.inc15.i.loopexit, %incinvertfor.body3.i
+  ;; id
   %113 = load i64, i64* %"iv1'ac", align 8
+  ;; ik
   %114 = load i64, i64* %"iv'ac", align 8
   %_unwrap = trunc i64 %114 to i32
+  ;; ik * d
   %mul.i_unwrap = mul nsw i32 %_unwrap, %d
   %_unwrap22 = sext i32 %mul.i_unwrap to i64
+  ;; ik * d + id
   %_unwrap23 = add nsw i64 %113, %_unwrap22
   %"arrayidx14.i'ipg_unwrap" = getelementptr inbounds double, double* %"'ipc21", i64 %_unwrap23
   %115 = load double, double* %"arrayidx14.i'ipg_unwrap", align 8
   store double 0.000000e+00, double* %"arrayidx14.i'ipg_unwrap", align 8
+
   %116 = load double, double* %"'de", align 8
   %117 = fadd fast double %116, %115
   store double %117, double* %"'de", align 8
   %118 = load double, double* %"'de", align 8
   store double 0.000000e+00, double* %"'de", align 8
+  ;; id
   %119 = load i64, i64* %"iv1'ac", align 8
+  ;; ik
   %120 = load i64, i64* %"iv'ac", align 8
   %arrayidx5.i_unwrap = getelementptr inbounds double, double* %Qs, i64 %_unwrap23
   %_unwrap24 = load double, double* %arrayidx5.i_unwrap, align 8, !tbaa !3, !invariant.group !42
@@ -743,9 +751,11 @@ invertfor.body3.i:                                ; preds = %mergeinvertfor.body
   store double %124, double* %"'de25", align 8
   %125 = load double, double* %"add8.i'de", align 8
   store double 0.000000e+00, double* %"add8.i'de", align 8
+
   %126 = load double, double* %"'de26", align 8
   %127 = fadd fast double %126, %125
   store double %127, double* %"'de26", align 8
+
   %128 = load double, double* %"'de25", align 8
   %129 = fadd fast double %128, %125
   store double %129, double* %"'de25", align 8
@@ -753,15 +763,18 @@ invertfor.body3.i:                                ; preds = %mergeinvertfor.body
   store double 0.000000e+00, double* %"'de25", align 8
   %131 = load i64, i64* %"iv1'ac", align 8
   %132 = load i64, i64* %"iv'ac", align 8
+
   %"arrayidx5.i'ipg_unwrap" = getelementptr inbounds double, double* %"Qs'", i64 %_unwrap23
   %133 = load double, double* %"arrayidx5.i'ipg_unwrap", align 8
   %134 = fadd fast double %133, %130
   store double %134, double* %"arrayidx5.i'ipg_unwrap", align 8
+
   %135 = load double, double* %"'de26", align 8
   store double 0.000000e+00, double* %"'de26", align 8
   %136 = load i64, i64* %"iv1'ac", align 8
   %137 = icmp eq i64 %136, 0
   %138 = xor i1 %137, true
+  ; unused
   %139 = select fast i1 %138, double %135, double 0.000000e+00
   %140 = load double, double* %"add8.i'de", align 8
   %141 = fadd fast double %140, %135
@@ -776,10 +789,13 @@ incinvertfor.body3.i:                             ; preds = %invertfor.body3.i
   br label %invertfor.body3.i
 
 invertfor.inc15.i.loopexit:                       ; preds = %invertfor.inc15.i
+  ;; DEBUG_POINT_12
+  ;; ik
   %145 = load i64, i64* %"iv'ac", align 8
   %"arrayidx.i'ipg_unwrap27" = getelementptr inbounds double, double* %"'ipc", i64 %145
   %146 = load double, double* %"arrayidx.i'ipg_unwrap27", align 8
   store double 0.000000e+00, double* %"arrayidx.i'ipg_unwrap27", align 8
+
   %147 = load double, double* %"add8.i'de", align 8
   %148 = fadd fast double %147, %146
   store double %148, double* %"add8.i'de", align 8
@@ -789,24 +805,29 @@ invertfor.inc15.i.loopexit:                       ; preds = %invertfor.inc15.i
   br label %mergeinvertfor.body3.i_for.inc15.i.loopexit
 
 mergeinvertfor.body3.i_for.inc15.i.loopexit:      ; preds = %invertfor.inc15.i.loopexit
+  ;; id
   store i64 %_unwrap28, i64* %"iv1'ac", align 8
   br label %invertfor.body3.i
 
 invertfor.inc15.i:                                ; preds = %mergeinvertfor.body.i_preprocess_qs.exit.loopexit, %incinvertfor.body.i
   %150 = load i64, i64* %"iv'ac", align 8
+  ;; always true, d > 0
   %cmp235.i_unwrap = icmp sgt i32 %d, 0
   br i1 %cmp235.i_unwrap, label %invertfor.inc15.i.loopexit, label %invertfor.body.i
 
 invertpreprocess_qs.exit.loopexit:                ; preds = %invertpreprocess_qs.exit
   %wide.trip.count44.i_unwrap = zext i32 %k to i64
+  ;; k - 1
   %_unwrap29 = add nsw i64 %wide.trip.count44.i_unwrap, -1
   br label %mergeinvertfor.body.i_preprocess_qs.exit.loopexit
 
 mergeinvertfor.body.i_preprocess_qs.exit.loopexit: ; preds = %invertpreprocess_qs.exit.loopexit
+  ;; iv'ac is ik
   store i64 %_unwrap29, i64* %"iv'ac", align 8
   br label %invertfor.inc15.i
 
 invertpreprocess_qs.exit:                         ; preds = %invertfor.end50, %invertfor.cond19.preheader.lr.ph
+  ;; always true
   br i1 %cmp37.i, label %invertpreprocess_qs.exit.loopexit, label %invertentry
 
 invertfor.cond19.preheader.lr.ph:                 ; preds = %invertfor.cond19.preheader
@@ -1169,10 +1190,9 @@ invertfor.body13.i:                               ; preds = %incinvertfor.body13
   %306 = load double, double* %"add21.i'de", align 8
   %307 = fadd fast double %306, %305
   store double %307, double* %"add21.i'de", align 8
-  ; bookmark2
 
-  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %307)
   %308 = load double, double* %"add21.i'de", align 8
+  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %308)
   store double 0.000000e+00, double* %"add21.i'de", align 8
 
   %309 = load double, double* %"'de62", align 8
@@ -1227,7 +1247,6 @@ invertfor.body13.i:                               ; preds = %incinvertfor.body13
   %337 = getelementptr inbounds double, double* %336, i64 %315
   %338 = load double, double* %337, align 8, !invariant.group !61
   ;; bookmark4
-  %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %338)
   %m0diffe71 = fmul fast double %313, %338
   %339 = load i64, i64* %"iv13'ac", align 8
   %340 = load i64, i64* %"iv11'ac", align 8
@@ -1251,6 +1270,7 @@ invertfor.body13.i:                               ; preds = %incinvertfor.body13
   %arrayidx17.i_unwrap = getelementptr inbounds double, double* %arrayidx35_unwrap, i64 %_unwrap76
   %_unwrap77 = load double, double* %arrayidx17.i_unwrap, align 8, !tbaa !3, !invariant.group !53
   %m1diffe78 = fmul fast double %313, %_unwrap77
+  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %m1diffe78)
   store double 0.000000e+00, double* %"mul20.i'de", align 8
 
   %343 = load double, double* %"'de79", align 8
@@ -1297,6 +1317,7 @@ invertcQtimesx.exit.loopexit:                     ; preds = %invertcQtimesx.exit
   %363 = load double, double* %"'ipc40", align 8
   %364 = fadd fast double %363, %362
   store double %364, double* %"'ipc40", align 8
+  ; %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %364)
 
   %365 = load i64, i64* %"iv5'ac", align 8
   %366 = load i64, i64* %"iv3'ac", align 8
