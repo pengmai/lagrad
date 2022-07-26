@@ -1226,6 +1226,8 @@ invertfor.body13.i:                               ; preds = %incinvertfor.body13
   %336 = getelementptr inbounds double, double* %322, i64 %335
   %337 = getelementptr inbounds double, double* %336, i64 %315
   %338 = load double, double* %337, align 8, !invariant.group !61
+  ;; bookmark4
+  %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %338)
   %m0diffe71 = fmul fast double %313, %338
   %339 = load i64, i64* %"iv13'ac", align 8
   %340 = load i64, i64* %"iv11'ac", align 8
@@ -1290,7 +1292,6 @@ incinvertfor.body13.i:                            ; preds = %invertfor.body13.i
 invertcQtimesx.exit.loopexit:                     ; preds = %invertcQtimesx.exit
   %362 = load double, double* %".pre'de", align 8
 
-  %printfc4ll = tail call i32 (i8*, ...) @printf(i8* nonnull dereferenceable(1) getelementptr inbounds ([13 x i8], [13 x i8]* @.flstr, i64 0, i64 0), double %362)
   store double 0.000000e+00, double* %".pre'de", align 8
 
   %363 = load double, double* %"'ipc40", align 8

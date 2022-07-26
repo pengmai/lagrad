@@ -62,7 +62,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
       for (int64_t i = 0; i < d; i++) {
         xcentered_2[i] = x[ix * d + i] - means[ik * d + i];
       }
-      memcpy(&_cache[ix * k + ik], xcentered_2, d * sizeof(double));
+      memcpy(&_cache[ix * k * d + ik * d], xcentered_2, d * sizeof(double));
 
       // Qtimesx
       for (int64_t i = 0; i < d; i++) {
@@ -345,7 +345,6 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
 
       /* invertcQtimesx.exit.loopexit */
       double _362 = pre_de; // this matches
-      printf("_362: %.4e\n", _362);
       pre_de = 0;
       Qxcenteredb_ipc40[0] += _362;
       /* mergeinvertfor.body7.i_cQtimesx.exit.loopexit */
@@ -367,6 +366,7 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
             de62 += _308;
             mul20_i_de += _308;
             double m0diffe71 = mul20_i_de * _cache[ix * k * d + ik * d + i];
+            printf("read cache: %.4e\n", _cache[ix * k * d + ik * d + i]);
             int64_t Lidx = (2 * d + (((int32_t)i) ^ -1)) * i / 2 + j;
             double m1diffe78 = mul20_i_de * Ls[ik * tri_size_conv + Lidx];
             mul20_i_de = 0;
@@ -378,10 +378,10 @@ void main_term_raised(int d, int k, int n, double const *restrict alphas,
             double _354 = de62;
             de62 = 0;
             Qxcenteredb_ipc40[i + 1 + j] += _354;
+            // printf("_cache: %lld\n", i);
           }
           /* invertfor.body13.lr.ph.i */
           double _295 = de59;
-          // printf("295: %.4e\n", _295);
           de59 = 0;
           xcenteredb_ipc37[i] += _295;
           /* invertfor.body7.i */
