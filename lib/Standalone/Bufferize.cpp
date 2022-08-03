@@ -22,12 +22,20 @@
 using namespace mlir;
 using llvm::errs;
 // constexpr bool in_place = false;
+constexpr bool disable_ie_analysis = false;
 
 namespace {
 struct InsertExtractAnalysis {
   InsertExtractAnalysis(Operation *op) {
+    if (disable_ie_analysis) {
+      return;
+    }
+
     DominanceInfo dom;
     op->walk([&](tensor::ExtractSliceOp op) {
+      if (op->hasAttr("dontdoit")) {
+        return;
+      }
       auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
       if (maybeInsertSliceOp.hasValue()) {
         extract_to_insert[op] = maybeInsertSliceOp.getValue();
@@ -102,7 +110,15 @@ private:
       }
     }
 
-    if (isWrittenInPlace && insertSliceOp &&
+    bool linked = false;
+    if (insertSliceOp) {
+      SmallVector<Value> frontier{op.getResult()};
+      ValueSet derivedFromResult;
+      runTopDownDFS(frontier, derivedFromResult);
+      linked = derivedFromResult.contains(insertSliceOp.source());
+    }
+
+    if (linked && isWrittenInPlace && insertSliceOp &&
         (insertSliceOp.getMixedOffsets() == op.getMixedOffsets()) &&
         (insertSliceOp.getMixedSizes() == op.getMixedSizes()) &&
         (insertSliceOp.getMixedStrides() == op.getMixedStrides())) {
@@ -111,6 +127,33 @@ private:
     return llvm::None;
   }
 };
+
+void bufferizeLinalgOp(linalg::LinalgOp linalgOp, ValueRange outputBuffers,
+                       ValueRange results, TypeConverter &typeConverter,
+                       ConversionPatternRewriter &rewriter) {
+  PatternRewriter::InsertionGuard g(rewriter);
+  rewriter.setInsertionPoint(linalgOp);
+
+  SmallVector<Value> newOperands;
+  newOperands.reserve(linalgOp.getNumInputsAndOutputs());
+  for (OpOperand *inputOperand : linalgOp.getInputTensorOperands()) {
+    newOperands.push_back(rewriter.create<memref::BufferCastOp>(
+        linalgOp.getLoc(),
+        typeConverter.convertType(inputOperand->get().getType()),
+        inputOperand->get()));
+  }
+  newOperands.append(outputBuffers.begin(), outputBuffers.end());
+
+  assert(linalgOp->getNumRegions() == 1 &&
+         "expected linalg op to have 1 region");
+  auto newOp = cast<linalg::LinalgOp>(linalgOp.cloneWithoutRegions(
+      rewriter, linalgOp.getLoc(), TypeRange{}, newOperands));
+  rewriter.inlineRegionBefore(linalgOp->getRegion(0), newOp->getRegion(0),
+                              newOp->getRegion(0).begin());
+
+  // The number of output buffers should always be 1 for now.
+  rewriter.replaceOp(linalgOp, results);
+}
 
 class BufferizeInsertExtractPair : public ConversionPattern {
 public:
@@ -130,8 +173,6 @@ public:
       return failure();
     }
     auto insertSliceOp = ieAnalysis.getPairedInsertSlice(extractSliceOp);
-
-    errs() << "running insertextract pair op at loc: " << op->getLoc() << "\n";
     auto sliceType = extractSliceOp.getType();
     auto sourceType = getTypeConverter()
                           ->convertType(extractSliceOp.getSourceType())
@@ -161,29 +202,9 @@ public:
       if (ieAnalysis.isLinalgMarkedForBufferization(use.getOwner())) {
         auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner());
         if (linalgOp.isOutputTensor(&use)) {
-          /* Begin bufferizing linalg op */
-          SmallVector<Value> newOperands;
-          newOperands.reserve(linalgOp.getNumInputsAndOutputs());
-          for (OpOperand *inputOperand : linalgOp.getInputTensorOperands()) {
-            newOperands.push_back(rewriter.create<memref::BufferCastOp>(
-                linalgOp.getLoc(),
-                getTypeConverter()->convertType(inputOperand->get().getType()),
-                inputOperand->get()));
-          }
-          newOperands.push_back(subview);
-
-          assert(linalgOp->getNumRegions() == 1 &&
-                 "expected linalg op to have 1 region");
-          auto newOp = cast<linalg::LinalgOp>(linalgOp.cloneWithoutRegions(
-              rewriter, linalgOp.getLoc(), TypeRange{}, newOperands));
-          rewriter.inlineRegionBefore(linalgOp->getRegion(0),
-                                      newOp->getRegion(0),
-                                      newOp->getRegion(0).begin());
-
-          // The number of output buffers should always be 1 for now.
-          rewriter.replaceOp(linalgOp, loaded.getResult());
-          /* End bufferizing linalg op*/
-          //   }
+          bufferizeLinalgOp(linalgOp, /*outputBuffers=*/subview.getResult(),
+                            /*results=*/loaded.getResult(), *getTypeConverter(),
+                            rewriter);
         }
       }
     }
