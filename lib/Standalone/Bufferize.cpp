@@ -33,9 +33,6 @@ struct InsertExtractAnalysis {
 
     DominanceInfo dom;
     op->walk([&](tensor::ExtractSliceOp op) {
-      if (op->hasAttr("dontdoit")) {
-        return;
-      }
       auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
       if (maybeInsertSliceOp.hasValue()) {
         extract_to_insert[op] = maybeInsertSliceOp.getValue();
