@@ -3,6 +3,7 @@
  * Motivated by a lack of bufferization for the tensor.insert op.
  */
 #include "mlir/Transforms/Bufferize.h"
+#include "Standalone/Logger.h"
 #include "Standalone/Passes.h"
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
@@ -29,17 +30,43 @@ struct InsertExtractAnalysis {
     op->walk([&](tensor::ExtractSliceOp op) {
       auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
       if (maybeInsertSliceOp.hasValue()) {
-        errs() << "matched extract_slice: " << op << "with insert_slice "
-               << maybeInsertSliceOp.getValue() << "\n";
         extract_to_insert[op] = maybeInsertSliceOp.getValue();
         matchingInserts.insert(maybeInsertSliceOp.getValue());
+        for (auto &use : op.getResult().getUses()) {
+          if (auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner())) {
+            // Only handle the case where the linalg op has one output for now.
+            if (linalgOp.isOutputTensor(&use) &&
+                linalgOp.getNumOutputs() == 1 &&
+                linalgOp.hasTensorSemantics()) {
+              linalgInPlaceOps.insert(linalgOp);
+            }
+          }
+        }
       }
     });
   }
-  DenseMap<Operation *, Operation *> extract_to_insert;
-  DenseSet<Operation *> matchingInserts;
+
+  bool isPairedExtractSlice(tensor::ExtractSliceOp op) const {
+    return extract_to_insert.count(op) > 0;
+  }
+
+  bool isPairedInsertSlice(tensor::InsertSliceOp op) const {
+    return matchingInserts.contains(op);
+  }
+
+  tensor::InsertSliceOp getPairedInsertSlice(tensor::ExtractSliceOp op) const {
+    return cast<tensor::InsertSliceOp>(extract_to_insert.lookup(op));
+  }
+
+  bool isLinalgMarkedForBufferization(Operation *op) const {
+    return linalgInPlaceOps.count(op) > 0;
+  }
 
 private:
+  DenseMap<Operation *, Operation *> extract_to_insert;
+  DenseSet<Operation *> matchingInserts;
+  DenseSet<Operation *> linalgInPlaceOps;
+
   Optional<tensor::InsertSliceOp>
   getMatchingInsertSlice(tensor::ExtractSliceOp op,
                          const DominanceInfo &dom) const {
@@ -85,11 +112,10 @@ public:
       return failure();
     }
     auto extractSliceOp = cast<tensor::ExtractSliceOp>(op);
-    if (ieAnalysis.extract_to_insert.count(op) == 0) {
+    if (!ieAnalysis.isPairedExtractSlice(extractSliceOp)) {
       return failure();
     }
-    auto insertSliceOp =
-        cast<tensor::InsertSliceOp>(ieAnalysis.extract_to_insert.lookup(op));
+    auto insertSliceOp = ieAnalysis.getPairedInsertSlice(extractSliceOp);
 
     errs() << "running insertextract pair op at loc: " << op->getLoc() << "\n";
     auto sliceType = extractSliceOp.getType();
@@ -114,6 +140,43 @@ public:
     auto loaded = rewriter.create<memref::TensorLoadOp>(op->getLoc(), casted);
     rewriter.replaceOp(op, loaded.getResult());
     rewriter.replaceOp(insertSliceOp, extractSliceOp.source());
+
+    // Need to ensure linalg ops that write to the extractSliceOp are bufferized
+    // in-place.
+    for (auto &use : extractSliceOp.getResult().getUses()) {
+      if (ieAnalysis.isLinalgMarkedForBufferization(use.getOwner())) {
+        auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner());
+        if (linalgOp.isOutputTensor(&use)) {
+          errs() << YELLOW
+                 << "extract slice result used by a linalg op in output tensor "
+                    "position\n"
+                 << RESET;
+          /* Begin bufferizing linalg op */
+          SmallVector<Value> newOperands;
+          newOperands.reserve(linalgOp.getNumInputsAndOutputs());
+          for (OpOperand *inputOperand : linalgOp.getInputTensorOperands()) {
+            newOperands.push_back(rewriter.create<memref::BufferCastOp>(
+                linalgOp.getLoc(),
+                getTypeConverter()->convertType(inputOperand->get().getType()),
+                inputOperand->get()));
+          }
+          newOperands.push_back(subview);
+
+          assert(linalgOp->getNumRegions() == 1 &&
+                 "expected linalg op to have 1 region");
+          auto newOp = cast<linalg::LinalgOp>(linalgOp.cloneWithoutRegions(
+              rewriter, linalgOp.getLoc(), TypeRange{}, newOperands));
+          rewriter.inlineRegionBefore(linalgOp->getRegion(0),
+                                      newOp->getRegion(0),
+                                      newOp->getRegion(0).begin());
+
+          // The number of output buffers should always be 1 for now.
+          rewriter.replaceOp(linalgOp, loaded.getResult());
+          /* End bufferizing linalg op*/
+          //   }
+        }
+      }
+    }
     return success();
   }
 
@@ -180,8 +243,7 @@ public:
   LogicalResult
   matchAndRewrite(tensor::ExtractSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (op.getDroppedDims().empty() ||
-        ieAnalysis.extract_to_insert.count(op) != 0) {
+    if (op.getDroppedDims().empty() || ieAnalysis.isPairedExtractSlice(op)) {
       // Only deal with rank reduced cases
       // If in the ieAnalysis, the dedicated pass will deal with it.
       return failure();
@@ -198,8 +260,8 @@ public:
     Value source = adaptor.source();
     // Ugly, brittle hack to get extract_slice with compressed GMMs working.
     // This results in the source having a fully dynamic layout map, which is
-    // okay, but partial bufferization appears to expect an identity layout map
-    // at the end of this transformation.
+    // okay, but partial bufferization appears to expect an identity layout
+    // map at the end of this transformation.
     if (sourceType.getDimSize(sourceType.getRank() - 1) == 1) {
       source = rewriter.create<memref::CastOp>(
           op.getLoc(), eraseStridedLayout(sourceType), source);
@@ -256,7 +318,7 @@ public:
   LogicalResult
   matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (ieAnalysis.matchingInserts.contains(op)) {
+    if (ieAnalysis.isPairedInsertSlice(op)) {
       // This op will be dealt with in the dedicated extract/insert slice pair
       // pass.
       return failure();
@@ -375,16 +437,18 @@ struct StandaloneBufferizePass
     BufferizeTypeConverter typeConverter;
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
+    auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
 
     target.addLegalDialect<memref::MemRefDialect>();
     target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
                                       StandardOpsDialect>([&](Operation *op) {
       return typeConverter.isLegal(op) || isa<arith::ConstantOp>(op);
     });
-    // target.addDynamicallyLegalDialect<linalg::LinalgDialect>(
-    //     [&](Operation *op) {
-    //       return typeConverter.isLegal(op);
-    //     });
+    target.addDynamicallyLegalDialect<linalg::LinalgDialect>(
+        [&](Operation *op) {
+          return typeConverter.isLegal(op) ||
+                 !ieAnalysis.isLinalgMarkedForBufferization(op);
+        });
     target.addLegalOp<CallOp>();
     target.addLegalOp<ReturnOp>();
     target.addLegalOp<linalg::CopyOp>();
@@ -394,7 +458,6 @@ struct StandaloneBufferizePass
     target.addLegalDialect<scf::SCFDialect>();
     populateBufferizeMaterializationLegality(target);
 
-    auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
     patterns.add<BufferizeInsertExtractPair>(ieAnalysis, typeConverter,
                                              patterns.getContext());
