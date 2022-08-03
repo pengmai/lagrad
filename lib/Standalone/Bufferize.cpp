@@ -88,7 +88,21 @@ private:
       return llvm::None;
     }
 
-    if (insertSliceOp &&
+    // We ultimately remove the insertSliceOp, so we must ensure that the
+    // subsequent ops write in-place.
+    bool isWrittenInPlace = false;
+    for (OpOperand &use : op.getResult().getUses()) {
+      if (auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner())) {
+        if (linalgOp.isOutputTensor(&use)) {
+          isWrittenInPlace = true;
+        }
+      } else if (auto forOp = dyn_cast<scf::ForOp>(use.getOwner())) {
+        // This is potentially a dangerous assumption.
+        isWrittenInPlace = true;
+      }
+    }
+
+    if (isWrittenInPlace && insertSliceOp &&
         (insertSliceOp.getMixedOffsets() == op.getMixedOffsets()) &&
         (insertSliceOp.getMixedSizes() == op.getMixedSizes()) &&
         (insertSliceOp.getMixedStrides() == op.getMixedStrides())) {
@@ -147,10 +161,6 @@ public:
       if (ieAnalysis.isLinalgMarkedForBufferization(use.getOwner())) {
         auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner());
         if (linalgOp.isOutputTensor(&use)) {
-          errs() << YELLOW
-                 << "extract slice result used by a linalg op in output tensor "
-                    "position\n"
-                 << RESET;
           /* Begin bufferizing linalg op */
           SmallVector<Value> newOperands;
           newOperands.reserve(linalgOp.getNumInputsAndOutputs());
