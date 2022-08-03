@@ -7,6 +7,7 @@
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/Transforms/ComprehensiveBufferize.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -18,9 +19,108 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
+using llvm::errs;
 // constexpr bool in_place = false;
 
 namespace {
+struct InsertExtractAnalysis {
+  InsertExtractAnalysis(Operation *op) {
+    DominanceInfo dom;
+    op->walk([&](tensor::ExtractSliceOp op) {
+      auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
+      if (maybeInsertSliceOp.hasValue()) {
+        errs() << "matched extract_slice: " << op << "with insert_slice "
+               << maybeInsertSliceOp.getValue() << "\n";
+        extract_to_insert[op] = maybeInsertSliceOp.getValue();
+        matchingInserts.insert(maybeInsertSliceOp.getValue());
+      }
+    });
+  }
+  DenseMap<Operation *, Operation *> extract_to_insert;
+  DenseSet<Operation *> matchingInserts;
+
+private:
+  Optional<tensor::InsertSliceOp>
+  getMatchingInsertSlice(tensor::ExtractSliceOp op,
+                         const DominanceInfo &dom) const {
+    // The source of the extract slice should have exactly one use besides the
+    // extract slice op.
+    size_t domUseCount = 0;
+    tensor::InsertSliceOp insertSliceOp;
+    for (Operation *user : op.source().getUsers()) {
+      if (dom.properlyDominates(op.getResult(), user)) {
+        if (auto iso = dyn_cast<tensor::InsertSliceOp>(user)) {
+          if (iso.dest() == op.source()) {
+            insertSliceOp = iso;
+          }
+        }
+        domUseCount++;
+      }
+    }
+    if (domUseCount != 1) {
+      return llvm::None;
+    }
+
+    if (insertSliceOp &&
+        (insertSliceOp.getMixedOffsets() == op.getMixedOffsets()) &&
+        (insertSliceOp.getMixedSizes() == op.getMixedSizes()) &&
+        (insertSliceOp.getMixedStrides() == op.getMixedStrides())) {
+      return insertSliceOp;
+    }
+    return llvm::None;
+  }
+};
+
+class BufferizeInsertExtractPair : public ConversionPattern {
+public:
+  BufferizeInsertExtractPair(const InsertExtractAnalysis &ieAnalysis,
+                             TypeConverter &typeConverter, MLIRContext *ctx)
+      : ConversionPattern(typeConverter, MatchAnyOpTypeTag(), /*benefit=*/3,
+                          ctx),
+        ieAnalysis{ieAnalysis} {}
+  LogicalResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!isa<tensor::ExtractSliceOp>(op)) {
+      return failure();
+    }
+    auto extractSliceOp = cast<tensor::ExtractSliceOp>(op);
+    if (ieAnalysis.extract_to_insert.count(op) == 0) {
+      return failure();
+    }
+    auto insertSliceOp =
+        cast<tensor::InsertSliceOp>(ieAnalysis.extract_to_insert.lookup(op));
+
+    errs() << "running insertextract pair op at loc: " << op->getLoc() << "\n";
+    auto sliceType = extractSliceOp.getType();
+    auto sourceType = getTypeConverter()
+                          ->convertType(extractSliceOp.getSourceType())
+                          .cast<MemRefType>();
+
+    auto resultType = eraseStridedLayout(
+        memref::SubViewOp::inferRankReducedResultType(
+            sliceType.getRank(), sourceType, extractSliceOp.getMixedOffsets(),
+            extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides())
+            .cast<MemRefType>());
+    auto identityResultType =
+        getTypeConverter()->convertType(sliceType).cast<MemRefType>();
+    auto source = rewriter.create<memref::BufferCastOp>(
+        op->getLoc(), sourceType, extractSliceOp.source());
+    auto subview = rewriter.create<memref::SubViewOp>(
+        op->getLoc(), resultType, source, extractSliceOp.getMixedOffsets(),
+        extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
+    auto casted = rewriter.create<memref::CastOp>(
+        op->getLoc(), subview.getResult(), identityResultType);
+    auto loaded = rewriter.create<memref::TensorLoadOp>(op->getLoc(), casted);
+    rewriter.replaceOp(op, loaded.getResult());
+    rewriter.replaceOp(insertSliceOp, extractSliceOp.source());
+    return success();
+  }
+
+private:
+  const InsertExtractAnalysis &ieAnalysis;
+};
+
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
@@ -61,24 +161,29 @@ public:
     return success();
   }
 };
-} // namespace
-
-namespace {
 
 /**
  * Replace tensor.extract_slice ops with a combination of memref.subview and
- * memref.cast. This operation is fragile and will produce incorrect results if
- * the result carries over function lines.
+ * memref.cast.
  */
 class BufferizeExtractSliceOp
     : public OpConversionPattern<tensor::ExtractSliceOp> {
+private:
+  const InsertExtractAnalysis &ieAnalysis;
+
 public:
   using OpConversionPattern::OpConversionPattern;
+  BufferizeExtractSliceOp(const InsertExtractAnalysis &ieAnalysis,
+                          TypeConverter &typeConverter, MLIRContext *ctx)
+      : OpConversionPattern(typeConverter, ctx, /*benefit=*/1),
+        ieAnalysis{ieAnalysis} {}
   LogicalResult
   matchAndRewrite(tensor::ExtractSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (op.getDroppedDims().empty()) {
+    if (op.getDroppedDims().empty() ||
+        ieAnalysis.extract_to_insert.count(op) != 0) {
       // Only deal with rank reduced cases
+      // If in the ieAnalysis, the dedicated pass will deal with it.
       return failure();
     }
     auto resultTensorType =
@@ -89,17 +194,27 @@ public:
         op.getOffsetSizeAndStrideStartOperandIndex() != 1) {
       return failure();
     }
+    auto sourceType = adaptor.source().getType().cast<MemRefType>();
+    Value source = adaptor.source();
+    // Ugly, brittle hack to get extract_slice with compressed GMMs working.
+    // This results in the source having a fully dynamic layout map, which is
+    // okay, but partial bufferization appears to expect an identity layout map
+    // at the end of this transformation.
+    if (sourceType.getDimSize(sourceType.getRank() - 1) == 1) {
+      source = rewriter.create<memref::CastOp>(
+          op.getLoc(), eraseStridedLayout(sourceType), source);
+    }
 
-    auto resultType = eraseStridedLayout(
-        memref::SubViewOp::inferRankReducedResultType(
-            resultRank, adaptor.source().getType().cast<MemRefType>(),
-            op.getMixedOffsets(), op.getMixedSizes(), op.getMixedStrides())
-            .cast<MemRefType>());
+    auto resultType =
+        eraseStridedLayout(memref::SubViewOp::inferRankReducedResultType(
+                               resultRank, sourceType, op.getMixedOffsets(),
+                               op.getMixedSizes(), op.getMixedStrides())
+                               .cast<MemRefType>());
     auto identityResultType =
         getTypeConverter()->convertType(resultTensorType).cast<MemRefType>();
 
     auto subview = rewriter.create<memref::SubViewOp>(
-        op.getLoc(), resultType, adaptor.source(), op.getMixedOffsets(),
+        op.getLoc(), resultType, source, op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
 
     DominanceInfo dom;
@@ -113,6 +228,8 @@ public:
       }
     }
     if (!hasWriteAfter) {
+      // rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op,
+      //                                                   subview.getResult());
       rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
                                                   identityResultType);
     } else {
@@ -124,16 +241,27 @@ public:
     return success();
   }
 };
-} // namespace
 
-namespace {
 class BufferizeInsertSliceOp
     : public OpConversionPattern<tensor::InsertSliceOp> {
+private:
+  const InsertExtractAnalysis &ieAnalysis;
+
 public:
   using OpConversionPattern::OpConversionPattern;
+  BufferizeInsertSliceOp(const InsertExtractAnalysis &ieAnalysis,
+                         TypeConverter &typeConverter, MLIRContext *ctx)
+      : OpConversionPattern(typeConverter, ctx, /*benefit=*/1),
+        ieAnalysis{ieAnalysis} {}
   LogicalResult
   matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    if (ieAnalysis.matchingInserts.contains(op)) {
+      // This op will be dealt with in the dedicated extract/insert slice pair
+      // pass.
+      return failure();
+    }
+
     DominanceInfo dom;
     bool hasUseAfter = false;
 
@@ -169,9 +297,69 @@ public:
     return success();
   }
 };
-} // namespace
 
-namespace {
+class BufferizeLinalgOp
+    : public OpInterfaceConversionPattern<linalg::LinalgOp> {
+public:
+  using OpInterfaceConversionPattern::OpInterfaceConversionPattern;
+  LogicalResult
+  matchAndRewrite(linalg::LinalgOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (op.hasBufferSemantics()) {
+      return failure();
+    }
+    DominanceInfo dom;
+    bool hasUseAfter = false;
+    for (auto user : op.getOutputOperand(0)->get().getUsers()) {
+      if (dom.properlyDominates(op->getResult(0), user)) {
+        hasUseAfter = true;
+      }
+    }
+    SmallVector<Value> newOperands{operands.begin(), operands.end()};
+    Operation *parentOp =
+        op.getOutputOperand(0)->get().getDefiningOp()
+            ?: op.getOutputOperand(0)->get().getParentRegion()->getParentOp();
+    bool isImmutableArg = false;
+    if (auto funcOp = dyn_cast<FuncOp>(parentOp)) {
+      auto blockArg = op.getOutputOperand(0)->get().cast<BlockArgument>();
+      // Function arguments are immutable by default.
+      isImmutableArg = !static_cast<bool>(
+          funcOp.getArgAttr(blockArg.getArgNumber(), "linalg.mutable"));
+    }
+    bool isConstantMemory = isa_and_nonnull<arith::ConstantOp>(parentOp);
+    bool mustCopy = hasUseAfter || isConstantMemory || isImmutableArg;
+
+    assert(op.getNumOutputs() == 1);
+    if (mustCopy) {
+      errs() << "Analysis determined we must copy: hasUseAfter " << hasUseAfter
+             << " isConstantMemory: " << isConstantMemory
+             << " isImmutableArg: " << isImmutableArg << "\n";
+      auto space = rewriter.create<memref::AllocOp>(
+          op.getLoc(), newOperands.back().getType().cast<MemRefType>());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), newOperands.back(), space);
+      newOperands[newOperands.size() - 1] = space;
+    } else {
+      op.emitRemark() << "Made in-place update";
+    }
+    SmallVector<Value> results;
+    results.reserve(op->getNumResults());
+    Operation *unknownOp = op;
+    auto linalgOp = cast<linalg::LinalgOp>(unknownOp);
+    assert(op->getNumRegions() == 1 && "expected linalg op to have 1 region");
+    auto newOp = cast<linalg::LinalgOp>(linalgOp.cloneWithoutRegions(
+        rewriter, op.getLoc(), TypeRange{}, newOperands));
+    rewriter.inlineRegionBefore(op->getRegion(0), newOp->getRegion(0),
+                                newOp->getRegion(0).begin());
+    for (auto outputBuffer : newOp.getOutputBufferOperands()) {
+      results.push_back(rewriter.create<memref::TensorLoadOp>(
+          op.getLoc(), outputBuffer->get()));
+    }
+
+    rewriter.replaceOp(op, results);
+    return success();
+  }
+};
+
 struct StandaloneBufferizePass
     : public PassWrapper<StandaloneBufferizePass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -190,19 +378,33 @@ struct StandaloneBufferizePass
 
     target.addLegalDialect<memref::MemRefDialect>();
     target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
-                                      StandardOpsDialect>(
-        [&](Operation *op) { return typeConverter.isLegal(op); });
+                                      StandardOpsDialect>([&](Operation *op) {
+      return typeConverter.isLegal(op) || isa<arith::ConstantOp>(op);
+    });
+    // target.addDynamicallyLegalDialect<linalg::LinalgDialect>(
+    //     [&](Operation *op) {
+    //       return typeConverter.isLegal(op);
+    //     });
     target.addLegalOp<CallOp>();
     target.addLegalOp<ReturnOp>();
     target.addLegalOp<linalg::CopyOp>();
     target.addLegalOp<linalg::YieldOp>();
+    target.addLegalOp<linalg::InitTensorOp>();
     target.addIllegalOp<tensor::InsertOp>();
     target.addLegalDialect<scf::SCFDialect>();
     populateBufferizeMaterializationLegality(target);
 
+    auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
-    patterns.add<BufferizeExtractSliceOp>(typeConverter, patterns.getContext());
-    patterns.add<BufferizeInsertSliceOp>(typeConverter, patterns.getContext());
+    patterns.add<BufferizeInsertExtractPair>(ieAnalysis, typeConverter,
+                                             patterns.getContext());
+    patterns.add<BufferizeExtractSliceOp>(ieAnalysis, typeConverter,
+                                          patterns.getContext());
+    patterns.add<BufferizeInsertSliceOp>(ieAnalysis, typeConverter,
+                                         patterns.getContext());
+    // patterns.add<BufferizeLinalgOp>(typeConverter,
+    // patterns.getContext());
+
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns)))) {
 
