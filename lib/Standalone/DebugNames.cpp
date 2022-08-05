@@ -1,3 +1,4 @@
+#include "Standalone/Logger.h"
 #include "Standalone/Utils.h"
 // #include <algorithm>
 #include <fstream>
@@ -8,6 +9,7 @@
 
 namespace mlir {
 using namespace mlir;
+using llvm::errs;
 // Trim functions taken from https://stackoverflow.com/a/25385766
 const char *ws = " \t\n\r\f\v";
 
@@ -46,6 +48,12 @@ void parseCommaSepParens(std::string src, SmallVector<std::string> &tokens) {
   auto end = src.find(',');
   while (end != std::string::npos) {
     subs = src.substr(start, end - start);
+    // Need to handle tensor encodings being separated with a comma
+    if (subs.find('<') != std::string::npos &&
+        subs.find('>') == std::string::npos) {
+      end = src.find(',', end + 1);
+      subs = src.substr(start, end - start);
+    }
     tokens.push_back(trim(subs));
     start = end + 1;
     end = src.find(',', start);
@@ -167,6 +175,30 @@ void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
     ctx.debug_names[funcOp.getArgument(i)] = trim(subs);
   }
   DEBUGpopulateRegion(funcOp.getCallableRegion(), sourceFile, ctx);
+}
+
+void Logger::red(MESSAGETYPE message) {
+  errs() << RED << message << "\n" << RESET;
+}
+
+void Logger::green(MESSAGETYPE message) {
+  errs() << GREEN << message << "\n" << RESET;
+}
+
+void Logger::yellow(MESSAGETYPE message) {
+  errs() << YELLOW << message << "\n" << RESET;
+}
+
+void Logger::blue(MESSAGETYPE message) {
+  errs() << BOLDBLUE << message << "\n" << RESET;
+}
+
+void Logger::magenta(MESSAGETYPE message) {
+  errs() << BOLDMAGENTA << message << "\n" << RESET;
+}
+
+void Logger::cyan(MESSAGETYPE message) {
+  errs() << CYAN << message << "\n" << RESET;
 }
 
 } // namespace mlir
