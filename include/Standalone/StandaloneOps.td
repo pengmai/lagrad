@@ -69,4 +69,19 @@ def Standalone_GradOp : Standalone_Op<"grad", [NoSideEffect]> {
     }];
 }
 
+// TODO: Look into interfaces to automate the verification
+def Standalone_PackOp : Standalone_Op<"pack", [NoSideEffect]> {
+    let summary = "convert fully materialized triangular tensor to packed";
+    let description = [{
+        The `standalone.pack` operation denotes a conversion from a fully materialized strictly lower triangular tensor to a packed triangular tensor.
+    }];
+
+    let arguments = (ins AnyTensor:$source);
+    let results = (outs AnyTensor:$dest);
+
+    let assemblyFormat = [{
+        $source attr-dict `:` type($source) `to` type($dest)
+    }];
+}
+
 #endif // STANDALONE_OPS

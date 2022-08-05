@@ -1,4 +1,5 @@
 #include "Standalone/Utils.h"
+#include "Standalone/StandaloneOps.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -221,15 +222,19 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init) {
     return rewriter.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 0.0));
   }
-  if (operand.getType().isa<ShapedType>()) {
-    auto shapedType = operand.getType().dyn_cast<ShapedType>();
+  if (auto shapedType = operand.getType().dyn_cast<RankedTensorType>()) {
     assert(shapedType.getNumDynamicDims() == 0 &&
            "expected getZero to have static shape");
     if (init) {
       auto zero = rewriter.create<arith::ConstantOp>(
           loc, FloatAttr::get(shapedType.getElementType(), 0.0));
-      auto space = rewriter.create<linalg::InitTensorOp>(
+      // init_tensor ops don't support encodings out of the box.
+      Value space = rewriter.create<linalg::InitTensorOp>(
           loc, shapedType.getShape(), shapedType.getElementType());
+      if (shapedType.getEncoding()) {
+        space = rewriter.create<standalone::PackOp>(loc, shapedType, space);
+        // space = rewriter.create<tensor::CastOp>(loc, shapedType, space);
+      }
       auto filled = rewriter.create<linalg::FillOp>(loc, zero, space);
       return filled.getResult(0);
     } else {
@@ -621,7 +626,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           extractSliceOp.getResult().getType().cast<RankedTensorType>();
       bool requires_add = env[operand] != nullptr;
       auto space = requires_add ? env[operand]
-                                : getZero(operand.getLoc(), operand, rewriter,
+                                : getZero(op->getLoc(), operand, rewriter,
                                           /*init=*/true);
       Value new_value = vjp_value;
       if (requires_add) {
@@ -1021,6 +1026,8 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
       }
     }
   }
+  adjoint->setAttr("adjoint of " + ctx.debug_names[op.getResult(0)],
+                   UnitAttr::get(op.getContext()));
 
   return adjoint.getResult(0);
 }

@@ -1,5 +1,6 @@
 #include "Standalone/Logger.h"
 #include "Standalone/Passes.h"
+#include "Standalone/StandaloneOps.h"
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
@@ -57,7 +58,9 @@ static void unpackRanges(ArrayRef<Range> ranges, SmallVectorImpl<Value> &lbs,
 
 static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
                                                      AffineMap map,
-                                                     ArrayRef<Value> vals) {
+                                                     ArrayRef<Value> vals,
+                                                     Type operandType,
+                                                     ValueRange trilIndices) {
   if (map.isEmpty())
     return {};
 
@@ -66,10 +69,15 @@ static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
   res.reserve(map.getNumResults());
   auto dims = map.getNumDims();
   for (auto e : map.getResults()) {
-    auto exprMap = AffineMap::get(dims, map.getNumSymbols(), e);
-    SmallVector<Value> operands(vals.begin(), vals.end());
-    canonicalizeMapAndOperands(&exprMap, &operands);
-    res.push_back(b.create<AffineApplyOp>(loc, exprMap, operands));
+    if (hasPackedEncoding(operandType)) {
+      auto exprMap = AffineMap::get(dims, map.getNumSymbols(), e);
+      res.push_back(b.create<AffineApplyOp>(loc, exprMap, trilIndices));
+    } else {
+      auto exprMap = AffineMap::get(dims, map.getNumSymbols(), e);
+      SmallVector<Value> operands(vals.begin(), vals.end());
+      canonicalizeMapAndOperands(&exprMap, &operands);
+      res.push_back(b.create<AffineApplyOp>(loc, exprMap, operands));
+    }
   }
   return res;
 }
@@ -131,6 +139,11 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   auto Lidx = b.create<arith::AddIOp>(
       loc, b.create<arith::SubIOp>(loc, jv, ivPlusOne), LidxInit);
 
+  // The zero is a temporary placeholder to pass the
+  // verifier. We expect it to be removed when the packed annotation is
+  // converted to the proper packed type.
+  auto trilIndices = ValueRange{zero, Lidx};
+
   // 1.a. Emit load from input operands or for scalars access the operand
   // itself.
   for (auto inputOperand : linalgOp.getInputOperands()) {
@@ -138,19 +151,11 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
       indexedValues.push_back(inputOperand->get());
       continue;
     }
-    if (hasPackedEncoding(inputOperand->get().getType())) {
-      // We require a specific indexing map, essentially accessing the loop in
-      // reverse order. The zero is a temporary placeholder to pass the
-      // verifier. We expect it to be removed when the packed annotation is
-      // converted to the proper packed type.
-      indexedValues.push_back(b.create<tensor::ExtractOp>(
-          loc, inputOperand->get(), ValueRange{Lidx, zero}));
-    } else {
-      auto indexing = makeCanonicalAffineApplies(
-          b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims);
-      indexedValues.push_back(
-          b.create<tensor::ExtractOp>(loc, inputOperand->get(), indexing));
-    }
+    auto indexing = makeCanonicalAffineApplies(
+        b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims,
+        inputOperand->get().getType(), trilIndices);
+    indexedValues.push_back(
+        b.create<tensor::ExtractOp>(loc, inputOperand->get(), indexing));
   }
 
   // 1.b. Emit load from output views.
@@ -159,7 +164,8 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
     Value iterArg = std::get<1>(pair);
 
     auto indexing = makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims);
+        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims,
+        outputOperand->get().getType(), trilIndices);
     indexedValues.push_back(
         b.create<tensor::ExtractOp>(loc, iterArg, indexing));
   }
@@ -170,7 +176,8 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   SmallVector<SmallVector<Value>, 8> indexing;
   for (auto outputOperand : linalgOp.getOutputTensorOperands()) {
     indexing.push_back(makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims));
+        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims,
+        outputOperand->get().getType(), trilIndices));
   }
   return inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
                                   outputTensors);
@@ -236,6 +243,8 @@ RankedTensorType convertToPackedType(RankedTensorType tensorType) {
   }
 
   int64_t triDim = tensorType.getShape().back();
+  assert(triDim == tensorType.getShape().rbegin()[1] &&
+         "triangular packed shape was not square");
   int64_t triSize = triDim * (triDim - 1) / 2;
   SmallVector<int64_t> packedShape =
       llvm::to_vector<4>(tensorType.getShape().drop_back(1));
@@ -255,6 +264,7 @@ struct PackedTensorUsageAnalysis {
   }
 
   bool usesPackedTensor(Operation *op) const { return cache.contains(op); }
+  void removeMark(Operation *op) { cache.erase(op); }
 
 private:
   DenseSet<Operation *> cache;
@@ -300,6 +310,17 @@ private:
   }
 };
 
+class ErasePackedCallOp : public OpRewritePattern<CallOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(CallOp op,
+                                PatternRewriter &rewriter) const override {
+    auto moduleOp = op->getParentOfType<ModuleOp>();
+    auto funcOp = cast<FuncOp>(moduleOp.lookupSymbol(op.calleeAttr()));
+    rewriter.replaceOpWithNewOp<CallOp>(op, funcOp, op.operands());
+    return success();
+  }
+};
+
 class ErasePackedExtractOp : public OpRewritePattern<tensor::ExtractOp> {
 private:
   const PackedTensorUsageAnalysis &packedTensorUsage;
@@ -312,18 +333,206 @@ public:
 
   LogicalResult matchAndRewrite(tensor::ExtractOp op,
                                 PatternRewriter &rewriter) const override {
-    auto tensorType = op.tensor().getType().cast<RankedTensorType>();
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
 
-    if (tensorType.isDynamicDim(tensorType.getRank() - 1)) {
-      llvm_unreachable(
-          "dynamic packed triangular matrices not yet implemented");
-    }
-
     rewriter.replaceOpWithNewOp<tensor::ExtractOp>(op, op.tensor(),
                                                    op.indices().drop_back(1));
+    return success();
+  }
+};
+
+class ErasePackedInsertOp : public OpRewritePattern<tensor::InsertOp> {
+private:
+  const PackedTensorUsageAnalysis &packedTensorUsage;
+
+public:
+  ErasePackedInsertOp(const PackedTensorUsageAnalysis &packedTensorUsage,
+                      MLIRContext *context)
+      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
+                                                      packedTensorUsage} {}
+  LogicalResult matchAndRewrite(tensor::InsertOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!packedTensorUsage.usesPackedTensor(op)) {
+      return failure();
+    }
+    rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(), op.dest(),
+                                                  op.indices().drop_back(1));
+    return success();
+  }
+};
+
+class ErasePackedExtractSliceOp
+    : public OpRewritePattern<tensor::ExtractSliceOp> {
+private:
+  const PackedTensorUsageAnalysis &packedTensorUsage;
+
+public:
+  ErasePackedExtractSliceOp(const PackedTensorUsageAnalysis &packedTensorUsage,
+                            MLIRContext *context)
+      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
+                                                      packedTensorUsage} {}
+  LogicalResult matchAndRewrite(tensor::ExtractSliceOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!packedTensorUsage.usesPackedTensor(op)) {
+      return failure();
+    }
+
+    int64_t triDim = op.getType().getShape().back();
+    assert(triDim == op.getType().getShape().rbegin()[1] &&
+           "triangular packed shape was not square");
+    int64_t triSize = triDim * (triDim - 1) / 2;
+    SmallVector<OpFoldResult, 4> offsets{op.getMixedOffsets()},
+        sizes{op.getMixedSizes()}, strides{op.getMixedStrides()};
+    // TODO: rework this to be more general. It currently assumes the full
+    // triangular matrix is extracted and the offset is always the same (i.e. is
+    // zero).
+    offsets.pop_back();
+    sizes.pop_back();
+    strides.pop_back();
+
+    sizes.back() =
+        IntegerAttr::get(IndexType::get(rewriter.getContext()), triSize);
+
+    rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
+        op, convertToPackedType(op.getType()), op.source(), offsets, sizes,
+        strides);
+    return success();
+  }
+};
+
+class ErasePackedInsertSliceOp
+    : public OpRewritePattern<tensor::InsertSliceOp> {
+private:
+  const PackedTensorUsageAnalysis &packedTensorUsage;
+
+public:
+  ErasePackedInsertSliceOp(const PackedTensorUsageAnalysis &packedTensorUsage,
+                           MLIRContext *context)
+      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
+                                                      packedTensorUsage} {}
+  LogicalResult matchAndRewrite(tensor::InsertSliceOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!packedTensorUsage.usesPackedTensor(op)) {
+      return failure();
+    }
+
+    int64_t triDim = op.getType().getShape().back();
+    assert(triDim == op.getType().getShape().rbegin()[1] &&
+           "triangular packed shape was not square");
+    int64_t triSize = triDim * (triDim - 1) / 2;
+    SmallVector<OpFoldResult, 4> offsets{op.getMixedOffsets()},
+        sizes{op.getMixedSizes()}, strides{op.getMixedStrides()};
+    // TODO: rework this to be more general. It currently assumes the full
+    // triangular matrix is extracted and the offset is always the same (i.e. is
+    // zero).
+    offsets.pop_back();
+    sizes.pop_back();
+    strides.pop_back();
+
+    sizes.back() =
+        IntegerAttr::get(IndexType::get(rewriter.getContext()), triSize);
+
+    rewriter.replaceOpWithNewOp<tensor::InsertSliceOp>(
+        op, op.source(), op.dest(), offsets, sizes, strides);
+    return success();
+  }
+};
+
+class ErasePackOp : public OpRewritePattern<standalone::PackOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(standalone::PackOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!hasPackedEncoding(op.getType())) {
+      return failure();
+    }
+    auto sourceType = op.source().getType().dyn_cast<RankedTensorType>();
+    auto destType = op.getType().dyn_cast<RankedTensorType>();
+    // Meant to handle a specific case where an explicit pack op is used because
+    // linalg.init_tensor can't make tensors with special encodings.
+    if (!(sourceType && destType &&
+          sourceType.getShape() == destType.getShape() &&
+          sourceType.getElementType() == destType.getElementType() &&
+          isa_and_nonnull<linalg::InitTensorOp>(op.source().getDefiningOp()))) {
+      return failure();
+    }
+    rewriter.replaceOpWithNewOp<linalg::InitTensorOp>(
+        op, convertToPackedType(destType).getShape(),
+        destType.getElementType());
+    return success();
+  }
+};
+
+class EraseEncoding : public RewritePattern {
+public:
+  EraseEncoding(MLIRContext *context)
+      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context) {}
+  LogicalResult matchAndRewrite(Operation *op,
+                                PatternRewriter &rewriter) const override {
+    if (isa<tensor::TensorDialect>(op->getDialect())) {
+      return failure();
+    }
+    if (llvm::none_of(op->getOperandTypes(),
+                      [&](Type type) { return hasPackedEncoding(type); }) &&
+        llvm::none_of(op->getResultTypes(),
+                      [&](Type type) { return hasPackedEncoding(type); })) {
+      return failure();
+    }
+
+    // TODO: Might be able to remove this special case
+    if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
+      assert(constOp.valueAttr().isa<SplatElementsAttr>() &&
+             "non-splat packed triangular constants not yet supported");
+      auto valueAttr = constOp.valueAttr().cast<SplatElementsAttr>();
+      rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+          constOp,
+          DenseElementsAttr::get(
+              convertToPackedType(constOp.getType().cast<RankedTensorType>()),
+              valueAttr.getSplatValue()));
+    } else {
+      rewriter.updateRootInPlace(op, [&]() {
+        for (auto operand : op->getOperands()) {
+          if (hasPackedEncoding(operand.getType())) {
+            operand.setType(convertToPackedType(
+                operand.getType().cast<RankedTensorType>()));
+          }
+        }
+        for (auto result : op->getResults()) {
+          if (hasPackedEncoding(result.getType())) {
+            result.setType(
+                convertToPackedType(result.getType().cast<RankedTensorType>()));
+          }
+        }
+      });
+    }
+    return success();
+  }
+};
+
+class ErasePackedForOp : public OpRewritePattern<scf::ForOp> {
+private:
+  const PackedTensorUsageAnalysis &packedTensorUsage;
+
+public:
+  ErasePackedForOp(const PackedTensorUsageAnalysis &packedTensorUsage,
+                   MLIRContext *context)
+      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
+                                                      packedTensorUsage} {}
+  LogicalResult matchAndRewrite(scf::ForOp op,
+                                PatternRewriter &rewriter) const override {
+    // TODO: Could remove this in favour of the more generic EraseEncoding
+    // pattern, would need to extend it to traverse region arguments.
+    Logger::blue("Running erase for op");
+    rewriter.updateRootInPlace(op, [&]() {
+      for (BlockArgument operand : op.getRegionIterArgs()) {
+        if (hasPackedEncoding(operand.getType())) {
+          operand.setType(
+              convertToPackedType(operand.getType().cast<RankedTensorType>()));
+        }
+      }
+    });
     return success();
   }
 };
@@ -362,10 +571,38 @@ struct PackTriangularPass
     RewritePatternSet erasurePatterns(context);
     ConversionTarget erasureTarget(*context);
 
+    auto packedPredicate = [&](Operation *op) {
+      return !packedTensorUsage.usesPackedTensor(op);
+    };
     erasureTarget.addDynamicallyLegalDialect<tensor::TensorDialect>(
-        [&](Operation *op) { return !packedTensorUsage.usesPackedTensor(op); });
-    erasurePatterns.add<ErasePackedExtractOp>(packedTensorUsage, context);
+        packedPredicate);
+    erasureTarget.addDynamicallyLegalOp<CallOp>(packedPredicate);
+    erasureTarget.addDynamicallyLegalDialect<arith::ArithmeticDialect>(
+        [&](Operation *op) {
+          auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
+          return llvm::none_of(op->getOperandTypes(), isPacked) &&
+                 llvm::none_of(op->getResultTypes(), isPacked);
+        });
+    erasureTarget.addDynamicallyLegalDialect<scf::SCFDialect>(
+        [&](Operation *op) {
+          auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
+          return llvm::none_of(op->getOperandTypes(), isPacked) &&
+                 llvm::none_of(op->getResultTypes(), isPacked);
+        });
+    erasureTarget.addLegalOp<linalg::InitTensorOp>();
+    // erasureTarget.addLegalOp<linalg::FillOp>();
+    // erasureTarget.addLegalOp<linalg::YieldOp>();
+
+    erasureTarget.addIllegalDialect<standalone::StandaloneDialect>();
     erasurePatterns.add<ErasePackedFuncOp>(context);
+    erasurePatterns.add<ErasePackedCallOp>(context);
+    erasurePatterns.add<ErasePackedExtractOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackedInsertOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackedExtractSliceOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackedInsertSliceOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackOp>(context);
+    erasurePatterns.add<EraseEncoding>(context);
+    erasurePatterns.add<ErasePackedForOp>(packedTensorUsage, context);
     if (failed(applyPartialConversion(getOperation(), erasureTarget,
                                       std::move(erasurePatterns)))) {
       signalPassFailure();
