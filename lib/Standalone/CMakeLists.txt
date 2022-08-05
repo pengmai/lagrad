@@ -9,6 +9,7 @@ add_mlir_dialect_library(MLIRStandalone
         TensorConstantFolding.cpp
         ElementwiseToAffine.cpp
         TriangularLoops.cpp
+        TriangularPacking.cpp
         StaticAllocs.cpp
         ActivityAnalysis.cpp
         DeadCodeElimination.cpp
