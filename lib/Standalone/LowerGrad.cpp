@@ -130,6 +130,7 @@ struct GradTarget : public ConversionTarget {
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
     addLegalDialect<linalg::LinalgDialect>();
+    addLegalOp<standalone::PackOp>();
     addLegalOp<FuncOp>();
   }
 };
