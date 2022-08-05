@@ -159,8 +159,8 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
 
         oldToCloned[forOp.getInductionVar()] = idx;
         // Emit reads to the cached values
-        auto markAsCache = [&](Operation *op) {
-          op->setAttr("lagrad_cache", UnitAttr::get(op->getContext()));
+        auto markAsCache = [&](Operation *op, std::string name) {
+          op->setAttr("cached " + name, UnitAttr::get(op->getContext()));
         };
         for (auto tbrPair : ctx.tbrCachedVals) {
           auto tbrVal = tbrPair.first;
@@ -204,25 +204,25 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
               auto view = builder.create<memref::SubViewOp>(
                   loc, resultType, cache, mixedOffsets, mixedSizes,
                   mixedStrides);
-              markAsCache(view);
+              markAsCache(view, ctx.debug_names[tbrVal]);
               ctx.debug_names[view] =
                   "<read view for caching " + ctx.debug_names[tbrVal] + ">";
               auto casted = builder.create<memref::CastOp>(
                   loc, view.getResult(),
                   MemRefType::get(rtt.getShape(), rtt.getElementType()));
-              markAsCache(casted);
+              markAsCache(casted, ctx.debug_names[tbrVal]);
               ctx.debug_names[casted] =
                   "<casted memref for reading " + ctx.debug_names[tbrVal] + ">";
               auto loaded =
                   builder.create<memref::TensorLoadOp>(loc, casted.getResult());
-              markAsCache(loaded);
+              markAsCache(loaded, ctx.debug_names[tbrVal]);
               ctx.debug_names[loaded] =
                   "<loaded tensor from cached " + ctx.debug_names[tbrVal] + ">";
               oldToCloned[tbrVal] = loaded;
             } else {
               auto loaded =
                   builder.create<memref::LoadOp>(loc, cache, induction_vars);
-              markAsCache(loaded);
+              markAsCache(loaded, ctx.debug_names[tbrVal]);
               ctx.debug_names[loaded] =
                   "<loaded scalar from cached " + ctx.debug_names[tbrVal] + ">";
               oldToCloned[tbrVal] = loaded;
@@ -242,6 +242,8 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
                     [&](Value v) { return ctx.toBeRecorded.contains(v); }) &&
                 llvm::none_of(forOp.getRegionIterArgs(), inDependSet)) {
               auto cloned = builder.clone(pop);
+              cloned->setAttr("cloned " + ctx.debug_names[pop.getResult(0)],
+                              UnitAttr::get(pop.getContext()));
               for (auto tup :
                    llvm::zip(pop.getResults(), cloned->getResults())) {
                 oldToCloned[std::get<0>(tup)] = std::get<1>(tup);
@@ -338,6 +340,8 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
       if (oldToCloned[op->getOperand(i)])
         op->setOperand(i, oldToCloned[op->getOperand(i)]);
   });
+  adjointFor->setAttr("adjoint of " + ctx.debug_names[forOp.getResult(0)],
+                      UnitAttr::get(forOp.getContext()));
 
   // The output argument is a special case here. The gradient of the primal
   // result should always be the first adjoint result by construction.
