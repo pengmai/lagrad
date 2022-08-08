@@ -1,3 +1,4 @@
+#include "Standalone/Logger.h"
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -6,6 +7,7 @@
 #define VERBOSITY 0
 
 using namespace mlir;
+using llvm::errs;
 
 namespace mlir {
 void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
@@ -189,7 +191,8 @@ static inline void printSet(LAGradContext &ctx, const ValueSet &set,
       if (ctx.debug_names.count(v) == 1) {
         names.push_back(ctx.debug_names[v]);
       } else {
-        names.push_back("<value not registered>");
+        // Hopefully these values aren't important
+        // names.push_back("<value not registered>");
       }
     }
     std::sort(names.begin(), names.end());
@@ -267,15 +270,24 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto logOp = dyn_cast_or_null<math::LogOp>(&op)) {
       ValueSet logAdjU;
       logAdjU.insert(logOp.getOperand());
+      // This isn't in the TBR paper equations but is required because we're
+      // propagating information about previous ops.
+      setUnion(logAdjU, adjU[logOp.getOperand()]);
       adjU[logOp.getResult()] = logAdjU;
     } else if (auto expOp = dyn_cast_or_null<math::ExpOp>(&op)) {
       ValueSet expAdjU;
       expAdjU.insert(expOp.getOperand());
+      setUnion(expAdjU, adjU[expOp.getOperand()]);
       adjU[expOp.getResult()] = expAdjU;
     } else if (auto tanhOp = dyn_cast_or_null<math::TanhOp>(&op)) {
       ValueSet tanhAdjU;
       tanhAdjU.insert(tanhOp.getOperand());
+      setUnion(tanhAdjU, adjU[tanhOp.getOperand()]);
       adjU[tanhOp.getResult()] = tanhAdjU;
+    } else if (auto selectOp = dyn_cast<SelectOp>(&op)) {
+      ValueSet selectAdjU;
+      selectAdjU.insert(selectOp.condition());
+      adjU[selectOp.getResult()] = selectAdjU;
     } else if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
       ValueSet genericAdjU;
       populateAdjointUseSets(ctx, genericOp.getBodyRegion(), adjU);
@@ -364,19 +376,21 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
         adjU[insertSliceOp.getResult()] = insertSliceAdjU;
       }
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
-      ValueSet ifAdjU;
-      populateAdjointUseSets(ctx, ifOp.thenRegion(), adjU);
-      populateAdjointUseSets(ctx, ifOp.elseRegion(), adjU);
-      for (auto operand : ifOp.thenBlock()->getTerminator()->getOperands()) {
-        setUnion(ifAdjU, adjU[operand]);
-      }
-      for (auto operand : ifOp.elseBlock()->getTerminator()->getOperands()) {
-        setUnion(ifAdjU, adjU[operand]);
-      }
-      // This may be a little coarse-grained, assuming adjU flow for multiple
-      // arguments when that may not be the case.
-      for (auto result : ifOp.getResults()) {
-        adjU[result] = ifAdjU;
+      if (ifOp.getNumResults() > 0) {
+        ValueSet ifAdjU;
+        populateAdjointUseSets(ctx, ifOp.thenRegion(), adjU);
+        populateAdjointUseSets(ctx, ifOp.elseRegion(), adjU);
+        for (auto operand : ifOp.thenBlock()->getTerminator()->getOperands()) {
+          setUnion(ifAdjU, adjU[operand]);
+        }
+        for (auto operand : ifOp.elseBlock()->getTerminator()->getOperands()) {
+          setUnion(ifAdjU, adjU[operand]);
+        }
+        // This may be a little coarse-grained, assuming adjU flow for multiple
+        // arguments when that may not be the case.
+        for (auto result : ifOp.getResults()) {
+          adjU[result] = ifAdjU;
+        }
       }
     } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
       ValueSet forAdjU;
@@ -392,23 +406,24 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       auto &callRegion =
           ctx.moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr()).getBody();
       populateAdjointUseSets(ctx, callRegion, adjU);
-      assert(callRegion.hasOneBlock() && "Expected function to have one block");
-      for (auto returnOperand :
-           callRegion.back().getTerminator()->getOperands()) {
-        SmallVector<Value> frontier{adjU[returnOperand].begin(),
-                                    adjU[returnOperand].end()};
-        ValueSet returnDeps;
-        runBottomUpDFS(frontier, returnDeps);
-        for (auto tup :
-             llvm::zip(callRegion.getArguments(), callOp.getOperands())) {
-          if (returnDeps.contains(std::get<0>(tup))) {
-            callAdjU.insert(std::get<1>(tup));
-            setUnion(callAdjU, adjU[std::get<1>(tup)]);
+      if (callRegion.hasOneBlock()) {
+        for (auto returnOperand :
+             callRegion.back().getTerminator()->getOperands()) {
+          SmallVector<Value> frontier{adjU[returnOperand].begin(),
+                                      adjU[returnOperand].end()};
+          ValueSet returnDeps;
+          runBottomUpDFS(frontier, returnDeps);
+          for (auto tup :
+               llvm::zip(callRegion.getArguments(), callOp.getOperands())) {
+            if (returnDeps.contains(std::get<0>(tup))) {
+              callAdjU.insert(std::get<1>(tup));
+              setUnion(callAdjU, adjU[std::get<1>(tup)]);
+            }
           }
         }
-      }
-      for (auto result : callOp.getResults()) {
-        adjU[result] = callAdjU;
+        for (auto result : callOp.getResults()) {
+          adjU[result] = callAdjU;
+        }
       }
     }
   }
@@ -423,24 +438,43 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
   llvm::SmallDenseMap<Value, ValueSet> adjU;
   for (auto &op : primalFunc.getCallableRegion()->getOps()) {
     if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
-      // if (VERBOSITY >= 1) {
-      //   llvm::errs() << "Running TBR Analysis for loop "
-      //                << ctx.debug_names[forOp.getResult(0)] << "\n";
-      // }
-      ValueSet finalAdjU;
+      if (VERBOSITY >= 1) {
+        llvm::errs() << BOLDCYAN << "Running Effective-Use Analysis for loop "
+                     << ctx.debug_names[forOp.getResult(0)] << RESET << "\n";
+      }
       populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
       if (VERBOSITY >= 3) {
         printAllAdjU(ctx, adjU);
       }
       for (auto operand :
            forOp.getLoopBody().front().getTerminator()->getOperands()) {
-        setUnion(finalAdjU, adjU[operand]);
+        setUnion(ctx.effectivelyUsed, adjU[operand]);
       }
 
       if (VERBOSITY >= 2) {
         llvm::errs() << "adjU:\n";
-        printSet(ctx, finalAdjU);
+        printSet(ctx, ctx.effectivelyUsed);
       }
+      forOp.walk([&](Operation *childOp) {
+        if (childOp->hasAttr("lagrad_should_cache")) {
+          ctx.toBeRecorded.insert(childOp->getResult(0));
+        }
+      });
+      // for (auto val : ctx.effectivelyUsed) {
+      //   if (auto *defOp = val.getDefiningOp()) {
+      //     if (defOp->hasAttr("lagrad_should_cache")) {
+      //       ctx.toBeRecorded.insert(val);
+      //     }
+      //   }
+      //   if (auto defOp =
+      //   dyn_cast_or_null<arith::AddFOp>(val.getDefiningOp())) {
+      //     ctx.toBeRecorded.insert(defOp.getResult());
+      //     errs() << BOLDGREEN
+      //            << "addf op: " << ctx.debug_names[defOp.getResult()] <<
+      //            RESET
+      //            << "\n";
+      //   }
+      // }
 
       ValueSet derivedFromIterArgs;
       SmallVector<Value> frontier;
@@ -454,7 +488,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
       }
 
       for (auto v : derivedFromIterArgs) {
-        if (finalAdjU.contains(v)) {
+        if (ctx.effectivelyUsed.contains(v)) {
           ctx.toBeRecorded.insert(v);
         }
       }
