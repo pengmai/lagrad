@@ -11,15 +11,17 @@ func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
     %max_next = select %p, %ai, %max_it : f64
     scf.yield %max_next : f64
   }
+  %zerot = arith.constant dense<0.0> : tensor<4xf64>
 
   // Watch out for unnecessary copies here
   %exp = linalg.generic
     {
-      indexing_maps = [#map],
+      indexing_maps = [#map, #map],
       iterator_types = ["parallel"]
     }
-    outs(%activations : tensor<4xf64>) {
-  ^bb0(%arg0: f64):
+    ins(%activations : tensor<4xf64>)
+    outs(%zerot : tensor<4xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
     %0 = arith.subf %arg0, %max : f64
     %1 = math.exp %0 : f64
     linalg.yield %1 : f64
@@ -34,11 +36,12 @@ func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
 
   %cross_entropy = linalg.generic
     {
-      indexing_maps = [#map],
+      indexing_maps = [#map, #map],
       iterator_types = ["parallel"]
     }
-    outs(%exp : tensor<4xf64>) {
-  ^bb0(%arg0: f64):
+    ins(%exp : tensor<4xf64>)
+    outs(%zerot : tensor<4xf64>) {
+  ^bb0(%arg0: f64, %arg1: f64):
     %0 = arith.divf %arg0, %sum : f64
     linalg.yield %0 : f64
   } -> tensor<4xf64>
