@@ -10,10 +10,10 @@ void relu(int size, float *x) {
   }
 }
 
-void nn_softmax(int length, const float *activations, float *outp) {
+float nn_crossentropy(const int length, const float *activations, int label) {
   int i;
   float sum, max;
-
+  float outp[length];
   for (i = 1, max = activations[0]; i < length; i++) {
     if (activations[i] > max) {
       max = activations[i];
@@ -27,7 +27,27 @@ void nn_softmax(int length, const float *activations, float *outp) {
   for (i = 0; i < length; i++) {
     outp[i] = exp(activations[i] - max) / sum;
   }
+  return -log(outp[label]);
 }
+
+// void nn_softmax(int length, const float *activations, float *outp) {
+//   int i;
+//   float sum, max;
+
+//   for (i = 1, max = activations[0]; i < length; i++) {
+//     if (activations[i] > max) {
+//       max = activations[i];
+//     }
+//   }
+
+//   for (i = 0, sum = 0; i < length; i++) {
+//     sum += exp(activations[i] - max);
+//   }
+
+//   for (i = 0; i < length; i++) {
+//     outp[i] = exp(activations[i] - max) / sum;
+//   }
+// }
 
 float enzyme_nn_hypothesis(const float *input, const int32_t *labels,
                            const float *w0, const float *b0, const float *w1,
@@ -35,7 +55,6 @@ float enzyme_nn_hypothesis(const float *input, const int32_t *labels,
   float *hidden0 = malloc(HIDDEN_SIZE * sizeof(float));
   float *hidden1 = malloc(HIDDEN_SIZE * sizeof(float));
   float activations[OUTPUT_SIZE];
-  float output[OUTPUT_SIZE];
   float loss = 0;
   for (int b = 0; b < BATCH_SIZE; b++) {
     memcpy(hidden0, b0, HIDDEN_SIZE * sizeof(float));
@@ -60,9 +79,7 @@ float enzyme_nn_hypothesis(const float *input, const int32_t *labels,
         activations[i] += w2[i * HIDDEN_SIZE + j] * hidden1[j];
       }
     }
-
-    nn_softmax(OUTPUT_SIZE, activations, output);
-    loss -= log(output[labels[b]]);
+    loss += nn_crossentropy(OUTPUT_SIZE, activations, labels[b]);
   }
   free(hidden0);
   free(hidden1);

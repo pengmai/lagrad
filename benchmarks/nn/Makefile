@@ -4,6 +4,8 @@ OPT14=opt
 LGOPT=$(HOME)/Research/lagrad/build/bin/lagrad-opt
 LLC=$(HOME)/.local/LLVM12/bin/llc
 
+OPENBLAS_INCLUDE=$(HOME)/.local/OpenBLAS/include
+OPENBLAS_OBJ=$(HOME)/.local/OpenBLAS/lib/libopenblas.a
 ENZYME_DYLIB=$(HOME)/Research/Enzyme/enzyme/build/Enzyme/LLVMEnzyme-12.dylib
 PROFILER_DYLIB=$(HOME)/Research/profile-pass/build/profiler/libProfilerPass.dylib
 RUNNER_UTILS=$(HOME)/.local/lib/libmlir_runner_utils.dylib
@@ -52,13 +54,13 @@ LOWER_TO_LLVM=\
 # End MLIR Passes
 #
 
-_OBJ = main.o read_data.o enzyme_nn.o nn-mlir.o
+_OBJ = main.o read_data.o blas_wrapper.o enzyme_nn.o nn-mlir.o
 OBJ = $(patsubst %,tmp/%,$(_OBJ))
 export SDKROOT=$(shell xcrun --show-sdk-path)
 
 DEPS = nn.h
 tmp/neuralnet.out: $(OBJ) $(DEPS)
-	$(CC) $(OBJ) $(RUNNER_UTILS) -O3 -o $@ -rpath $(RPATH)
+	$(CC) $(OBJ) $(OPENBLAS_OBJ) $(RUNNER_UTILS) -O3 -o $@ -rpath $(RPATH)
 
 tmp/%-lldialect.mlir: %.mlir
 	$(LGOPT) $< $(PREPROCESS) $(BUFFERIZE) $(LOWER_TO_LLVM) -o $@
@@ -85,7 +87,7 @@ tmp/enzyme_nn.o: tmp/enzyme_nn-opt.ll
 	$(CC) -c $^ -o $@
 
 tmp/%.o: %.c $(DEPS)
-	$(CC) $< -c -O3 -ffast-math -o $@
+	$(CC) $< -c -O3 -ffast-math -I$(OPENBLAS_INCLUDE) -o $@
 
 .PHONY: clean
 clean:
