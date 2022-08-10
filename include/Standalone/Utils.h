@@ -14,6 +14,7 @@ public:
   explicit LAGradContext(ModuleOp m) : moduleOp(m) {}
   ModuleOp moduleOp;
   DenseMap<Value, std::string> debug_names;
+  DenseMap<Value, SmallVector<OpFoldResult>> dynamic_shapes;
   ValueSet activeValues;
   ValueSet effectivelyUsed;
   ValueSet toBeRecorded;
@@ -23,9 +24,10 @@ public:
 bool isFloatOrFloatTensor(Type typ);
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
+void analyzeDynamicShapes(LAGradContext &ctx, FuncOp funcOp,
+                          OpBuilder &builder);
 
-void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out,
-                    bool traverseGeneric = true);
+void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out);
 void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out);
 
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
@@ -43,7 +45,7 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 SmallVector<Value> bbOperands, bool offsetInputs = true,
                 LAGradContext *ctx = nullptr);
 
-Value onesLike(Location loc, Value operand, OpBuilder &builder, bool init);
+Value onesLike(LAGradContext &ctx, Location loc, Value operand, OpBuilder &builder, bool init);
 
 Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 

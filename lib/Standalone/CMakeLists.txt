@@ -12,6 +12,7 @@ add_mlir_dialect_library(MLIRStandalone
         TriangularPacking.cpp
         StaticAllocs.cpp
         ActivityAnalysis.cpp
+        DynamicShapeAnalysis.cpp
         DeadCodeElimination.cpp
         LoopAllocHoisting.cpp
         LinalgCanonicalize.cpp

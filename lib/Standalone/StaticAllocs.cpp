@@ -56,7 +56,7 @@ public:
     auto staticSize = rewriter.create<LLVM::ConstantOp>(
         op->getLoc(), rewriter.getI64Type(), rewriter.getIndexAttr(allocSize));
     rewriter.updateRootInPlace(op, [&]() { op.setOperand(staticSize); });
-    return failure();
+    return success();
   }
 };
 
@@ -93,6 +93,13 @@ public:
                            .getElementType();
 
     size_t allocSize = elementType.getIntOrFloatBitWidth() / 8;
+    if (!llvm::all_of(gepOp.indices(), [](Value indexVal) {
+          return isa<LLVM::ConstantOp>(indexVal.getDefiningOp());
+        })) {
+      // Enzyme appears to handle dynamic shapes okay.
+      return failure();
+    }
+
     for (auto indexVal : gepOp.indices()) {
       auto indexConstOp =
           dyn_cast_or_null<LLVM::ConstantOp>(indexVal.getDefiningOp());
