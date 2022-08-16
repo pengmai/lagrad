@@ -16,6 +16,8 @@ ENZYME_DYLIB = (
     / "LLVMEnzyme-12.dylib"
 )
 
+LAGRAD_BINARY = str(pathlib.Path(__file__).parents[1] / "build" / "bin" / "lagrad-opt")
+
 LAGRAD_LLVM_DYLIB = (
     pathlib.Path.home()
     / "Research"
@@ -165,6 +167,17 @@ class MLIRTranslateExecutor(ExecutorWithArguments):
         self.add_argument("-mlir-to-llvmir")
 
 
+class LLCExecutor(ExecutorWithArguments):
+    def __init__(self):
+        super(LLCExecutor, self).__init__()
+        self.command = lambda ctx: which("llc")
+        self.add_argument_unfiltered("$in")
+        self.add_argument_unfiltered("-o", "$out")
+        self.output_type = "object"
+        self.output_extension = "o"
+        self.add_argument("-filetype=obj")
+
+
 class OptExecutor(ExecutorWithArguments):
     def __init__(self, command: str = None, asm=False):
         super(OptExecutor, self).__init__()
@@ -266,12 +279,15 @@ def get_sdk_root():
     return p.stdout.decode("utf-8")
 
 
-def compile_lagrad(project: Project, inputs: list[str], fast_math=True) -> Phase:
+def compile_lagrad(
+    project: Project, inputs: list[str], fast_math=True, use_clang=True
+) -> Phase:
     lagrad_llvm_dialect = Phase(
         project=project,
         name="Lower to LLVM Dialect",
         inputs=inputs,
         executor=LAGradOptExecutor(),
+        rebuild_on=[LAGRAD_BINARY],
     )
     llvm_ir = Phase(
         project=project,
@@ -286,15 +302,23 @@ def compile_lagrad(project: Project, inputs: list[str], fast_math=True) -> Phase
             inputs_from=[llvm_ir],
             executor=OptExecutor().run_fast_math(),
         )
-    lagrad_clang = ClangCompileLLVM()
-    lagrad_clang.optimize(3)
-    lagrad_clang.ignore_override_module()
-    return Phase(
-        project=project,
-        name="Compile LAGrad objects",
-        inputs_from=[llvm_ir],
-        executor=lagrad_clang,
-    )
+    if use_clang:
+        lagrad_clang = ClangCompileLLVM()
+        lagrad_clang.optimize(3)
+        lagrad_clang.ignore_override_module()
+        return Phase(
+            project=project,
+            name="Compile LAGrad objects",
+            inputs_from=[llvm_ir],
+            executor=lagrad_clang,
+        )
+    else:
+        return Phase(
+            project=project,
+            name="LLC Compile LAGrad objects",
+            inputs_from=[llvm_ir],
+            executor=LLCExecutor(),
+        )
 
 
 def clang_compile(project: Project, inputs: list[str]):
@@ -332,5 +356,5 @@ def clang_dynamiclib(project: Project, inputs_from: list[Phase], output: str):
         name="Build dynamic lib",
         inputs_from=inputs_from,
         executor=build,
-        output=output
+        output=output,
     )

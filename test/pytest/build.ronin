@@ -25,6 +25,8 @@ with new_context() as ctx:
     ]
     lstm_sources = glob("*.mlir", SRCFILE / "lstm")
 
-    lagrad_phase = compile_lagrad(project, ba_sources + hand_sources + lstm_sources)
+    lagrad_phase = compile_lagrad(
+        project, ba_sources + hand_sources + lstm_sources, use_clang=False
+    )
     clang_dynamiclib(project, [lagrad_phase], "mlir_bindings.dylib")
     cli(project)

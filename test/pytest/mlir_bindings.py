@@ -132,7 +132,7 @@ def ndto_args(arr):
     )
 
 
-TMP_DIR = pathlib.Path(__file__).parent / "tmp"
+TMP_DIR = pathlib.Path(__file__).parent / "build" / "osx64"
 BENCHMARK_TEMPLATES = (
     pathlib.Path(__file__).parents[2] / "benchmarks" / "mlir" / "templates"
 )
@@ -152,7 +152,7 @@ def compile_bindings(verbose=False):
         raise Exception(e.stderr.decode("utf-8"))
 
 
-compile_bindings()
+# compile_bindings()
 
 
 class BAReprojGrad(ctypes.Structure):
