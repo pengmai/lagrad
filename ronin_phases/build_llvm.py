@@ -37,6 +37,7 @@ class LAGradOptFlags:
         "-inline",
         "-linalg-canonicalize",
         "-standalone-dce",
+        "-symbol-dce",
         "-convert-elementwise-to-linalg",
         "-convert-linalg-triangular-to-loops",
         "-canonicalize",
@@ -318,4 +319,18 @@ def clang_link(project: Project, inputs_from: list[Phase], output: str):
         inputs_from=inputs_from,
         executor=linker,
         output=output,
+    )
+
+
+def clang_dynamiclib(project: Project, inputs_from: list[Phase], output: str):
+    build = GccLink()
+    build.output_type = "library"
+    build.output_extension = "dylib"
+    build.add_argument("-dynamiclib")
+    Phase(
+        project=project,
+        name="Build dynamic lib",
+        inputs_from=inputs_from,
+        executor=build,
+        output=output
     )
