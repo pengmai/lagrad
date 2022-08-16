@@ -5,6 +5,10 @@
 
 namespace mlir {
 using namespace mlir;
+static inline void markAsCache(Operation *op) {
+  op->setAttr("lagrad_cache", UnitAttr::get(op->getContext()));
+}
+
 void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
                           ConversionPatternRewriter &rewriter) {
   for (auto tbrVal : ctx.toBeRecorded) {
@@ -37,15 +41,16 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
     SmallVector<int64_t> shape;
     for (auto tup : llvm::zip(lower_bounds, upper_bounds)) {
       shape.push_back(-1); // Dynamic size
-      dynamicSizes.push_back(
-          rewriter
-              .create<arith::SubIOp>(loc, std::get<1>(tup), std::get<0>(tup))
-              .getResult());
+      auto size = rewriter.create<arith::SubIOp>(loc, std::get<1>(tup),
+                                                 std::get<0>(tup));
+      markAsCache(size);
+      dynamicSizes.push_back(size.getResult());
     }
     if (auto rtt = tbrVal.getType().dyn_cast_or_null<RankedTensorType>()) {
       shape.insert(shape.end(), rtt.getShape().begin(), rtt.getShape().end());
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, rtt.getElementType()), dynamicSizes);
+      markAsCache(cache);
       ctx.debug_names[cache] =
           "<primal cache for " + ctx.debug_names[tbrVal] + ">";
 
@@ -75,23 +80,27 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
                             .cast<MemRefType>();
       auto view = rewriter.create<memref::SubViewOp>(
           loc, resultType, cache, mixedOffsets, mixedSizes, mixedStrides);
+      markAsCache(view);
       ctx.debug_names[view] =
           "<write view for caching " + ctx.debug_names[tbrVal] + ">";
       auto memref = rewriter.create<memref::BufferCastOp>(
           loc, MemRefType::get(rtt.getShape(), rtt.getElementType()), tbrVal);
+      markAsCache(memref);
       ctx.debug_names[memref] =
           "<casted memref for writing " + ctx.debug_names[tbrVal] + ">";
-      rewriter.create<linalg::CopyOp>(loc, memref, view);
+      markAsCache(rewriter.create<linalg::CopyOp>(loc, memref, view));
       ctx.tbrCachedVals[tbrVal] = cache;
     } else {
       auto cache = rewriter.create<memref::AllocOp>(
           loc, MemRefType::get(shape, tbrVal.getType()), dynamicSizes);
+      markAsCache(cache);
       ctx.debug_names[cache] =
           "<primal cache for " + ctx.debug_names[tbrVal] + ">";
       rewriter.setInsertionPointAfterValue(tbrVal);
 
       // Write to the cache
-      rewriter.create<memref::StoreOp>(loc, tbrVal, cache, induction_vars);
+      markAsCache(
+          rewriter.create<memref::StoreOp>(loc, tbrVal, cache, induction_vars));
       ctx.tbrCachedVals[tbrVal] = cache;
     }
   }

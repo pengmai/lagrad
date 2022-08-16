@@ -21,6 +21,14 @@ char getFloatPrefix(unsigned int bitWidth) {
   }
 }
 
+static MemRefType convertToFullyDynamicMemRef(MemRefType type) {
+  SmallVector<int64_t> shape;
+  shape.reserve(type.getRank());
+  for (int64_t dim = 0; dim < type.getRank(); dim++)
+    shape.push_back(-1);
+  return eraseStridedLayout(MemRefType::get(shape, type.getElementType()));
+}
+
 static SmallVector<Type, 4> extractOperandTypes(Operation *op) {
   SmallVector<Type, 4> result;
   result.reserve(op->getNumOperands());
@@ -28,9 +36,9 @@ static SmallVector<Type, 4> extractOperandTypes(Operation *op) {
     // The underlying descriptor type (e.g. LLVM) does not have layout
     // information. Canonicalizing the type at the level of std when going into
     // a library call avoids needing to introduce DialectCastOp.
-    if (auto memrefType = type.dyn_cast<MemRefType>())
-      result.push_back(eraseStridedLayout(memrefType));
-    else
+    if (auto memrefType = type.dyn_cast<MemRefType>()) {
+      result.push_back(convertToFullyDynamicMemRef(memrefType));
+    } else
       result.push_back(type);
   }
   return result;
@@ -47,8 +55,8 @@ createTypeCanonicalizedMemRefOperands(OpBuilder &b, Location loc,
       res.push_back(op);
       continue;
     }
-    Value cast =
-        b.create<memref::CastOp>(loc, eraseStridedLayout(memrefType), op);
+    Value cast = b.create<memref::CastOp>(
+        loc, convertToFullyDynamicMemRef(memrefType), op);
     res.push_back(cast);
   }
   return res;
@@ -99,10 +107,51 @@ public:
   }
 };
 
+static unsigned int checkBitWidths(linalg::LinalgOp op) {
+  assert(op.getNumOutputs() > 0);
+  unsigned int bitWidth = op.getOutputBufferTypes()[0].getElementTypeBitWidth();
+  for (OpOperand *operand : op.getInputAndOutputOperands()) {
+    Type type = operand->get().getType();
+    if (auto memrefType = type.dyn_cast<MemRefType>()) {
+      if (memrefType.getElementTypeBitWidth() != bitWidth) {
+        assert(false &&
+               "Expected all linalg MemRef operands to have the same bitwidth");
+      }
+    } else if (auto floatType = type.dyn_cast<FloatType>()) {
+      if (floatType.getIntOrFloatBitWidth() != bitWidth) {
+        assert(false &&
+               "Expected all linalg Float operands to have the same bitwidth");
+      }
+    }
+  }
+  return bitWidth;
+}
+
+class ReplaceMatmul : public OpRewritePattern<linalg::MatmulOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::MatmulOp mmOp,
+                                PatternRewriter &rewriter) const override {
+    if (mmOp.hasTensorSemantics()) {
+      return failure();
+    }
+
+    unsigned int bitWidth = checkBitWidths(mmOp);
+    std::string fnName = "dmatmul";
+    fnName[0] = getFloatPrefix(bitWidth);
+
+    FlatSymbolRefAttr fnNameAttr = getOrInsertFuncDecl(mmOp, fnName, rewriter);
+    rewriter.replaceOpWithNewOp<CallOp>(
+        mmOp, fnNameAttr, TypeRange(),
+        createTypeCanonicalizedMemRefOperands(rewriter, mmOp.getLoc(),
+                                              mmOp.getOperands()));
+    return success();
+  }
+};
+
 class ReplaceMatVec : public OpRewritePattern<linalg::MatvecOp> {
 public:
-  ReplaceMatVec(MLIRContext *ctx)
-      : OpRewritePattern<linalg::MatvecOp>(ctx, /*benefit=*/1) {}
+  using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(linalg::MatvecOp mvOp,
                                 PatternRewriter &rewriter) const override {
     // mvOp.getResult(0).getType().dyn_cast<MemRefType>().getElementTypeBitWidth
@@ -110,24 +159,10 @@ public:
       return failure();
     }
 
-    unsigned int bitWidth =
-        mvOp.getOutputBufferTypes()[0].getElementTypeBitWidth();
-    assert(
-        llvm::all_of(mvOp.getOperandTypes(),
-                     [&](Type type) {
-                       if (auto memrefType = type.dyn_cast<MemRefType>()) {
-                         return memrefType.getElementTypeBitWidth() == bitWidth;
-                       } else if (auto floatType = type.dyn_cast<FloatType>()) {
-                         return floatType.getIntOrFloatBitWidth() == bitWidth;
-                       }
-                       // Unsupported type
-                       return false;
-                     }) &&
-        "Expected all operands to have the same bit width");
+    unsigned int bitWidth = checkBitWidths(mvOp);
     std::string fnName = "dmatvec";
     fnName[0] = getFloatPrefix(bitWidth);
 
-    // fnName[0] = getFloatPrefix(mvOp.getOperandTypes());
     FlatSymbolRefAttr fnNameAttr = getOrInsertFuncDecl(mvOp, fnName, rewriter);
     rewriter.replaceOpWithNewOp<CallOp>(
         mvOp, fnNameAttr, TypeRange(),
@@ -139,27 +174,13 @@ public:
 
 class ReplaceDot : public OpRewritePattern<linalg::DotOp> {
 public:
-  ReplaceDot(MLIRContext *ctx)
-      : OpRewritePattern<linalg::DotOp>(ctx, /*benefit=*/1) {}
+  using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(linalg::DotOp op,
                                 PatternRewriter &rewriter) const override {
     if (op.hasTensorSemantics()) {
       return failure();
     }
-    unsigned int bitWidth =
-        op.getOutputBufferTypes()[0].getElementTypeBitWidth();
-    assert(
-        llvm::all_of(op.getOperandTypes(),
-                     [&](Type type) {
-                       if (auto memrefType = type.dyn_cast<MemRefType>()) {
-                         return memrefType.getElementTypeBitWidth() == bitWidth;
-                       } else if (auto floatType = type.dyn_cast<FloatType>()) {
-                         return floatType.getIntOrFloatBitWidth() == bitWidth;
-                       }
-                       // Unsupported type
-                       return false;
-                     }) &&
-        "Expected all operands to have the same bit width");
+    unsigned int bitWidth = checkBitWidths(op);
     // Could add a special case when the input operands are the same buffer to
     // call cblas_dnrm2() ** 2
     std::string fnName = "ddot";
@@ -190,6 +211,7 @@ struct LinalgKnownLibraryCallPass
     auto *context = &getContext();
     RewritePatternSet patterns(context);
     patterns.add<ReplaceKnownGeneric>(patterns.getContext());
+    patterns.add<ReplaceMatmul>(patterns.getContext());
     patterns.add<ReplaceMatVec>(patterns.getContext());
     patterns.add<ReplaceDot>(patterns.getContext());
     if (failed(applyPatternsAndFoldGreedily(getOperation()->getRegions(),

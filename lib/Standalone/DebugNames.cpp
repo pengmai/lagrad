@@ -148,7 +148,7 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
 }
 
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
-  if (!ENABLE_NAME_DEBUG) {
+  if (!ENABLE_NAME_DEBUG || funcOp.empty()) {
     return;
   }
   // Clearing the map makes printing everything less verbose

@@ -112,6 +112,7 @@ private:
         copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
     LAGradContext lagradctx{moduleOp};
     DEBUGpopulateFunc(lagradctx, funcOp);
+    analyzeDynamicShapes(lagradctx, funcOp, rewriter);
     runActivityAnalysis(lagradctx, funcOp, gradientsOf);
     populatePrimalCaches(lagradctx, funcOp, rewriter);
     return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,

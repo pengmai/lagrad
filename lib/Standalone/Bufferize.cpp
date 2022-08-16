@@ -310,19 +310,27 @@ public:
     DominanceInfo dom;
     bool hasWriteAfter = false;
 
-    // Need to consider writes to tensors that alias this one.
-    // This is a coarse-grained heuristic.
-    SmallVector<Value> frontier{op.source()};
-    ValueSet derivedFromSource;
-    runTopDownDFS(frontier, derivedFromSource);
-    for (Value derivedValue : derivedFromSource) {
-      Operation *definingOp = derivedValue.getDefiningOp();
-      if (definingOp && dom.properlyDominates(op.getResult(), definingOp) &&
-          ((dyn_cast<tensor::InsertSliceOp>(definingOp) ||
-            dyn_cast<tensor::InsertOp>(definingOp)))) {
+    for (auto user : op.source().getUsers()) {
+      if (dom.properlyDominates(op.getResult(), user)) {
         hasWriteAfter = true;
       }
     }
+
+    // Need to consider writes to tensors that alias this one.
+    // This causes a slow-down with GMM/main term, have yet to look into why.
+
+    // This is a coarse-grained heuristic.
+    // SmallVector<Value> frontier{op.source()};
+    // ValueSet derivedFromSource;
+    // runTopDownDFS(frontier, derivedFromSource);
+    // for (Value derivedValue : derivedFromSource) {
+    //   Operation *definingOp = derivedValue.getDefiningOp();
+    //   if (definingOp && dom.properlyDominates(op.getResult(), definingOp) &&
+    //       ((dyn_cast<tensor::InsertSliceOp>(definingOp) ||
+    //         dyn_cast<tensor::InsertOp>(definingOp)))) {
+    //     hasWriteAfter = true;
+    //   }
+    // }
     if (!hasWriteAfter) {
       // rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op,
       //                                                   subview.getResult());
