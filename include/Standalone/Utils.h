@@ -45,7 +45,8 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
                 SmallVector<Value> bbOperands, bool offsetInputs = true,
                 LAGradContext *ctx = nullptr);
 
-Value onesLike(LAGradContext &ctx, Location loc, Value operand, OpBuilder &builder, bool init);
+Value onesLike(LAGradContext &ctx, Location loc, Value operand,
+               OpBuilder &builder, bool init);
 
 Value constLike(Location loc, Value operand, double scalar, OpBuilder &builder);
 
@@ -68,7 +69,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
                              bool topLevel);
 
 Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
-                       Value vjp_value, int op_index,
+                       Value vjp_value, int op_index, Value output,
                        ConversionPatternRewriter &rewriter);
 
 Value reverseIfOp(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,

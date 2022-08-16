@@ -140,7 +140,8 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
       Value operand = op->getOperand(0);
       // Initialize the gradient signal to 1.0
       if (topLevel) {
-        env[operand] = onesLike(op->getLoc(), operand, rewriter, /*init=*/true);
+        env[operand] =
+            onesLike(ctx, op->getLoc(), operand, rewriter, /*init=*/true);
       } else {
         env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
@@ -187,26 +188,36 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
   return funcOp;
 }
 
-Value onesLike(Location loc, Value operand, OpBuilder &builder,
-               bool init = false) {
+Value onesLike(LAGradContext &ctx, Location loc, Value operand,
+               OpBuilder &builder, bool init = false) {
   if (operand.getType().isa<FloatType>()) {
     return builder.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 1.0));
   }
-  if (operand.getType().isa<ShapedType>()) {
-    auto shapedType = operand.getType().dyn_cast<ShapedType>();
+  if (auto shapedType = operand.getType().dyn_cast<ShapedType>()) {
     assert(shapedType.getElementType().isa<FloatType>() &&
            "Shaped type was not a float type");
     if (init) {
       auto floatVal = shapedType.getElementTypeBitWidth() == 32 ? APFloat(1.0f)
                                                                 : APFloat(1.0);
       auto one = builder.create<arith::ConstantFloatOp>(
-          loc, floatVal, shapedType.getElementType().dyn_cast<FloatType>());
-      auto space = builder.create<linalg::InitTensorOp>(
-          loc, shapedType.getShape(), shapedType.getElementType());
+          loc, floatVal, shapedType.getElementType().cast<FloatType>());
+      Value space;
+      if (shapedType.getNumDynamicDims() > 0) {
+        assert(ctx.dynamic_shapes.count(operand) &&
+               "onesLike: operand was not found in dynamic shape map");
+        space = builder.create<linalg::InitTensorOp>(
+            loc, ctx.dynamic_shapes.lookup(operand),
+            shapedType.getElementType());
+      } else {
+        space = builder.create<linalg::InitTensorOp>(
+            loc, shapedType.getShape(), shapedType.getElementType());
+      }
       auto filled = builder.create<linalg::FillOp>(loc, one, space);
       return filled.getResult(0);
     }
+    assert(shapedType.getNumDynamicDims() == 0 &&
+           "tried to make a constant onesLike with dynamic shape");
     auto denseAttr = shapedType.getElementTypeBitWidth() == 32
                          ? DenseFPElementsAttr::get(shapedType, {1.0f})
                          : DenseFPElementsAttr::get(shapedType, {1.0});
@@ -222,15 +233,27 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init) {
     return rewriter.create<arith::ConstantOp>(
         loc, FloatAttr::get(operand.getType(), 0.0));
   }
+  auto intToAttr = [&](int64_t i) {
+    return IntegerAttr::get(IntegerType::get(rewriter.getContext(), 64), i);
+  };
   if (auto shapedType = operand.getType().dyn_cast<RankedTensorType>()) {
-    assert(shapedType.getNumDynamicDims() == 0 &&
-           "expected getZero to have static shape");
     if (init) {
       auto zero = rewriter.create<arith::ConstantOp>(
           loc, FloatAttr::get(shapedType.getElementType(), 0.0));
+      SmallVector<OpFoldResult> shape;
+      shape.reserve(shapedType.getRank());
+      for (int64_t i = 0; i < shapedType.getRank(); i++) {
+        if (shapedType.isDynamicDim(i)) {
+          // running into canonicalization issues with this
+          shape.push_back(
+              rewriter.create<tensor::DimOp>(loc, operand, i).getResult());
+        } else {
+          shape.push_back(intToAttr(shapedType.getDimSize(i)));
+        }
+      }
       // init_tensor ops don't support encodings out of the box.
       Value space = rewriter.create<linalg::InitTensorOp>(
-          loc, shapedType.getShape(), shapedType.getElementType());
+          loc, shape, shapedType.getElementType());
       if (shapedType.getEncoding()) {
         space = rewriter.create<standalone::PackOp>(loc, shapedType, space);
         // space = rewriter.create<tensor::CastOp>(loc, shapedType, space);
@@ -405,7 +428,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     auto vjp_value = env[ifOp.getResult(0)];
     if (!vjp_value) {
       Value result = ifOp.getResult(0);
-      vjp_value = onesLike(result.getLoc(), result, rewriter);
+      vjp_value = onesLike(ctx, result.getLoc(), result, rewriter);
       env[result] = vjp_value;
     }
 
@@ -571,7 +594,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       }
       auto powFOp = cast<math::PowFOp>(op);
       auto loc = op->getLoc();
-      auto one = onesLike(loc, operand, rewriter);
+      auto one = onesLike(ctx, loc, operand, rewriter);
       vjp_value = rewriter.create<arith::MulFOp>(
           loc, powFOp.rhs(),
           rewriter.create<math::PowFOp>(
@@ -681,10 +704,20 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           if (!isFloatOrFloatTensor(freeOperand.getType())) {
             continue;
           }
+          assert(freeOperand.getType().isa<FloatType>() &&
+                 "Expected linalg.generic free operand to be a float");
           // Not totally sure if we can use the VJP value as-is, watch out
           // for bugs.
+          auto zeroDTensorType =
+              RankedTensorType::get({}, freeOperand.getType());
+          auto denseFPAttr =
+              freeOperand.getType().getIntOrFloatBitWidth() == 32
+                  ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
+                  : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
+          Value output =
+              rewriter.create<arith::ConstantOp>(operand.getLoc(), denseFPAttr);
           auto out = reverseGenericOp(genericOp, ctx, freeOperand, vjp_value,
-                                      -1, rewriter);
+                                      -1, output, rewriter);
           auto result =
               rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
           if (!env[freeOperand]) {
@@ -698,8 +731,9 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
+      Value output = getZero(genericOp.getLoc(), operand, rewriter);
       vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
-                                   rewriter);
+                                   output, rewriter);
     } else if (opName == "linalg.dot") {
       if (op_index > 1)
         continue;
@@ -854,7 +888,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
         continue;
       }
       Value zero = env[operand] ? env[operand]
-                                : getZero(operand.getLoc(), operand, rewriter);
+                                : getZero(operand.getLoc(), operand, rewriter,
+                                          /*init=*/true);
       SmallVector<AffineMap, 3> indexingMaps(
           op->getNumOperands(), rewriter.getMultiDimIdentityMap(3));
       if (op_index == 0) {
@@ -909,127 +944,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       env[operand] = addInPlace(vjp_value, env[operand], rewriter);
     }
   }
-}
-
-Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
-                       Value vjp_value, int op_index,
-                       ConversionPatternRewriter &rewriter) {
-  // Need to ensure:
-  // if (op_index > (size_t)genericOp.getNumInputs() - 1)
-  //   continue;
-  auto numIterators = op.iterator_types().size();
-  SmallVector<AffineMap, 6> indexing_maps(
-      op->getNumOperands() + 1, rewriter.getMultiDimIdentityMap(numIterators));
-  SmallVector<StringRef, 6> iterator_types(numIterators,
-                                           getParallelIteratorTypeName());
-
-  Value output;
-  if (op_index == -1) {
-    auto zeroDTensorType = RankedTensorType::get({}, operand.getType());
-    auto denseFPAttr = operand.getType().getIntOrFloatBitWidth() == 32
-                           ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
-                           : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
-    output = rewriter.create<arith::ConstantOp>(operand.getLoc(), denseFPAttr);
-  } else {
-    output = getZero(operand.getLoc(), operand, rewriter);
-  }
-  auto outputShape = output.getType().dyn_cast_or_null<ShapedType>();
-  assert(outputShape && outputShape.hasRank() &&
-         "output must be a ranked type");
-  auto generic_indexing_maps = op.getIndexingMaps();
-  auto op_count = op.getNumOperands();
-  SmallVector<Value> inputs;
-  for (size_t i = 0; i < op_count; i++) {
-    if (i == static_cast<size_t>(op_index)) {
-      indexing_maps[i] = generic_indexing_maps[i];
-      inputs.push_back(op.getOperand(i));
-    } else if (i == op_count - 1) {
-      if (op_index == -1) {
-        // In the case of free variables, the output is assumed to be 0d.
-        indexing_maps[i + 1] = indexing_maps[i + 1].getSubMap({});
-      } else {
-        // The output has to map the shape of the current argument.
-        indexing_maps[i + 1] = generic_indexing_maps[op_index];
-      }
-      // Add the gradient signal as an argument at the end of the
-      // inputs.
-      inputs.push_back(vjp_value);
-      indexing_maps[i] = generic_indexing_maps[op_count - 1];
-    } else {
-      indexing_maps[i] = generic_indexing_maps[i];
-      inputs.push_back(op.getOperand(i));
-    }
-  }
-
-  DenseMap<Value, Value> bbEnv;
-  SmallVector<Value> genericOperands;
-  for (Value arg : op.getBodyRegion().getArguments()) {
-    genericOperands.push_back(arg);
-  }
-
-  Operation *yieldOp = nullptr;
-
-  auto adjoint = rewriter.create<linalg::GenericOp>(
-      operand.getLoc(), /*resultTensorType=*/outputShape,
-      /*inputs=*/inputs, /*outputs=*/ValueRange({output}),
-      /*indexing_maps=*/indexing_maps,
-      /*iterator_types=*/iterator_types,
-      [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-        PatternRewriter::InsertionGuard insertionGuard(rewriter);
-        SmallVector<mlir::Operation *> genericRegionOps =
-            cloneBasicBlock(op.getOps(), builder, regionArgs, genericOperands);
-
-        for (auto it = genericRegionOps.rbegin(); it != genericRegionOps.rend();
-             it++) {
-          auto rop = *it;
-          if (rop->getName().getStringRef() == "linalg.yield") {
-            bbEnv[rop->getOperand(0)] = regionArgs[regionArgs.size() - 2];
-            rewriter.setInsertionPointAfter(rop);
-            // rop->erase();
-            rewriter.eraseOp(rop);
-            yieldOp = rop;
-          } else if (rop->getName().getStringRef() == "arith.cmpf") {
-            continue;
-          } else {
-            populateVJP(rop, ctx, bbEnv, rewriter);
-          }
-        }
-
-        // This add operation is required in the case of undoing
-        // reductions. It might be possible to omit this, if the
-        // output argument is never used in the primal, or perhaps if
-        // the primal iterator types do not include reductions.
-        // I'm not entirely sure how best to check if we can omit this.
-        auto new_operand = op_index == -1 ? operand : regionArgs[op_index];
-        if (!bbEnv[new_operand]) {
-          rewriter.create<linalg::YieldOp>(loc,
-                                           getZero(loc, new_operand, rewriter));
-        } else if (outputShape.getRank() !=
-                   static_cast<int64_t>(numIterators)) {
-          Value add_res = rewriter.create<arith::AddFOp>(
-              loc, bbEnv[new_operand], regionArgs[regionArgs.size() - 1]);
-
-          rewriter.create<linalg::YieldOp>(loc, add_res);
-        } else {
-          rewriter.create<linalg::YieldOp>(loc, bbEnv[new_operand]);
-        }
-      });
-
-  for (auto &bodyOp : adjoint.getBodyRegion().getOps()) {
-    // Ugly, but necessary to do some form of cleanup here because non-active
-    // primal ops might no longer be in scope if the generic ops are inside a
-    // loop. scf.if ops inside the generic body cause this to segfault for some
-    // reason.
-    for (auto *user : bodyOp.getUsers()) {
-      if (bodyOp.getNumResults() > 0 && bodyOp.hasOneUse() && user == yieldOp) {
-        rewriter.eraseOp(&bodyOp);
-      }
-    }
-  }
-  adjoint->setAttr("adjoint of " + ctx.debug_names[op.getResult(0)],
-                   UnitAttr::get(op.getContext()));
-
-  return adjoint.getResult(0);
 }
 
 Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
