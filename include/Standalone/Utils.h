@@ -6,7 +6,6 @@
 #include <string>
 
 namespace mlir {
-
 using ValueSet = llvm::SmallDenseSet<Value>;
 
 class LAGradContext {
