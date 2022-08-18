@@ -27,9 +27,10 @@ LAGRAD_LLVM_DYLIB = (
     / "libProfilerPass.dylib"
 )
 
-MLIR_RUNNER_UTILS = (
-    pathlib.Path.home() / ".local" / "lib" / "libmlir_runner_utils.dylib"
-)
+LOCAL_LIB = pathlib.Path.home() / ".local" / "lib"
+LOCAL_INCLUDE = pathlib.Path.home() / ".local" / "include"
+LAGRAD_UTILS = LOCAL_LIB / "lagrad_utils.dylib"
+MLIR_RUNNER_UTILS = LOCAL_LIB / "libmlir_runner_utils.dylib"
 
 
 class LAGradOptFlags:
@@ -38,6 +39,7 @@ class LAGradOptFlags:
         "-canonicalize",
         "-inline",
         "-linalg-canonicalize",
+        "-pack-triangular",
         "-standalone-dce",
         "-symbol-dce",
         "-convert-elementwise-to-linalg",
@@ -138,6 +140,22 @@ class ClangCompileLLVM(GccExecutor):
         return self
 
 
+class RenderTemplateExecutor(ExecutorWithArguments):
+    def __init__(self, output_extension="mlir"):
+        super(RenderTemplateExecutor, self).__init__()
+        self.command = lambda ctx: str(pathlib.Path(__file__).parent / "render.py")
+        self.add_argument_unfiltered("$in")
+        self.add_argument_unfiltered("-o", "$out")
+        self.output_type = "object"
+        self.output_prefix = "rendered_"
+        self.output_extension = output_extension
+
+    def with_args(self, template_args: dict[str, int]):
+        for k, v in template_args.items():
+            self.add_argument(f"-{k}", v)
+        return self
+
+
 class LAGradOptExecutor(ExecutorWithArguments):
     def __init__(self, command: str = None, default_args=True):
         super(LAGradOptExecutor, self).__init__()
@@ -205,6 +223,7 @@ class OptExecutor(ExecutorWithArguments):
 def compile_enzyme(project: Project, inputs: list[str]) -> Phase:
     emit_llvm = ClangEmitLLVM()
     emit_llvm.add_argument(*PRE_ENZYME_OPT)
+    emit_llvm.add_include_path(LOCAL_INCLUDE)
     preenzyme = Phase(
         project=project,
         name="Pre-Enzyme C to LLVM IR",
@@ -230,16 +249,35 @@ def compile_enzyme(project: Project, inputs: list[str]) -> Phase:
     )
 
 
-def compile_mlir_enzyme(project: Project, inputs: list[str], pre_ad_opt=True) -> Phase:
+def compile_mlir_enzyme(
+    project: Project,
+    inputs: list[str],
+    template_args: dict[str, int] = None,
+    pre_ad_opt=True,
+) -> Phase:
     lagrad_opt = LAGradOptExecutor(default_args=False)
     lagrad_opt.add_argument(*LAGradOptFlags.bufferize)
     lagrad_opt.add_argument(*LAGradOptFlags.lower_to_llvm_with_enzyme)
-    llvm_dialect = Phase(
-        project=project,
-        name="Enzyme MLIR Lower to LLVM Dialect",
-        inputs=inputs,
-        executor=lagrad_opt,
-    )
+    llvm_dialect_kwargs = {
+        "project": project,
+        "name": "Enzyme MLIR Lower to LLVM Dialect",
+        "executor": lagrad_opt,
+    }
+
+    if template_args:
+        llvm_dialect_kwargs["inputs_from"] = [
+            Phase(
+                project=project,
+                name="Render Enzyme MLIR",
+                inputs=inputs,
+                executor=RenderTemplateExecutor().with_args(template_args),
+            )
+        ]
+    else:
+        llvm_dialect_kwargs["inputs"] = inputs
+
+    llvm_dialect = Phase(**llvm_dialect_kwargs)
+
     llvm_ir = Phase(
         project=project,
         name="Enzyme MLIR Lower to LLVM IR",
@@ -280,15 +318,30 @@ def get_sdk_root():
 
 
 def compile_lagrad(
-    project: Project, inputs: list[str], fast_math=True, use_clang=True
+    project: Project,
+    inputs: list[str],
+    template_args: dict[str, int] = None,
+    fast_math=True,
+    use_clang=True,
 ) -> Phase:
-    lagrad_llvm_dialect = Phase(
-        project=project,
-        name="Lower to LLVM Dialect",
-        inputs=inputs,
-        executor=LAGradOptExecutor(),
-        rebuild_on=[LAGRAD_BINARY],
-    )
+    lower_llvm_kwargs = {
+        "project": project,
+        "name": "Lower to LLVM Dialect",
+        "executor": LAGradOptExecutor(),
+        "rebuild_on": [LAGRAD_BINARY],
+    }
+    if template_args:
+        lower_llvm_kwargs["inputs_from"] = [
+            Phase(
+                project=project,
+                name="Render Template",
+                inputs=inputs,
+                executor=RenderTemplateExecutor().with_args(template_args),
+            )
+        ]
+    else:
+        lower_llvm_kwargs["inputs"] = inputs
+    lagrad_llvm_dialect = Phase(**lower_llvm_kwargs)
     llvm_ir = Phase(
         project=project,
         name="LAGrad Translate to LLVM IR",
@@ -321,15 +374,31 @@ def compile_lagrad(
         )
 
 
-def clang_compile(project: Project, inputs: list[str]):
+def clang_compile(
+    project: Project, inputs: list[str], template_args: dict[str, int] = None
+):
     compile_executor = GccCompile("clang-12")
     compile_executor.optimize(3)
-    return Phase(
-        project=project,
-        name="Compile C",
-        inputs=inputs,
-        executor=compile_executor,
-    )
+    compile_executor.add_include_path(LOCAL_INCLUDE)
+
+    kwargs = {"project": project, "name": "Compile C", "executor": compile_executor}
+    if template_args:
+        # Need to include the file's directory if rendering a template
+        for parent in set([pathlib.Path(ffile).parent for ffile in inputs]):
+            compile_executor.add_include_path(parent)
+        kwargs["inputs_from"] = [
+            Phase(
+                project=project,
+                name="Render C",
+                inputs=inputs,
+                executor=RenderTemplateExecutor(output_extension="c").with_args(
+                    template_args
+                ),
+            )
+        ]
+    else:
+        kwargs["inputs"] = inputs
+    return Phase(**kwargs)
 
 
 def clang_link(project: Project, inputs_from: list[Phase], output: str):
@@ -339,7 +408,7 @@ def clang_link(project: Project, inputs_from: list[Phase], output: str):
     Phase(
         project=project,
         name="Link Executable",
-        inputs=[str(MLIR_RUNNER_UTILS)],
+        inputs=[str(MLIR_RUNNER_UTILS), str(LAGRAD_UTILS)],
         inputs_from=inputs_from,
         executor=linker,
         output=output,

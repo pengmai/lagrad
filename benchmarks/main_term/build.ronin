@@ -1,0 +1,46 @@
+from ronin.cli import cli
+from ronin.projects import Project
+from ronin.contexts import new_context
+from ronin.utils.paths import glob
+from ronin_phases.build_llvm import (
+    compile_enzyme,
+    compile_mlir_enzyme,
+    compile_lagrad,
+    clang_compile,
+    clang_link,
+)
+import pathlib
+
+data_file = (
+    pathlib.Path.home()
+    / "Research"
+    / "Enzyme"
+    / "enzyme"
+    / "benchmarks"
+    / "gmm"
+    / "data"
+    / "1k"
+    / "gmm_d128_K5.txt"
+)
+
+with new_context() as ctx:
+    with open(data_file, "r") as f:
+        d, k, n = [int(x) for x in f.readline().split()]
+    template_args = {"n": n, "k": k, "d": d, "tri_size": d * (d - 1) // 2}
+    project = Project("Main term microbenchmark")
+    enzyme_sources = glob("*_enzyme.c")
+    enzyme_mlir_sources = glob("enzyme*.mlir")
+    c_sources = [ffile for ffile in glob("*.c") if ffile not in enzyme_sources]
+    lagrad_sources = [
+        ffile for ffile in glob("*.mlir") if ffile not in enzyme_mlir_sources
+    ]
+    c_phase = clang_compile(project, c_sources, {"data_file": str(data_file)})
+    enzyme_phase = compile_enzyme(project, enzyme_sources)
+    enzyme_mlir_phase = compile_mlir_enzyme(project, enzyme_mlir_sources, template_args)
+    lagrad_phase = compile_lagrad(project, lagrad_sources, template_args)
+    clang_link(
+        project,
+        [c_phase, enzyme_phase, enzyme_mlir_phase, lagrad_phase],
+        "main_term.out",
+    )
+    cli(project)
