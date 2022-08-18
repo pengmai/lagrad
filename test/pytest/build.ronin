@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from ronin.cli import cli
 from ronin.projects import Project
 from ronin.contexts import new_context
@@ -10,6 +12,11 @@ SRCFILE = pathlib.Path(__file__).parents[1] / "Standalone"
 with new_context() as ctx:
     project = Project("LAGrad tests")
 
+    gmm_sources = [
+        abs_path
+        for ffile in ["gmm_objective_full"]
+        for abs_path in glob(f"{ffile}.mlir", SRCFILE / "gmm")
+    ]
     ba_sources = glob("*.mlir", SRCFILE / "ba")
     hand_sources = [
         abs_path
@@ -26,7 +33,7 @@ with new_context() as ctx:
     lstm_sources = glob("*.mlir", SRCFILE / "lstm")
 
     lagrad_phase = compile_lagrad(
-        project, ba_sources + hand_sources + lstm_sources, use_clang=False
+        project, gmm_sources + ba_sources + hand_sources + lstm_sources, use_clang=False
     )
     clang_dynamiclib(project, [lagrad_phase], "mlir_bindings.dylib")
     cli(project)

@@ -123,7 +123,9 @@ memref_4d = [
 
 def ndto_args(arr):
     if not isinstance(arr, np.ndarray):
-        assert isinstance(arr, np.float64), f"Unexpected argument type: '{type(arr)}'"
+        assert isinstance(arr, np.float64) or isinstance(
+            arr, np.int64
+        ), f"Unexpected argument type: '{type(arr)}'"
         return (arr,)
     return (
         (arr, arr, 0)
@@ -153,6 +155,15 @@ def compile_bindings(verbose=False):
 
 
 # compile_bindings()
+
+
+class GMMFullGrad(ctypes.Structure):
+    _fields_ = [
+        ("dalphas", F64Descriptor1D),
+        ("dmeans", F64Descriptor2D),
+        ("dQs", F64Descriptor2D),
+        ("dLs", F64Descriptor3D),
+    ]
 
 
 class BAReprojGrad(ctypes.Structure):
@@ -205,6 +216,19 @@ def struct_to_tuple(s):
 
 ctypes.CDLL(pathlib.Path.home() / ".local" / "lib" / "libmlir_runner_utils.dylib")
 mlirlib = ctypes.CDLL(TMP_DIR / "mlir_bindings.dylib")
+gmm_args = (
+    memref_1d
+    + memref_2d
+    + memref_2d
+    + memref_3d
+    + memref_2d
+    + [ctypes.c_double, ctypes.c_longlong]
+)
+mlirlib.gmm_objective_full.argtypes = gmm_args
+mlirlib.gmm_objective_full.restype = ctypes.c_double
+mlirlib.lagrad_gmm_full.argtypes = gmm_args
+mlirlib.lagrad_gmm_full.restype = GMMFullGrad
+
 mlirlib.lagrad_compute_reproj_error.argtypes = (
     memref_1d + memref_1d + [ctypes.c_double] + memref_1d + memref_1d
 )
@@ -287,6 +311,8 @@ def wrap(mlir_func):
     return wrapped
 
 
+mlir_gmm_primal_full = wrap(mlirlib.gmm_objective_full)
+lagrad_gmm_full = wrap(mlirlib.lagrad_gmm_full)
 lagrad_ba_compute_reproj_error = wrap(mlirlib.lagrad_compute_reproj_error)
 lagrad_ba_compute_w_error = wrap(mlirlib.lagrad_compute_w_error)
 

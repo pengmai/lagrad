@@ -18,6 +18,57 @@ def parse_floats(arr):
 
 
 @dataclass
+class Wishart:
+    gamma: np.float64 = 0.0
+    m: np.int32 = 0
+
+
+@dataclass
+class GMMInput:
+    alphas: np.ndarray = field(default=np.empty(0, dtype=np.float64))
+    means: np.ndarray = field(default=np.empty(0, dtype=np.float64))
+    icf: np.ndarray = field(default=np.empty(0, dtype=np.float64))
+    x: np.ndarray = field(default=np.empty(0, dtype=np.float64))
+    wishart: Wishart = field(default=Wishart())
+
+
+def read_gmm_instance(fn, replicate_point):
+    """Reads input data for GMM objective from the given file.
+    Args:
+        fn (str): input file name.
+        replicate_point (bool): if False then file contains n different points,
+            otherwise file contains only one point that will be replicated
+            n times.
+
+    Returns:
+        (GMMInput): data for GMM objective test class.
+    """
+    with open(fn, "r") as fid:
+        line = fid.readline()
+        line = line.split()
+
+        d = int(line[0])
+        k = int(line[1])
+        n = int(line[2])
+
+        alphas = np.array([float(fid.readline()) for _ in range(k)])
+        means = np.array([parse_floats(fid.readline().split()) for _ in range(k)])
+        icf = np.array([parse_floats(fid.readline().split()) for _ in range(k)])
+
+        if replicate_point:
+            x_ = parse_floats(fid.readline().split())
+            x = np.array([x_] * n)
+        else:
+            x = np.array([parse_floats(fid.readline().split()) for _ in range(n)])
+
+        line = fid.readline().split()
+        wishart_gamma = float(line[0])
+        wishart_m = int(line[1])
+
+    return GMMInput(alphas, means, icf, x, Wishart(wishart_gamma, wishart_m))
+
+
+@dataclass
 class BAInput:
     cams: np.ndarray = field(default=np.empty(0, dtype=np.float64))
     x: np.ndarray = field(default=np.empty(0, dtype=np.float64))
@@ -34,7 +85,6 @@ def read_ba_instance(fn):
         (BAInput): input data for BA objective test class.
     """
 
-    fid = open(fn, "r")
     with open(fn, "r") as fid:
         line = fid.readline()
         line = line.split()
