@@ -218,28 +218,35 @@ public:
     SmallVector<Value> iterArgsInit;
     iterArgsInit.reserve(op.getNumOutputs());
     for (OpOperand *outTensor : op.getOutputTensorOperands()) {
-      auto outType = outTensor->get().getType().cast<RankedTensorType>();
+      // TODO: This is a bandaid, need some way of determining when it's safe to
+      // write.
+      if (isa<tensor::ExtractSliceOp>(outTensor->get().getDefiningOp())) {
+        iterArgsInit.push_back(outTensor->get());
+      } else {
+        auto outType = outTensor->get().getType().cast<RankedTensorType>();
 
-      auto memrefType =
-          hasPackedEncoding(outType)
-              ? BufferizeTypeConverter().convertType(
-                    convertToPackedType(outType))
-              : MemRefType::get(outType.getShape(), outType.getElementType());
-      Value space = rewriter.create<linalg::InitTensorOp>(
-          op.getLoc(), outType.getShape(), outType.getElementType());
-      if (hasPackedEncoding(outType)) {
-        space =
-            rewriter.create<standalone::PackOp>(op.getLoc(), outType, space);
-      }
-      if (op.payloadUsesValueFromOperand(outTensor)) {
-        auto castedSpace = rewriter.create<memref::BufferCastOp>(
-            op.getLoc(), memrefType, space);
-        auto memrefOutput = rewriter.create<memref::BufferCastOp>(
-            op.getLoc(), memrefType, outTensor->get());
-        rewriter.create<linalg::CopyOp>(op.getLoc(), memrefOutput, castedSpace);
-      }
+        auto memrefType =
+            hasPackedEncoding(outType)
+                ? BufferizeTypeConverter().convertType(
+                      convertToPackedType(outType))
+                : MemRefType::get(outType.getShape(), outType.getElementType());
+        Value space = rewriter.create<linalg::InitTensorOp>(
+            op.getLoc(), outType.getShape(), outType.getElementType());
+        if (hasPackedEncoding(outType)) {
+          space =
+              rewriter.create<standalone::PackOp>(op.getLoc(), outType, space);
+        }
+        if (op.payloadUsesValueFromOperand(outTensor)) {
+          auto castedSpace = rewriter.create<memref::BufferCastOp>(
+              op.getLoc(), memrefType, space);
+          auto memrefOutput = rewriter.create<memref::BufferCastOp>(
+              op.getLoc(), memrefType, outTensor->get());
+          rewriter.create<linalg::CopyOp>(op.getLoc(), memrefOutput,
+                                          castedSpace);
+        }
 
-      iterArgsInit.push_back(space);
+        iterArgsInit.push_back(space);
+      }
     }
     auto loopNest = scf::buildLoopNest(
         rewriter, op.getLoc(), lbs, ubs, steps, iterArgsInit,
@@ -261,6 +268,8 @@ public:
     lastLoop.setLowerBound(last_lb);
 
     rewriter.replaceOp(op, loopNest.getResults());
+    loopNest.loops.front()->setAttr("Packed loop",
+                                    UnitAttr::get(rewriter.getContext()));
     return success();
   }
 };

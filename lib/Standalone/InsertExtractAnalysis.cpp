@@ -84,6 +84,8 @@ InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
     } else if (auto forOp = dyn_cast<scf::ForOp>(use.getOwner())) {
       // This is potentially a dangerous assumption.
       isWrittenInPlace = true;
+    } else if (auto addfOp = dyn_cast<arith::AddFOp>(use.getOwner())) {
+      isWrittenInPlace = true;
     }
   }
 
