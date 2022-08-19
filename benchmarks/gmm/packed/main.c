@@ -1,20 +1,24 @@
 #include "gmm.h"
 #include "gmm_types.h"
 #include "lagrad_utils.h"
+#include "memusage.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <unistd.h>
 
-#define NUM_RUNS 2
+#define NUM_RUNS 6
+#define CHECK_MEM 1
 
-typedef struct {
-  double *data;
-  double *aligned;
-} UnrankedMemref;
 double *deadbeef = (double *)0xdeadbeef;
+RunProcDyn rpd;
+void check_mem_usage() {
+  run_get_dynamic_proc_info(getpid(), &rpd);
+  printf("%zu\t%zu\n", rpd.rss, rpd.vsize);
+}
 
 extern double mlir_gmm_opt_full(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
@@ -27,6 +31,15 @@ extern double mlir_gmm_opt_full(
     /*wishart_m=*/int64_t);
 
 extern GMMCompressedGrad lagrad_gmm_packed(
+    /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
+    /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*Ls*/ double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*x=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*wishart_gamma=*/double,
+    /*wishart_m=*/int64_t);
+
+extern GMMCompressedGrad enzyme_mlir_gmm_packed(
     /*alphas=*/double *, double *, int64_t, int64_t, int64_t,
     /*means=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*Qs=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -49,6 +62,20 @@ GMMCompressedGrad lagrad_gmm_packed_adjoint(GMMInput *gmm_input,
       /*wishart_m=*/gmm_input->wishart_m);
 }
 
+GMMCompressedGrad enzyme_mlir_gmm_packed_adjoint(GMMInput *gmm_input,
+                                                 double *compressed_Ls) {
+  int n = gmm_input->n, k = gmm_input->k, d = gmm_input->d;
+  int tri_size = d * (d - 1) / 2;
+  return enzyme_mlir_gmm_packed(
+      /*alphas=*/deadbeef, gmm_input->alphas, 0, k, 1,
+      /*means=*/deadbeef, gmm_input->means, 0, k, d, d, 1,
+      /*Qs=*/deadbeef, gmm_input->Qs, 0, k, d, d, 1,
+      /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
+      /*x=*/deadbeef, gmm_input->x, 0, n, d, d, 1,
+      /*wishart_gamma=*/gmm_input->wishart_gamma,
+      /*wishart_m=*/gmm_input->wishart_m);
+}
+
 extern GMMCompressedGrad enzyme_c_gmm_packed(GMMInput *gmm,
                                              double *compressed_Ls);
 
@@ -59,128 +86,6 @@ void free_gmm_input(GMMInput gmm_input) {
   free(gmm_input.Ls);
   free(gmm_input.x);
 }
-
-/* Implementations */
-
-// unsigned long enzyme_mlir_gmm_full_adjoint(GMMInput gmm_input,
-//                                            double *ref_alphas,
-//                                            double *ref_means, double
-//                                            *ref_icf, double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   GMMGrad ans = enzyme_gmm_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-
-//   convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
-//   check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
-//                 ref_means, temp_icf, ref_icf, "Enzyme (MLIR Start) Full");
-//   free(ans.dalphas.aligned);
-//   free(ans.dmeans.aligned);
-//   free(ans.dqs.aligned);
-//   free(ans.dls.aligned);
-//   return timediff(start, stop);
-// }
-
-// unsigned long mlir_optimized_full_primal(GMMInput gmm_input, double
-// *ref_alphas,
-//                                          double *ref_means, double *ref_icf,
-//                                          double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   enzyme_gmm_opt_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-//   return timediff(start, stop);
-// }
-
-// unsigned long mlir_optimized_full_adjoint(GMMInput gmm_input,
-//                                           double *ref_alphas, double
-//                                           *ref_means, double *ref_icf, double
-//                                           *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   GMMGrad ans = enzyme_gmm_opt_diff_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-
-//   // print_d_arr(ans.dls.aligned + 10, 10);
-//   convert_ql_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned, temp_icf);
-//   check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
-//                 ref_means, temp_icf, ref_icf, "Enzyme (memory optimized)
-//                 Full");
-//   free(ans.dalphas.aligned);
-//   free(ans.dmeans.aligned);
-//   free(ans.dqs.aligned);
-//   free(ans.dls.aligned);
-//   return timediff(start, stop);
-// }
-
-// unsigned long mlir_optimized_compressed_primal(GMMInput gmm_input,
-//                                                double *ref_alphas,
-//                                                double *ref_means,
-//                                                double *ref_icf,
-//                                                double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   int tri_size = d * (d - 1) / 2;
-//   int icf_size = d * (d + 1) / 2;
-//   double *compressed_Ls = (double *)malloc(k * tri_size * sizeof(double));
-//   for (size_t i = 0; i < k; i++) {
-//     for (size_t j = 0; j < tri_size; j++) {
-//       compressed_Ls[i * tri_size + j] = gmm_input.icf[i * icf_size + d + j];
-//     }
-//   }
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   double res = enzyme_gmm_opt_compressed(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, compressed_Ls, 0, k, tri_size, tri_size, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-
-//   printf("MLIR opt primal res: %f\n", res);
-//   free(compressed_Ls);
-//   return timediff(start, stop);
-// }
-
-// unsigned long lagrad_gmm_full_primal(GMMInput gmm_input, double *ref_alphas,
-//                                      double *ref_means, double *ref_icf,
-//                                      double *temp_icf) {
-//   int d = gmm_input.d, k = gmm_input.k, n = gmm_input.n;
-//   struct timeval start, stop;
-//   gettimeofday(&start, NULL);
-//   double res = mlir_gmm_opt_full(
-//       /*alphas=*/deadbeef, gmm_input.alphas, 0, k, 1, /*means=*/deadbeef,
-//       gmm_input.means, 0, k, d, d, 1, /*Qs=*/deadbeef, gmm_input.Qs, 0, k, d,
-//       d, 1, /*Ls=*/deadbeef, gmm_input.Ls, 0, k, d, d, d * d, d, 1,
-//       /*x=*/deadbeef, gmm_input.x, 0, n, d, d, 1,
-//       /*wishart_gamma=*/gmm_input.wishart_gamma,
-//       /*wishart_m=*/gmm_input.wishart_m);
-//   gettimeofday(&stop, NULL);
-//   printf("MLIR full primal: %.4e\n", res);
-//   return timediff(start, stop);
-// }
 
 typedef struct GMMApp {
   const char *name;
@@ -207,11 +112,14 @@ unsigned long collect_packed_adjoint(GMMApp app, GMMInput *gmm_input,
   // print_d_arr_2d(ans.dqs.aligned, ans.dqs.size_0, ans.dqs.size_1);
   // print_d_arr(ans.dls.aligned, ans.dls.size_1);
 
-  // print_d_arr(ans.dls.aligned + 10, 10);
-  convert_ql_compressed_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned,
-                               temp_icf);
-  check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
-                ref_means, temp_icf, ref_icf, app.name);
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    convert_ql_compressed_to_icf(d, k, n, ans.dqs.aligned, ans.dls.aligned,
+                                 temp_icf);
+    check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
+                  ref_means, temp_icf, ref_icf, app.name);
+  }
   free(ans.dalphas.aligned);
   free(ans.dmeans.aligned);
   free(ans.dqs.aligned);
@@ -235,6 +143,7 @@ int main() {
       //
       {.name = "LAGrad", .func = lagrad_gmm_packed_adjoint},
       {.name = "Enzyme/C", .func = enzyme_c_gmm_packed},
+      {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_packed_adjoint},
   };
 
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
@@ -242,7 +151,10 @@ int main() {
   unsigned long results_df[NUM_RUNS];
   double *ref_icf = calloc(k * icf_size, sizeof(double));
   double *temp_icf = calloc(k * icf_size, sizeof(double));
-  GMMCompressedGrad ref_grad = populate_ref(&gmm_input);
+  GMMCompressedGrad ref_grad;
+  if (!CHECK_MEM) {
+    ref_grad = populate_ref(&gmm_input);
+  }
   convert_ql_compressed_to_icf(d, k, n, ref_grad.dqs.aligned,
                                ref_grad.dls.aligned, ref_icf);
   free(ref_grad.dqs.aligned);

@@ -186,7 +186,7 @@ module  {
     %lwishpri = scf.for %ik = %c0 to %ck step %c1 iter_args(%out_iter = %zero) -> (f64) {
       %Qdiags_slice = tensor.extract_slice %Qdiags[%ik, 0] [1, {{d}}] [1, 1] : tensor<{{k}}x{{d}}xf64> to tensor<{{d}}xf64>
       // Inlined msqnorm
-      %Qsquared = arith.mulf %Qdiags_slice, %Qdiags_slice {lagrad_should_cache} : tensor<{{d}}xf64>
+      %Qsquared = arith.mulf %Qdiags_slice, %Qdiags_slice : tensor<{{d}}xf64>
       %fro_0 = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qsquared : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %1 = arith.addf %arg0, %arg1 : f64

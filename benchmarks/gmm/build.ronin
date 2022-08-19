@@ -21,7 +21,7 @@ data_file = (
     / "data"
     # / "test.txt"
     / "1k"
-    / "gmm_d128_K200.txt"
+    / "gmm_d128_K5.txt"
 )
 
 with new_context() as ctx:
