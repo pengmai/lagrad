@@ -1,0 +1,42 @@
+from ronin.cli import cli
+from ronin.gcc import GccBuild
+from ronin.files import Copy
+from ronin.projects import Project
+from ronin.phases import Phase
+from ronin.contexts import new_context
+from ronin.utils.paths import glob, join_path
+import pathlib
+
+DEFAULT_INSTALL = str(pathlib.Path.home() / ".local")
+with new_context() as ctx:
+    project = Project(name="LAGrad C Utilities")
+    include_dest = join_path(ctx.get("paths.install", DEFAULT_INSTALL), "include")
+    lib_dest = join_path(ctx.get("paths.install", DEFAULT_INSTALL), "lib")
+
+    linker = GccBuild()
+    linker.add_argument("-dynamiclib")
+    dyn_lib = Phase(
+        project=project,
+        name="Build dynamic library",
+        inputs=glob("*.c"),
+        executor=linker,
+        output="lagrad_utils.dylib",
+    )
+
+    if ctx.build.install:
+        Phase(
+            project=project,
+            name="Install library",
+            executor=Copy(),
+            inputs_from=[dyn_lib],
+            output_strip_prefix_from=dyn_lib,
+            output_path=lib_dest,
+        )
+        Phase(
+            project=project,
+            name="Install headers",
+            executor=Copy(),
+            inputs=glob("*.h"),
+            output_path=include_dest,
+        )
+    cli(project)
