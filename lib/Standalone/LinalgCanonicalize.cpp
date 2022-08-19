@@ -122,6 +122,8 @@ public:
       return failure();
     }
 
+    DominanceInfo dom;
+
     for (Operation *user : extractSliceOp.getResult().getUsers()) {
       for (Value operand : user->getOperands()) {
         if (operand != extractSliceOp.getResult()) {
@@ -130,6 +132,7 @@ public:
             assert(linalgOp.getNumOutputs() == 1 &&
                    "expected linalg op to have 1 output");
             if (linalgOp.hasTensorSemantics() &&
+                dom.dominates(extractSliceOp.source(), linalgOp) &&
                 isZeroTensor(linalgOp.getOutputTensorOperands()[0]->get())) {
               rewriter.setInsertionPoint(linalgOp);
               Location loc = op->getLoc();

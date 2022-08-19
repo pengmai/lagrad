@@ -220,7 +220,8 @@ public:
     for (OpOperand *outTensor : op.getOutputTensorOperands()) {
       // TODO: This is a bandaid, need some way of determining when it's safe to
       // write.
-      if (isa<tensor::ExtractSliceOp>(outTensor->get().getDefiningOp())) {
+      if (isa_and_nonnull<tensor::ExtractSliceOp>(
+              outTensor->get().getDefiningOp())) {
         iterArgsInit.push_back(outTensor->get());
       } else {
         auto outType = outTensor->get().getType().cast<RankedTensorType>();
