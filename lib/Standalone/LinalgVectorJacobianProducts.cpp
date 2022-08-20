@@ -94,7 +94,9 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
 
           rewriter.create<linalg::YieldOp>(loc, add_res);
         } else {
-          rewriter.create<linalg::YieldOp>(loc, bbEnv[new_operand]);
+          Value add_res = rewriter.create<arith::AddFOp>(
+              loc, bbEnv[new_operand], regionArgs.back());
+          rewriter.create<linalg::YieldOp>(loc, add_res);
         }
       });
 
