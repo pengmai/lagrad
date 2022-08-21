@@ -22,6 +22,8 @@ public:
 
 bool isFloatOrFloatTensor(Type typ);
 
+bool isLoopParallel(scf::ForOp forOp);
+
 void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
 void analyzeDynamicShapes(LAGradContext &ctx, FuncOp funcOp,
                           OpBuilder &builder);

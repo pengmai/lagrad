@@ -173,7 +173,13 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
                   : cast<scf::ForOp>(tbrVal.getParentRegion()->getParentOp());
           if (parent == forOp) {
             SmallVector<Value> induction_vars;
-            while (parent) {
+            auto canAvoidCaching = [&](scf::ForOp parent) {
+              return isLoopParallel(parent) &&
+                     llvm::none_of(parent.getResults(), [&](Value val) {
+                       return ctx.effectivelyUsed.contains(val);
+                     });
+            };
+            while (parent && !canAvoidCaching(parent)) {
               induction_vars.push_back(parent.getInductionVar());
               parent = parent->getParentOfType<scf::ForOp>();
             }
@@ -242,6 +248,15 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
                     [&](Value v) { return ctx.toBeRecorded.contains(v); }) &&
                 llvm::none_of(forOp.getRegionIterArgs(), inDependSet)) {
               auto cloned = builder.clone(pop);
+              // Yet another bandaid: this allows the primal outer loop in GMM
+              // to be totally erased because it's unused.
+              if (isa<scf::ForOp>(pop)) {
+                pop.walk([&rewriter](linalg::CopyOp copyOp) {
+                  if (copyOp->hasAttr("lagrad_cache")) {
+                    rewriter.eraseOp(copyOp);
+                  }
+                });
+              }
               cloned->setAttr("cloned " + ctx.debug_names[pop.getResult(0)],
                               UnitAttr::get(pop.getContext()));
               for (auto tup :

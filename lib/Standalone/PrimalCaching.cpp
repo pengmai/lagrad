@@ -4,7 +4,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 namespace mlir {
-using namespace mlir;
+using llvm::errs;
+
 static inline void markAsCache(Operation *op) {
   op->setAttr("lagrad_cache", UnitAttr::get(op->getContext()));
 }
@@ -28,13 +29,25 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
                                          : cast<scf::ForOp>(&op);
     // These indices are in reverse order of what you'd expect, going from the
     // inside loop out
-    while (parent) {
+
+    auto canAvoidCaching = [&](scf::ForOp parent) {
+      return isLoopParallel(parent) &&
+             llvm::none_of(parent.getResults(), [&](Value val) {
+               return ctx.effectivelyUsed.contains(val);
+             });
+    };
+    while (parent && !canAvoidCaching(parent)) {
       induction_vars.push_back(parent.getInductionVar());
       // Assume the step sizes are 1.
       upper_bounds.push_back(parent.upperBound());
       lower_bounds.push_back(parent.lowerBound());
       rewriter.setInsertionPoint(parent);
       parent = parent->getParentOfType<scf::ForOp>();
+    }
+    // Need to set insertion point here if the parallel checks result in no
+    // loops
+    if (parent) {
+      rewriter.setInsertionPoint(parent);
     }
 
     SmallVector<Value> dynamicSizes;

@@ -1,10 +1,13 @@
 #include "Standalone/Utils.h"
 #include "Standalone/StandaloneOps.h"
+#include "mlir/Analysis/AffineAnalysis.h"
+#include "mlir/Analysis/LoopAnalysis.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 namespace mlir {
 using namespace mlir;
@@ -13,6 +16,57 @@ bool isFloatOrFloatTensor(Type typ) {
   return typ.isa<FloatType>() ||
          (typ.isa<RankedTensorType>() &&
           typ.dyn_cast<RankedTensorType>().getElementType().isa<FloatType>());
+}
+
+// Specialization of getSupportedReduction for scf.for ops.
+static Value SCFGetSupportedReduction(scf::ForOp forOp, unsigned pos,
+                                      AtomicRMWKind &kind) {
+  SmallVector<Operation *> combinerOps;
+  Value reducedVal =
+      matchReduction(forOp.getRegionIterArgs(), pos, combinerOps);
+  if (!reducedVal)
+    return nullptr;
+
+  // Expected only one combiner operation.
+  if (combinerOps.size() > 1)
+    return nullptr;
+
+  Operation *combinerOp = combinerOps.back();
+  Optional<AtomicRMWKind> maybeKind =
+      TypeSwitch<Operation *, Optional<AtomicRMWKind>>(combinerOp)
+          .Case([](arith::AddFOp) { return AtomicRMWKind::addf; })
+          // .Case([](arith::MulFOp) { return AtomicRMWKind::mulf; })
+          .Case([](arith::AddIOp) { return AtomicRMWKind::addi; })
+          // .Case([](arith::MulIOp) { return AtomicRMWKind::muli; })
+          .Default([](Operation *) -> Optional<AtomicRMWKind> {
+            // TODO: AtomicRMW supports other kinds of reductions this is
+            // currently not detecting, add those when the need arises.
+            return llvm::None;
+          });
+  if (!maybeKind)
+    return nullptr;
+
+  kind = *maybeKind;
+  return reducedVal;
+}
+
+void SCFGetSupportedReductions(
+    scf::ForOp forOp, SmallVectorImpl<LoopReduction> &supportedReductions) {
+  unsigned numIterArgs = forOp.getNumIterOperands();
+  if (numIterArgs == 0)
+    return;
+  supportedReductions.reserve(numIterArgs);
+  for (unsigned i = 0; i < numIterArgs; ++i) {
+    AtomicRMWKind kind;
+    if (Value value = SCFGetSupportedReduction(forOp, i, kind))
+      supportedReductions.emplace_back(LoopReduction{kind, i, value});
+  }
+}
+
+bool isLoopParallel(scf::ForOp forOp) {
+  SmallVector<LoopReduction> parallelReductions;
+  SCFGetSupportedReductions(forOp, parallelReductions);
+  return forOp.getNumIterOperands() == parallelReductions.size();
 }
 
 bool isIntOrIntTensor(Type typ) {
@@ -452,6 +506,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     auto forOp = dyn_cast<scf::ForOp>(op);
     assert(forOp.getNumResults() > 0 &&
            "for op with zero results not supported");
+    // This is incredibly brittle.
     size_t result_idx = -1;
     for (size_t idx = 0; idx < forOp.getNumResults(); idx++) {
       if (isFloatOrFloatTensor(forOp.getResult(idx).getType())) {
@@ -467,7 +522,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     ValueSet freeOperands;
     collectFreeVars(forOp.getBody(), forOp.getLoopBody(), freeOperands);
 
-    // auto free_operand_vec = llvm::to_vector<4>(freeOperands);
     SmallVector<Value> free_operand_vec;
     for (auto v : freeOperands) {
       if (ctx.activeValues.contains(v)) {
@@ -476,20 +530,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     }
     reverseForOp(forOp, ctx, free_operand_vec, vjp_value, result_idx, env,
                  rewriter);
-    // // only works for GMMs
-    // if (forOp.getResultTypes()[0].isa<FloatType>()) {
-    //   llvm::errs() << "OUTER FOR OP:\nDifferentiated through " << fv_count
-    //                << " free variables:\n";
-    // } else {
-    //   llvm::errs() << "INNER FOR OP:\nDifferentiated through " << fv_count
-    //                << " free variables:\n";
-    // }
-    // for (auto freeOperand : freeOperands) {
-    //   if (isFloatOrFloatTensor(freeOperand.getType())) {
-    //     llvm::errs() << "fv: " << freeOperand << "\n";
-    //   }
-    // }
-
     return;
   }
 
