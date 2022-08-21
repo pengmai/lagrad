@@ -38,6 +38,10 @@ def test_select_different_type():
     )
 
 
+def test_arrmax():
+    assert extract_1d(jit_file(f"{MLIR_FILES}/scf/arrmax.mlir")) == [0, 1, 0, 0]
+
+
 def test_nested_with_slice():
     expected = np.array(
         [

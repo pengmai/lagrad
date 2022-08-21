@@ -5,7 +5,7 @@
 
 func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main_term(
+func private @main_term(
   %alphas: tensor<4xf64>,
   %means: tensor<4x2xf64>,
   %Qs: tensor<4x2xf64>,
@@ -58,16 +58,15 @@ func @main_term(
 
       // inlined Qtimesx
       // Elementwise multiplication
-      %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<2xf64>
+      %Qxcentered_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<2xf64>
 
       // The triangular matrix-vector multiplication
-      %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<2x2xf64>, tensor<2xf64>) outs(%len_d_zero : tensor<2xf64>) -> tensor<2xf64>
-      %Qxcentered = arith.addf %out_0, %out_1 : tensor<2xf64>
-
-      %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<2xf64>) outs(%zerod_tensor : tensor<f64>) {
+      %matvec_1 = linalg.matvec {library_call = "dmatvec"} ins(%Ltri_slice, %xcentered : tensor<2x2xf64>, tensor<2xf64>) outs(%len_d_zero : tensor<2xf64>) -> tensor<2xf64>
+      %Qxcentered = arith.addf %Qxcentered_0, %matvec_1 : tensor<2xf64>
+      %msqnorm_0 = arith.mulf %Qxcentered, %Qxcentered : tensor<2xf64>
+      %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%msqnorm_0 : tensor<2xf64>) outs(%zerod_tensor : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
-        %0 = arith.mulf %arg0, %arg0 : f64
-        %1 = arith.addf %0, %arg1 : f64
+        %1 = arith.addf %arg0, %arg1 : f64
         linalg.yield %1 : f64
       } -> tensor<f64>
       %msqnorm = tensor.extract %msqnorm_t[] : tensor<f64>
@@ -91,11 +90,7 @@ func @main_term(
       outs(%max_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = scf.if %p -> (f64) {
-        scf.yield %arg0 : f64
-      } else {
-        scf.yield %arg1 : f64
-      }
+      %next = select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
