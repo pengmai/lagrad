@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 1
+#define CHECK_MEM 0
 
 double *deadbeef = (double *)0xdeadbeef;
 RunProcDyn rpd;
