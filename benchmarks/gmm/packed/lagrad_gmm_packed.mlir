@@ -93,7 +93,6 @@ module  {
         } -> tensor<{{d}}xf64>
 
         %Qxcentered = arith.addf %out_0, %out_1 {lagrad_should_cache} : tensor<{{d}}xf64>
-        // %Qxcentered_squared = arith.mulf %Qxcentered, %Qxcentered {lagrad_should_cache} : tensor<{{d}}xf64>
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
         ^bb0(%arg0: f64, %arg1: f64):
           %0 = arith.mulf %arg0, %arg0 : f64
@@ -108,7 +107,7 @@ module  {
         %main_term_ik = arith.subf %sum_aq, %hmsqnorm : f64
         %main_term_next = tensor.insert %main_term_ik into %mt_iter[%ik] : tensor<{{k}}xf64>
         scf.yield %main_term_next : tensor<{{k}}xf64>
-      } {lagrad_should_cache}
+      }
 
       // logsumexp %alphas inlined
       // find the max

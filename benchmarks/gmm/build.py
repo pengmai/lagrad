@@ -64,4 +64,5 @@ with new_context() as ctx:
 
     full_project = get_project("GMM Full", "full", "gmm_full")
     packed_project = get_project("GMM Packed", "packed", "gmm_packed")
-    cli(full_project, packed_project)
+    if __name__ == "__main__":
+        cli(full_project, packed_project)
