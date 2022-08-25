@@ -1,4 +1,4 @@
-#include "gmm.h"
+#include "main_term.h"
 #include "lagrad_utils.h"
 #include <math.h>
 #include <pmmintrin.h>
