@@ -20,8 +20,8 @@ data_file = (
     / "gmm"
     / "data"
     # / "test.txt"
-    / "1k"
-    / "gmm_d128_K5.txt"
+    / "2.5M"
+    / "gmm_d10_K10.txt"
 )
 
 
@@ -67,6 +67,12 @@ if __name__ == "__main__":
     with new_context() as ctx:
         with open(data_file, "r") as f:
             d, k, n = [int(x) for x in f.readline().split()]
-        template_args = {"n": n, "k": k, "d": d, "tri_size": d * (d - 1) // 2}
+        template_args = {
+            "n": n,
+            "k": k,
+            "d": d,
+            "tri_size": d * (d - 1) // 2,
+            "data_file": str(data_file),
+        }
 
         cli(get_full_project(template_args), get_packed_project(template_args))

@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 0
+#define CHECK_MEM 1
 
 double *deadbeef = (double *)0xdeadbeef;
 RunProcDyn rpd;
@@ -142,8 +142,8 @@ int main() {
   GMMApp apps[] = {
       //
       {.name = "LAGrad", .func = lagrad_gmm_packed_adjoint},
-      {.name = "Enzyme/C", .func = enzyme_c_gmm_packed},
-      {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_packed_adjoint},
+      // {.name = "Enzyme/C", .func = enzyme_c_gmm_packed},
+      // {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_packed_adjoint},
   };
 
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
