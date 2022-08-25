@@ -6,6 +6,7 @@ test/pytest/tmp
 benchmarks/tmp
 benchmarks/data
 benchmarks/results
+*.trace/
 .secretpass
 notes*.md
 sideprojects.md
