@@ -163,7 +163,7 @@ public:
               // Creating a new insert slice op segfaults for some reason.
               pairedInsertSlice.sourceMutable().assign(clonedOp->getResult(0));
               rewriter.eraseOp(user);
-              Logger::blue("Ran fuse paired insert extract");
+              // Logger::blue("Ran fuse paired insert extract");
               return success();
             }
           }

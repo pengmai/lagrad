@@ -56,7 +56,7 @@ Optional<tensor::InsertSliceOp>
 InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
                                               const DominanceInfo &dom) const {
   // The source of the extract slice should have exactly one use besides the
-  // extract slice op.
+  // insert slice op.
   size_t domUseCount = 0;
   tensor::InsertSliceOp insertSliceOp;
   for (Operation *user : op.source().getUsers()) {
