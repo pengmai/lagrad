@@ -5,6 +5,7 @@ from ronin.projects import Project
 from ronin.utils.platform import which
 import pathlib
 import subprocess
+from typing import Literal
 
 ENZYME_DYLIB = (
     pathlib.Path.home()
@@ -156,6 +157,22 @@ class RenderTemplateExecutor(ExecutorWithArguments):
         return self
 
 
+class ReplaceHandExecutor(ExecutorWithArguments):
+    def __init__(self, mode: Literal["mlir", "c"], complicated=False):
+        super().__init__()
+        self.command = lambda ctx: str(
+            pathlib.Path(__file__).parent / "replace_hand_opt.py"
+        )
+        self.add_argument_unfiltered("$in")
+        self.add_argument_unfiltered("-o", "$out")
+        self.output_type = "object"
+        self.output_prefix = "replaced_"
+        self.output_extension = "ll"
+        self.add_argument("--mode", mode)
+        if complicated:
+            self.add_argument("--complicated")
+
+
 class LAGradOptExecutor(ExecutorWithArguments):
     def __init__(self, command: str = None, default_args=True):
         super(LAGradOptExecutor, self).__init__()
@@ -220,10 +237,15 @@ class OptExecutor(ExecutorWithArguments):
         return self
 
 
-def compile_enzyme(project: Project, inputs: list[str]) -> Phase:
+def compile_enzyme(
+    project: Project, inputs: list[str], extra_includes: list[str] = []
+) -> Phase:
     emit_llvm = ClangEmitLLVM()
     emit_llvm.add_argument(*PRE_ENZYME_OPT)
     emit_llvm.add_include_path(LOCAL_INCLUDE)
+    for extra_include in extra_includes:
+        emit_llvm.add_include_path(extra_include)
+
     preenzyme = Phase(
         project=project,
         name="Pre-Enzyme C to LLVM IR",
@@ -254,6 +276,7 @@ def compile_mlir_enzyme(
     inputs: list[str],
     template_args: dict[str, int] = None,
     pre_ad_opt=True,
+    replace_hand_opt=False,
 ) -> Phase:
     lagrad_opt = LAGradOptExecutor(default_args=False)
     lagrad_opt.add_argument(*LAGradOptFlags.bufferize)
@@ -293,6 +316,14 @@ def compile_mlir_enzyme(
             name="Enzyme MLIR Pre-AD Optimization",
             inputs_from=[llvm_ir],
             executor=preenzyme_clang,
+        )
+
+    if replace_hand_opt:
+        llvm_ir = Phase(
+            project=project,
+            name="Enzyme MLIR Hand Opt Replacement",
+            inputs_from=[llvm_ir],
+            executor=ReplaceHandExecutor("mlir", complicated=True),
         )
 
     postenzyme = Phase(
@@ -375,11 +406,16 @@ def compile_lagrad(
 
 
 def clang_compile(
-    project: Project, inputs: list[str], template_args: dict[str, int] = None
+    project: Project,
+    inputs: list[str],
+    template_args: dict[str, int] = None,
+    extra_includes: list[str] = [],
 ):
     compile_executor = GccCompile("clang-12")
     compile_executor.optimize(3)
     compile_executor.add_include_path(LOCAL_INCLUDE)
+    for extra_include in extra_includes:
+        compile_executor.add_include_path(extra_include)
 
     kwargs = {"project": project, "name": "Compile C", "executor": compile_executor}
     if template_args:
@@ -411,6 +447,7 @@ def clang_link(project: Project, inputs_from: list[Phase], output: str):
         inputs=[str(MLIR_RUNNER_UTILS), str(LAGRAD_UTILS)],
         inputs_from=inputs_from,
         executor=linker,
+        rebuild_on=[str(LAGRAD_UTILS)],
         output=output,
     )
 
@@ -424,6 +461,7 @@ def clang_dynamiclib(project: Project, inputs_from: list[Phase], output: str):
         project=project,
         name="Build dynamic lib",
         inputs_from=inputs_from,
+        inputs=[str(MLIR_RUNNER_UTILS)],
         executor=build,
         output=output,
     )
