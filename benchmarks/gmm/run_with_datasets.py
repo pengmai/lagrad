@@ -17,7 +17,7 @@ import json
 import pandas as pd
 import numpy as np
 import re
-from build import get_packed_project
+from build import get_packed_project, get_full_project, get_tri_project
 
 from tqdm import tqdm
 
@@ -37,7 +37,7 @@ runtime_results_file = (
     / "Research"
     / "lagrad"
     / "detailed_results"
-    / "gmm_packed_runtimes.tsv"
+    / "gmm_full_runtimes.tsv"
 )
 
 mem_results_file = (
@@ -93,8 +93,11 @@ datasets.sort(key=sorter)
 # make_dataframe(datasets, runtime_results_file)
 # make_mem_dataframe(datasets, mem_results_file)
 
+mode = "runtime"
+assert mode in ["runtime", "memory"], "Invalid mode"
+
 with tqdm(datasets) as t:
-    # runtime_df = pd.read_csv(runtime_results_file, sep="\t", index_col=[0, 1])
+    runtime_df = pd.read_csv(runtime_results_file, sep="\t", index_col=[0, 1])
     mem_df = pd.read_csv(mem_results_file, sep="\t", index_col=[0, 1, 2])
     for dataset in t:
         t.write(f"Running {dataset.name}")
@@ -108,7 +111,9 @@ with tqdm(datasets) as t:
             "data_file": str(dataset),
         }
         with new_context() as ctx:
-            project = get_packed_project(template_args)
+            # project = get_packed_project(template_args)
+            # project = get_tri_project(template_args)
+            project = get_full_project(template_args)
             binary = (
                 f"{project.output_path}/bin/{project.phases['Link Executable'].output}"
             )
@@ -116,18 +121,20 @@ with tqdm(datasets) as t:
             ninja_file = NinjaFile(project)
             ninja_file.generate()
             check_call(["ninja", "-f", ninja_file.path], stdout=DEVNULL)
-            stdout, memdict = run_with_memory(binary, ".secretpass")
-            t.write(stdout)
-            t.write(str(memdict))
-            mem_df.loc[dataset.name, "LAGrad", "Packed"] = (
-                memdict.max_rss,
-                memdict.max_vsize,
-            )
-            mem_df.to_csv(mem_results_file, sep="\t")
-            # stdout = check_output([binary]).decode("utf-8")
-            # lines = stdout.splitlines()[1:]
-            # for line in lines:
-            #     t.write(line)
-            #     key, results = line.split(":")
-            #     runtime_df.loc[dataset.name, key] = json.loads(results)
-    # runtime_df.to_csv(runtime_results_file, sep="\t")
+            if mode == "memory":
+                stdout, memdict = run_with_memory(binary, ".secretpass", timeout=8*60)
+                t.write(stdout)
+                t.write(str(memdict))
+                mem_df.loc[dataset.name, "Enzyme/C", "Full"] = (
+                    memdict.max_rss,
+                    memdict.max_vsize,
+                )
+                mem_df.to_csv(mem_results_file, sep="\t")
+            else:
+                stdout = check_output([binary], timeout=8 * 60).decode("utf-8")
+                lines = stdout.splitlines()[1:]
+                for line in lines:
+                    t.write(line)
+                    key, results = line.split(":")
+                    runtime_df.loc[dataset.name, key] = json.loads(results)
+                runtime_df.to_csv(runtime_results_file, sep="\t")

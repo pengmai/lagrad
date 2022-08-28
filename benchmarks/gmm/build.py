@@ -20,8 +20,8 @@ data_file = (
     / "gmm"
     / "data"
     # / "test.txt"
-    / "2.5M"
-    / "gmm_d10_K10.txt"
+    / "1k"
+    / "gmm_d10_K25.txt"
 )
 
 
@@ -55,8 +55,14 @@ def get_project(title: str, subdir: str, out: str, template_args: dict):
     return project
 
 
+# Enzyme is currently returning incorrect results for the fully-materialized adjoint.
+# Going to ignore it for now.
 def get_full_project(template_args):
     return get_project("GMM Full", "full", "gmm_full", template_args)
+
+
+def get_tri_project(template_args):
+    return get_project("GMM Tri", "tri", "gmm_tri", template_args)
 
 
 def get_packed_project(template_args):
@@ -75,4 +81,8 @@ if __name__ == "__main__":
             "data_file": str(data_file),
         }
 
-        cli(get_full_project(template_args), get_packed_project(template_args))
+        cli(
+            get_full_project(template_args),
+            get_tri_project(template_args),
+            # get_packed_project(template_args),
+        )

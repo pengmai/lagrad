@@ -35,6 +35,17 @@ double sqnorm(int n, double const *x) {
   return res;
 }
 
+double sqnorm_ltri(int n, double const *x) {
+  int i, j;
+  double res;
+  for (i = 0; i < n; i++) {
+    for (j = 0; j < n; j++) {
+      res += x[i * n + j] * x[i * n + j];
+    }
+  }
+  return res;
+}
+
 // out = a - b
 void subtract(int d, double const *x, double const *y, double *out) {
   int id;
@@ -81,7 +92,7 @@ double log_wishart_prior_full_L(int d, int k, double wishart_gamma,
   double out = 0;
   for (ik = 0; ik < k; ik++) {
     double frobenius =
-        sqnorm(d, &Qdiags[ik * d]) + sqnorm(d * d, &Ls[ik * d * d]);
+        sqnorm(d, &Qdiags[ik * d]) + sqnorm_ltri(d, &Ls[ik * d * d]);
     out = out + 0.5 * wishart_gamma * wishart_gamma * (frobenius)-wishart_m *
                     sum_qs[ik];
   }
@@ -110,7 +121,7 @@ void QtimesXFullL(int d, double *Qdiag, double *L, double *x, double *out) {
   }
 
   for (i = 0; i < d; i++) {
-    for (j = 0; j < d; j++) {
+    for (j = 0; j < i; j++) {
       out[i] += L[i * d + j] * x[j];
     }
   }
@@ -174,7 +185,7 @@ extern int enzyme_dupnoneed;
 extern int enzyme_out;
 extern void __enzyme_autodiff(void *, ...);
 
-double enzyme_gmm_primal_full(GMMInput gmm) {
+double enzyme_gmm_primal_tri(GMMInput gmm) {
   double err = 0.0;
   enzyme_gmm_objective_full_L(gmm.d, gmm.k, gmm.n, gmm.alphas, gmm.means,
                               gmm.Qs, gmm.Ls, gmm.x, gmm.wishart_gamma,
@@ -182,7 +193,7 @@ double enzyme_gmm_primal_full(GMMInput gmm) {
   return err;
 }
 
-GMMGrad enzyme_c_gmm_full(GMMInput *gmm) {
+GMMGrad enzyme_c_gmm_tri(GMMInput *gmm) {
   int d = gmm->d, k = gmm->k, n = gmm->n;
 
   F64Descriptor1D dalphas = {.allocated = NULL,
