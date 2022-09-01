@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 import subprocess
 
 double_ptr = ctypes.POINTER(ctypes.c_double)
+float_ptr = ctypes.POINTER(ctypes.c_float)
 cstdlib = ctypes.cdll.LoadLibrary("libSystem.dylib")
 cstdlib.free.argtypes = [ctypes.c_void_p]
 cstdlib.free.restype = ctypes.c_void_p
@@ -25,6 +26,36 @@ class MemRefDescriptor(ctypes.Structure):
         assert not self.freed, "Memory was already freed"
         cstdlib.free(self.allocated)
         self.freed = True
+
+
+class F32Descriptor1D(MemRefDescriptor):
+    _fields_ = [
+        ("allocated", float_ptr),
+        ("aligned", float_ptr),
+        ("offset", ctypes.c_longlong),
+        ("size", ctypes.c_longlong),
+        ("stride", ctypes.c_longlong),
+    ]
+
+    @property
+    def shape(self):
+        return [self.size]
+
+
+class F32Descriptor2D(MemRefDescriptor):
+    _fields_ = [
+        ("allocated", float_ptr),
+        ("aligned", float_ptr),
+        ("offset", ctypes.c_longlong),
+        ("size_0", ctypes.c_longlong),
+        ("size_1", ctypes.c_longlong),
+        ("stride_0", ctypes.c_longlong),
+        ("stride_1", ctypes.c_longlong),
+    ]
+
+    @property
+    def shape(self):
+        return [self.size_0, self.size_1]
 
 
 class F64Descriptor1D(MemRefDescriptor):
@@ -95,6 +126,14 @@ class F64Descriptor4D(MemRefDescriptor):
         return [self.size_0, self.size_1, self.size_2, self.size_3]
 
 
+memref_1d_f32 = [
+    np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS"),
+    np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS"),
+] + [ctypes.c_longlong] * 3
+memref_2d_f32 = [
+    np.ctypeslib.ndpointer(dtype=np.float32, ndim=2, flags="C_CONTIGUOUS"),
+    np.ctypeslib.ndpointer(dtype=np.float32, ndim=2, flags="C_CONTIGUOUS"),
+] + [ctypes.c_longlong] * 5
 memref_1d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags="C_CONTIGUOUS"),
@@ -203,6 +242,17 @@ class LSTMObjectiveGrad(ctypes.Structure):
     ]
 
 
+class NNGrad(ctypes.Structure):
+    _fields_ = [
+        ("dweight0", F32Descriptor2D),
+        ("dbias0", F32Descriptor1D),
+        ("dweight1", F32Descriptor2D),
+        ("dbias1", F32Descriptor1D),
+        ("dweight2", F32Descriptor2D),
+        ("dbias2", F32Descriptor1D),
+    ]
+
+
 def struct_to_tuple(s):
     if isinstance(s, float):
         return s
@@ -301,6 +351,20 @@ if not DISABLE_LSTM:
         memref_4d + memref_2d + memref_3d + memref_2d
     )
     mlirlib.lagrad_lstm_objective.restype = LSTMObjectiveGrad
+mlp_args = (
+    memref_2d_f32
+    + memref_1d_int
+    + memref_2d_f32
+    + memref_1d_f32
+    + memref_2d_f32
+    + memref_1d_f32
+    + memref_2d_f32
+    + memref_1d_f32
+)
+mlirlib.mlir_mlp_batched.argtypes = mlp_args
+mlirlib.mlir_mlp_batched.restype = ctypes.c_float
+mlirlib.lagrad_mlp_batched.argtypes = mlp_args
+mlirlib.lagrad_mlp_batched.restype = NNGrad
 
 
 def wrap(mlir_func):
@@ -356,3 +420,6 @@ else:
     lagrad_lstm_model = wrap(mlirlib.lagrad_lstm_model)
     lagrad_lstm_predict = wrap(mlirlib.lagrad_lstm_predict)
     lagrad_lstm_objective = wrap(mlirlib.lagrad_lstm_objective)
+
+mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
+lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
