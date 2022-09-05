@@ -29,10 +29,12 @@ int main(int argc, char **argv) {
   mlir::registerPass(mlir::Standalone::createElementwiseToAffinePass);
   mlir::registerPass(mlir::Standalone::createBufferizePass);
   mlir::registerPass(mlir::Standalone::createTriangularLoopsPass);
+  mlir::registerPass(mlir::Standalone::createPackTriangularPass);
   mlir::registerPass(mlir::Standalone::createStaticAllocsPass);
   mlir::registerPass(mlir::Standalone::createStandaloneDCEPass);
   mlir::registerPass(mlir::Standalone::createLoopHoistingPass);
   mlir::registerPass(mlir::Standalone::createLinalgCanonicalizePass);
+  mlir::registerPass(mlir::Standalone::createLinalgToKnownLibraryCallPass);
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::standalone::StandaloneDialect>();
@@ -48,5 +50,5 @@ int main(int argc, char **argv) {
   registerAllDialects(registry);
 
   return failed(
-      mlir::MlirOptMain(argc, argv, "Standalone optimizer driver\n", registry));
+      mlir::MlirOptMain(argc, argv, "LAGrad optimizer driver\n", registry));
 }

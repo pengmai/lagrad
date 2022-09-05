@@ -84,5 +84,5 @@ if __name__ == "__main__":
         cli(
             get_full_project(template_args),
             get_tri_project(template_args),
-            # get_packed_project(template_args),
+            get_packed_project(template_args),
         )

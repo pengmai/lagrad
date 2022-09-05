@@ -36,3 +36,37 @@ void _mlir_ciface_souter(F32Descriptor1D *x, F32Descriptor1D *y,
     }
   }
 }
+
+void _mlir_ciface_smatmul(F32Descriptor2D *A, F32Descriptor2D *B,
+                          F32Descriptor2D *out) {
+  size_t M = A->size_0, K = A->size_1, N = out->size_1;
+  // for (size_t i = 0; i < M * N; i++) {
+  //   out->aligned[i] = 0;
+  // }
+  cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0,
+              A->aligned + A->offset, K, B->aligned + B->offset, N, 0.0,
+              out->aligned + out->offset, N);
+}
+
+void _mlir_ciface_smatmul_grad_first(F32Descriptor2D *g, F32Descriptor2D *B,
+                                     F32Descriptor2D *out) {
+  size_t M = g->size_0, K = g->size_1, N = out->size_1;
+  // for (size_t i = 0; i < M * N; i++) {
+  //   out->aligned[i] = 0;
+  // }
+
+  cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, M, N, K, 1.0,
+              g->aligned + g->offset, K, B->aligned + B->offset, K, 0.0,
+              out->aligned, N);
+}
+
+void _mlir_ciface_smatmul_grad_second(F32Descriptor2D *A, F32Descriptor2D *g,
+                                      F32Descriptor2D *out) {
+  size_t M = A->size_1, K = A->size_0, N = out->size_1;
+  // for (size_t i = 0; i < M * N; i++) {
+  //   out->aligned[i] = 0;
+  // }
+  cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, M, N, K, 1.0,
+              A->aligned + A->offset, M, g->aligned + g->offset, N, 0.0,
+              out->aligned + out->offset, N);
+}

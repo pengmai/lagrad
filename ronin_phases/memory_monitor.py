@@ -25,9 +25,7 @@ class MemUsageResult:
 
 
 def run_with_memory(binary: str, passloc: str, timeout=None):
-    p = subprocess.Popen(
-        [binary], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout
-    )
+    p = subprocess.Popen([binary], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     with open(passloc, "rb") as f:
         passwd = f.read()
     usage = run_safe(["sudo", "-S", MONITOR_BIN, str(p.pid)], stdin=passwd).decode(
@@ -37,7 +35,7 @@ def run_with_memory(binary: str, passloc: str, timeout=None):
         kv.split(":")[0].strip(): int(kv.split(":")[1].strip())
         for kv in usage.split(",")
     }
-    p.wait()
+    p.wait(timeout=timeout)
     assert (
         p.returncode == 0
     ), f"Process exited with nonzero exit. stdout: {p.stdout.read()} stderr: {p.stderr.read()}"

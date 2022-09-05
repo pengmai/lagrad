@@ -19,7 +19,7 @@ void print_ul_arr(unsigned long *arr, size_t n) {
 void print_f_arr(float *arr, size_t n) {
   printf("[");
   for (size_t i = 0; i < n; i++) {
-    printf("%.3f", arr[i]);
+    printf("%.4e", arr[i]);
     if (i != n - 1) {
       printf(", ");
     }

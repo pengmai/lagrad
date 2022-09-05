@@ -1,10 +1,18 @@
 #include "ba.h"
 #include "lagrad_utils.h"
+#include "memusage.h"
+#include <stdio.h>
+#include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 0
+#define CHECK_MEM 1
 
 double *deadbeef = (double *)0xdeadbeef;
+RunProcDyn rpd;
+void check_mem_usage() {
+  run_get_dynamic_proc_info(getpid(), &rpd);
+  printf("%zu\t%zu\n", rpd.rss, rpd.vsize);
+}
 
 BAGrad enzyme_c_compute_reproj_err(double *cams, double *X, double *w,
                                    double *feats, double *g) {
@@ -120,7 +128,11 @@ unsigned long compute_jacobian(BAApp app, BAInput input, BASparseMat *mat,
   calculate_reproj_jacobian(app, input, mat);
   calculate_w_jacobian(app, input, mat);
   gettimeofday(&stop, NULL);
-  verify_ba_results(ref, mat, app.name);
+  if (CHECK_MEM) {
+    check_mem_usage();
+  } else {
+    verify_ba_results(ref, mat, app.name);
+  }
   return timediff(start, stop);
 }
 
@@ -141,18 +153,23 @@ int main(int argc, char **argv) {
   BASparseMat mat = initBASparseMat(n, m, p);
   BASparseMat ref = initBASparseMat(n, m, p);
 
-  BAApp apps[] = {{.name = "LAGrad",
-                   .reproj_func = lagrad_compute_reproj_error_wrapper,
-                   .w_func = lagrad_compute_w_error},
-                  {.name = "Enzyme/C",
-                   .reproj_func = enzyme_c_compute_reproj_err,
-                   .w_func = enzyme_c_compute_w_err},
-                  {.name = "Enzyme/MLIR",
-                   .reproj_func = enzyme_compute_reproj_error_wrapper,
-                   .w_func = enzyme_compute_w_error}};
+  BAApp apps[] = {
+      {.name = "LAGrad",
+       .reproj_func = lagrad_compute_reproj_error_wrapper,
+       .w_func = lagrad_compute_w_error},
+      // {.name = "Enzyme/C",
+      //  .reproj_func = enzyme_c_compute_reproj_err,
+      //  .w_func = enzyme_c_compute_w_err},
+      // {.name = "Enzyme/MLIR",
+      //  .reproj_func = enzyme_compute_reproj_error_wrapper,
+      //  .w_func = enzyme_compute_w_error}
+  };
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
 
-  populate_ref(apps[0], ba_input, &ref);
+  if (!CHECK_MEM) {
+    populate_ref(apps[0], ba_input, &ref);
+  }
+
   unsigned long results_df[NUM_RUNS];
   for (size_t app = 0; app < num_apps; app++) {
     printf("%s: ", apps[app].name);

@@ -103,9 +103,51 @@ void enzyme_primal(MLPModel *m, DataBatch *b) {
                        m->weights1, m->bias1, m->weights2, m->bias2);
 }
 
-void enzyme_mlp(MLPModel *m, DataBatch *b, float *w0b, float *b0b, float *w1b,
-                float *b1b, float *w2b, float *b2b) {
+MLPGrad enzyme_mlp(MLPModel *m, DataBatch *b) {
+  float *w0b = calloc(INPUT_SIZE * HIDDEN_SIZE, sizeof(float));
+  float *b0b = calloc(HIDDEN_SIZE, sizeof(float));
+  float *w1b = calloc(HIDDEN_SIZE * HIDDEN_SIZE, sizeof(float));
+  float *b1b = calloc(HIDDEN_SIZE, sizeof(float));
+  float *w2b = calloc(HIDDEN_SIZE * OUTPUT_SIZE, sizeof(float));
+  float *b2b = calloc(OUTPUT_SIZE, sizeof(float));
+  MLPGrad grad = {.w0b = {.allocated = NULL,
+                          .aligned = w0b,
+                          .offset = 0,
+                          .size_0 = INPUT_SIZE,
+                          .size_1 = HIDDEN_SIZE,
+                          .stride_0 = HIDDEN_SIZE,
+                          .stride_1 = 1},
+                  .b0b = {.allocated = NULL,
+                          .aligned = b0b,
+                          .offset = 0,
+                          .size = HIDDEN_SIZE,
+                          .stride = 1},
+                  .w1b = {.allocated = NULL,
+                          .aligned = w1b,
+                          .offset = 0,
+                          .size_0 = HIDDEN_SIZE,
+                          .size_1 = HIDDEN_SIZE,
+                          .stride_0 = HIDDEN_SIZE,
+                          .stride_1 = 1},
+                  .b1b = {.allocated = NULL,
+                          .aligned = b1b,
+                          .offset = 0,
+                          .size = HIDDEN_SIZE,
+                          .stride = 1},
+                  .w2b = {.allocated = NULL,
+                          .aligned = w2b,
+                          .offset = 0,
+                          .size_0 = HIDDEN_SIZE,
+                          .size_1 = OUTPUT_SIZE,
+                          .stride_0 = OUTPUT_SIZE,
+                          .stride_1 = 1},
+                  .b2b = {.allocated = NULL,
+                          .aligned = b2b,
+                          .offset = 0,
+                          .size = OUTPUT_SIZE,
+                          .stride = 1}};
   __enzyme_autodiff(enzyme_nn_hypothesis, enzyme_const, b->features, b->labels,
                     m->weights0, w0b, m->bias0, b0b, m->weights1, w1b, m->bias1,
                     b1b, m->weights2, w2b, m->bias2, b2b);
+  return grad;
 }
