@@ -27,5 +27,7 @@ std::unique_ptr<mlir::Pass> createLoopHoistingPass();
 std::unique_ptr<mlir::Pass> createLinalgCanonicalizePass();
 
 std::unique_ptr<mlir::Pass> createLinalgToKnownLibraryCallPass();
+
+std::unique_ptr<mlir::Pass> createSparsifyPass();
 } // end namespace Standalone
 } // end namespace mlir

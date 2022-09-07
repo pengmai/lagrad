@@ -89,7 +89,7 @@ public:
         });
 
     rewriter.replaceOp(genericOp, newOp.getResults());
-    return failure();
+    return success();
   }
 };
 
@@ -104,6 +104,83 @@ bool isZeroTensor(Value value) {
   }
   return false;
 }
+
+bool isConstantOnesTensor(Value value) {
+  if (auto fillOp = dyn_cast_or_null<linalg::FillOp>(value.getDefiningOp())) {
+    if (auto constantFloatOp = dyn_cast_or_null<arith::ConstantFloatOp>(
+            fillOp.value().getDefiningOp())) {
+      if (constantFloatOp.value().convertToDouble() == 1.0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+class FoldMultiplyByOnes : public OpRewritePattern<linalg::GenericOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::GenericOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!op.hasTensorSemantics()) {
+      return failure();
+    }
+    if (llvm::none_of(op.getOperands(),
+                      [](Value v) { return isConstantOnesTensor(v); })) {
+      return failure();
+    }
+    size_t idx = 0;
+    for (OpOperand *operand : op.getInputTensorOperands()) {
+      if (isConstantOnesTensor(operand->get()) &&
+          op.payloadUsesValueFromOperand(operand)) {
+        BlockArgument regionArg = op.getBody()->getArgument(idx);
+        for (Operation *user : regionArg.getUsers()) {
+          if (auto mulfOp = dyn_cast<arith::MulFOp>(user)) {
+            Value other =
+                mulfOp.lhs() == regionArg ? mulfOp.rhs() : mulfOp.lhs();
+            rewriter.updateRootInPlace(
+                op, [&]() { rewriter.replaceOp(mulfOp, other); });
+            return success();
+          }
+        }
+      }
+      idx++;
+    }
+    return failure();
+  }
+};
+
+class FoldAddToZero : public OpRewritePattern<linalg::GenericOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(linalg::GenericOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!op.hasTensorSemantics()) {
+      return failure();
+    }
+    bool isOutputZero =
+        op.getNumResults() == 1 && isZeroTensor(op.getOutputOperand(0)->get());
+    if (!(isOutputZero && op.getNumInputs() == 1 &&
+          op.getOperandTypes()[0].cast<RankedTensorType>() ==
+              op.getOutputTensorTypes()[0])) {
+      return failure();
+    }
+
+    auto yieldOp = cast<linalg::YieldOp>(op.getBody()->getTerminator());
+    if (auto addfOp = dyn_cast_or_null<arith::AddFOp>(
+            yieldOp.getOperand(0).getDefiningOp())) {
+      BlockArgument inputArg = op.getBody()->getArgument(0);
+      BlockArgument outputArg = op.getBody()->getArgument(1);
+      if ((addfOp.lhs() == inputArg && addfOp.rhs() == outputArg) ||
+          (addfOp.lhs() == outputArg && addfOp.rhs() == inputArg)) {
+        errs() << "Replaced addtozero: " << op << "\n";
+        rewriter.replaceOp(op, op.getInputOperand(0)->get());
+        return success();
+      }
+    }
+    return failure();
+  }
+};
 
 class FusePairedInsertExtract : public RewritePattern {
 private:
@@ -192,6 +269,8 @@ struct LinalgCanonicalizePass
     auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
     RewritePatternSet patterns(context);
     patterns.add<RemoveUnusedInputs>(patterns.getContext());
+    // patterns.add<FoldMultiplyByOnes>(patterns.getContext());
+    // patterns.add<FoldAddToZero>(patterns.getContext());
     patterns.add<FusePairedInsertExtract>(ieAnalysis, patterns.getContext());
     if (failed(applyPatternsAndFoldGreedily(getOperation()->getRegions(),
                                             std::move(patterns)))) {

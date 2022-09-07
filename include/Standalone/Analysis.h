@@ -1,5 +1,6 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Dominance.h"
+#include <string>
 
 namespace mlir {
 struct InsertExtractAnalysis {
@@ -21,5 +22,21 @@ private:
   Optional<tensor::InsertSliceOp>
   getMatchingInsertSlice(tensor::ExtractSliceOp op,
                          const DominanceInfo &dom) const;
+};
+
+enum class HotSparsityType { Empty, OneHot, RowHot, ColHot };
+
+struct SparsePropagation {
+  SparsePropagation(Operation *op);
+  Optional<HotSparsityType> getSparsityType(Value val);
+  Optional<HotSparsityType> getSparsityEncoding(RankedTensorType type);
+  void setIndices(Value tensor, Value indices);
+  Optional<Value> getIndices(Value tensor);
+
+private:
+  DenseMap<Value, std::string> debug_names;
+  DenseMap<Value, HotSparsityType> sparsityTypes;
+  DenseMap<Value, Value> indices;
+  void propagateInsertSlice(tensor::InsertSliceOp op);
 };
 } // namespace mlir

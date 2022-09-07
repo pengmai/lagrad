@@ -40,18 +40,28 @@ std::fstream &gotoLine(std::fstream &file, unsigned int num) {
 
 void parseCommaSepParens(std::string src, SmallVector<std::string> &tokens) {
   std::string subs;
-  auto start = src.find('(');
-  auto argend = src.find(')');
+  size_t start = src.find('(');
+  size_t argend = src.find(')');
   assert(argend != std::string::npos && "Failed to find closing paren");
+  if (start + 1 == argend) {
+    return;
+  }
   src = src.substr(0, argend + 1);
   start++;
-  auto end = src.find(',');
+  size_t end = src.find(',');
   while (end != std::string::npos) {
     subs = src.substr(start, end - start);
     // Need to handle tensor encodings being separated with a comma
     if (subs.find('<') != std::string::npos &&
         subs.find('>') == std::string::npos) {
+      size_t saved_end = end;
       end = src.find(',', end + 1);
+      if (end == std::string::npos) {
+        end = src.find(')', saved_end + 1);
+        subs = src.substr(start, end - start);
+        tokens.push_back(trim(subs));
+        return;
+      }
       subs = src.substr(start, end - start);
     }
     tokens.push_back(trim(subs));
@@ -63,7 +73,7 @@ void parseCommaSepParens(std::string src, SmallVector<std::string> &tokens) {
 }
 
 void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
-                         LAGradContext &ctx) {
+                         NameMap &debug_names) {
   assert(region && "Region cannot be null");
   std::string line, src, subs;
   SmallVector<std::string> tokens;
@@ -75,24 +85,23 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
       assert(src.find('=') != std::string::npos &&
              "Expect op line to contain equals sign");
       subs = src.substr(0, src.find('='));
-      ctx.debug_names[op.getResult(0)] = trim(subs);
+      debug_names[op.getResult(0)] = trim(subs);
     }
     if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
       size_t idx = 0;
       for (auto arg : genericOp.getBodyRegion().getArguments()) {
-        ctx.debug_names[arg] =
-            ctx.debug_names[op.getResult(0)] + "#arg" + std::to_string(idx);
+        debug_names[arg] =
+            debug_names[op.getResult(0)] + "#arg" + std::to_string(idx);
         idx++;
       }
-      DEBUGpopulateRegion(&genericOp.getBodyRegion(), sourceFile, ctx);
+      DEBUGpopulateRegion(&genericOp.getBodyRegion(), sourceFile, debug_names);
     } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
       if (forOp.getNumResults() > 1) {
         assert(src.find('=') != std::string::npos &&
                "Expect op line to contain equals sign");
         subs = src.substr(0, src.find(':'));
         for (size_t i = 0; i < forOp.getNumResults(); i++) {
-          ctx.debug_names[op.getResult(i)] =
-              trim(subs) + "#" + std::to_string(i);
+          debug_names[op.getResult(i)] = trim(subs) + "#" + std::to_string(i);
         }
       }
       while (src.find('{') == std::string::npos) {
@@ -106,28 +115,27 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
              "Mismatch of parsed names and for op iter args");
       for (auto pair : llvm::zip(forOp.getRegionIterArgs(), tokens)) {
         subs = std::get<1>(pair).substr(0, std::get<1>(pair).find('='));
-        ctx.debug_names[std::get<0>(pair)] = trim(subs);
+        debug_names[std::get<0>(pair)] = trim(subs);
       }
 
-      DEBUGpopulateRegion(&forOp.getRegion(), sourceFile, ctx);
+      DEBUGpopulateRegion(&forOp.getRegion(), sourceFile, debug_names);
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
-      DEBUGpopulateRegion(&ifOp.thenRegion(), sourceFile, ctx);
-      DEBUGpopulateRegion(&ifOp.elseRegion(), sourceFile, ctx);
+      DEBUGpopulateRegion(&ifOp.thenRegion(), sourceFile, debug_names);
+      DEBUGpopulateRegion(&ifOp.elseRegion(), sourceFile, debug_names);
     } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
       if (callOp.getNumResults() > 1) {
         assert(src.find('=') != std::string::npos &&
                "Expect op line to contain equals sign");
         subs = src.substr(0, src.find(':'));
         for (size_t i = 0; i < callOp.getNumResults(); i++) {
-          ctx.debug_names[op.getResult(i)] =
-              trim(subs) + "#" + std::to_string(i);
+          debug_names[op.getResult(i)] = trim(subs) + "#" + std::to_string(i);
         }
       }
       auto moduleOp = op.getParentOfType<ModuleOp>();
       assert(moduleOp && "module op was null");
       auto calledFunc = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
       assert(calledFunc && "failed to find called function");
-      DEBUGpopulateFunc(ctx, calledFunc);
+      DEBUGpopulateFunc(debug_names, calledFunc);
     }
   }
 
@@ -147,7 +155,7 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
   // llvm::errs() << "]\n";
 }
 
-void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
+void DEBUGpopulateFunc(NameMap &debug_names, FuncOp funcOp) {
   if (!ENABLE_NAME_DEBUG || funcOp.empty()) {
     return;
   }
@@ -156,7 +164,6 @@ void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
   auto loc = funcOp.getLoc().cast<FileLineColLoc>();
   std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());
-  // llvm::errs() << "\nlooking at function " << funcOp.getName() << "\n";
   if (!sourceFile.is_open()) {
     // funcOp.emitWarning() << "failed to open file\n";
     return;
@@ -170,11 +177,12 @@ void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp) {
 
   SmallVector<std::string> tokens;
   parseCommaSepParens(src, tokens);
+  assert(tokens.size() == funcOp.getNumArguments());
   for (size_t i = 0; i < tokens.size(); i++) {
     subs = tokens[i].substr(0, tokens[i].find(':'));
-    ctx.debug_names[funcOp.getArgument(i)] = trim(subs);
+    debug_names[funcOp.getArgument(i)] = trim(subs);
   }
-  DEBUGpopulateRegion(funcOp.getCallableRegion(), sourceFile, ctx);
+  DEBUGpopulateRegion(funcOp.getCallableRegion(), sourceFile, debug_names);
 }
 
 void Logger::red(MESSAGETYPE message) {

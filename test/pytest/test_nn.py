@@ -51,4 +51,4 @@ def test_mlp():
     assert np.abs(dweight1 - ref_grads[2].numpy()).max() < tol
     assert np.abs(dbias1 - ref_grads[3].numpy()).max() < tol
     assert np.abs(dweight2 - ref_grads[4].numpy()).max() < tol
-    assert dbias2 == pytest.approx(ref_grads[-1], rel=1e-5)
+    assert dbias2 == pytest.approx(ref_grads[-1], rel=5e-5)

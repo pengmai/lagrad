@@ -7,12 +7,13 @@
 
 namespace mlir {
 using ValueSet = llvm::SmallDenseSet<Value>;
+using NameMap = DenseMap<Value, std::string>;
 
 class LAGradContext {
 public:
   explicit LAGradContext(ModuleOp m) : moduleOp(m) {}
   ModuleOp moduleOp;
-  DenseMap<Value, std::string> debug_names;
+  NameMap debug_names;
   DenseMap<Value, SmallVector<OpFoldResult>> dynamic_shapes;
   ValueSet activeValues;
   ValueSet effectivelyUsed;
@@ -24,7 +25,7 @@ bool isFloatOrFloatTensor(Type typ);
 
 bool isLoopParallel(scf::ForOp forOp);
 
-void DEBUGpopulateFunc(LAGradContext &ctx, FuncOp funcOp);
+void DEBUGpopulateFunc(NameMap &debug_names, FuncOp funcOp);
 void analyzeDynamicShapes(LAGradContext &ctx, FuncOp funcOp,
                           OpBuilder &builder);
 

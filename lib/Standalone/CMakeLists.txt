@@ -20,6 +20,7 @@ add_mlir_dialect_library(MLIRStandalone
         PrimalCaching.cpp
         LinalgVectorJacobianProducts.cpp
         SCFVectorJacobianProducts.cpp
+        SparsePropagation.cpp
         Utils.cpp
         DebugNames.cpp
 
