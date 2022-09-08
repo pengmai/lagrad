@@ -365,7 +365,8 @@ mlirlib.mlir_mlp_batched.argtypes = mlp_args
 mlirlib.mlir_mlp_batched.restype = ctypes.c_float
 mlirlib.lagrad_mlp_batched.argtypes = mlp_args
 mlirlib.lagrad_mlp_batched.restype = NNGrad
-
+mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
+mlirlib.rowhot_insert.restype = F64Descriptor2D
 
 def wrap(mlir_func):
     def wrapped(*args):
@@ -423,3 +424,4 @@ else:
 
 mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
 lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
+rowhot_insert = wrap(mlirlib.rowhot_insert)

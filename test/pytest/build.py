@@ -36,10 +36,16 @@ with new_context() as ctx:
         for ffile in ["nn"]
         for abs_path in glob(f"{ffile}.mlir", SRCFILE / "nn")
     ]
+    sparse_sources = glob("*.mlir", SRCFILE / "sparse")
 
     lagrad_phase = compile_lagrad(
         project,
-        gmm_sources + ba_sources + hand_sources + lstm_sources + nn_sources,
+        gmm_sources
+        + ba_sources
+        + hand_sources
+        + lstm_sources
+        + nn_sources
+        + sparse_sources,
         use_clang=False,
     )
     clang_dynamiclib(project, [lagrad_phase], "mlir_bindings.dylib")

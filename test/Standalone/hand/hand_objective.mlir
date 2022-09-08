@@ -278,9 +278,9 @@ func @mlir_hand_objective(
   %inverse_base_absolutes: tensor<22x4x4xf64>,
   %base_positions: tensor<544x4xf64>,
   %weights: tensor<544x22xf64>,
-  %correspondences: tensor<2xi32>,
-  %points : tensor<2x3xf64>
-) -> tensor<2x3xf64> {
+  %correspondences: tensor<?xi32>,
+  %points : tensor<?x3xf64>
+) -> tensor<?x3xf64> {
   %pose_params = call @mto_pose_params(%theta) : (tensor<26xf64>) -> tensor<25x3xf64>
   // Inlined get_skinned_vertex_positions
   %relatives = call @mget_posed_relatives(%base_relatives, %pose_params) : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<22x4x4xf64>
@@ -389,22 +389,22 @@ func @mlir_hand_objective(
   // End inline apply_global_transform
   // End inline get_skinned_vertex_positions
 
-  %err_init = linalg.init_tensor [2, 3] : tensor<2x3xf64>
+  %cpts = tensor.dim %points, %c0 : tensor<?x3xf64>
   %c3 = arith.constant 3 : index
-  %cpts = arith.constant 2 : index
-  %err = scf.for %iv = %c0 to %cpts step %c1 iter_args(%e_outer = %err_init) -> tensor<2x3xf64> {
-    %err_partial = scf.for %jv = %c0 to %c3 step %c1 iter_args(%e_inner = %e_outer) -> tensor<2x3xf64> {
-      %arg0 = tensor.extract %points[%iv, %jv] : tensor<2x3xf64>
-      %i_0 = tensor.extract %correspondences[%iv] : tensor<2xi32>
+  %err_init = linalg.init_tensor [%cpts, 3] : tensor<?x3xf64>
+  %err = scf.for %iv = %c0 to %cpts step %c1 iter_args(%e_outer = %err_init) -> tensor<?x3xf64> {
+    %err_partial = scf.for %jv = %c0 to %c3 step %c1 iter_args(%e_inner = %e_outer) -> tensor<?x3xf64> {
+      %arg0 = tensor.extract %points[%iv, %jv] : tensor<?x3xf64>
+      %i_0 = tensor.extract %correspondences[%iv] : tensor<?xi32>
       %i = arith.index_cast %i_0 : i32 to index
       %vp = tensor.extract %vertex_positions[%i, %jv] : tensor<544x3xf64>
       %0 = arith.subf %arg0, %vp : f64
-      %e_next = tensor.insert %0 into %e_inner[%iv, %jv] : tensor<2x3xf64>
-      scf.yield %e_next : tensor<2x3xf64>
+      %e_next = tensor.insert %0 into %e_inner[%iv, %jv] : tensor<?x3xf64>
+      scf.yield %e_next : tensor<?x3xf64>
     }
-    scf.yield %err_partial : tensor<2x3xf64>
+    scf.yield %err_partial : tensor<?x3xf64>
   }
-  return %err : tensor<2x3xf64>
+  return %err : tensor<?x3xf64>
 }
 
 func @lagrad_hand_objective(
@@ -414,9 +414,9 @@ func @lagrad_hand_objective(
   %inverse_base_absolutes: tensor<22x4x4xf64>,
   %base_positions: tensor<544x4xf64>,
   %weights: tensor<544x22xf64>,
-  %correspondences: tensor<2xi32>,
-  %points : tensor<2x3xf64>,
-  %g : tensor<2x3xf64>
+  %correspondences: tensor<?xi32>,
+  %points : tensor<?x3xf64>,
+  %g : tensor<?x3xf64>
 ) -> tensor<26xf64> {
   %f = constant @mlir_hand_objective : (
     tensor<26xf64>,
@@ -425,9 +425,9 @@ func @lagrad_hand_objective(
     tensor<22x4x4xf64>,
     tensor<544x4xf64>,
     tensor<544x22xf64>,
-    tensor<2xi32>,
-    tensor<2x3xf64>
-  ) -> tensor<2x3xf64>
+    tensor<?xi32>,
+    tensor<?x3xf64>
+  ) -> tensor<?x3xf64>
   %df = standalone.grad %f {of = [0], grad_signal = true} : (
     tensor<26xf64>,
     tensor<22xi32>,
@@ -435,18 +435,18 @@ func @lagrad_hand_objective(
     tensor<22x4x4xf64>,
     tensor<544x4xf64>,
     tensor<544x22xf64>,
-    tensor<2xi32>,
-    tensor<2x3xf64>
-  ) -> tensor<2x3xf64>, (
+    tensor<?xi32>,
+    tensor<?x3xf64>
+  ) -> tensor<?x3xf64>, (
     tensor<26xf64>,
     tensor<22xi32>,
     tensor<22x4x4xf64>,
     tensor<22x4x4xf64>,
     tensor<544x4xf64>,
     tensor<544x22xf64>,
-    tensor<2xi32>,
-    tensor<2x3xf64>,
-    tensor<2x3xf64>
+    tensor<?xi32>,
+    tensor<?x3xf64>,
+    tensor<?x3xf64>
   ) -> tensor<26xf64>
   %dtheta = call_indirect %df(
     %theta,
@@ -465,9 +465,9 @@ func @lagrad_hand_objective(
     tensor<22x4x4xf64>,
     tensor<544x4xf64>,
     tensor<544x22xf64>,
-    tensor<2xi32>,
-    tensor<2x3xf64>,
-    tensor<2x3xf64>
+    tensor<?xi32>,
+    tensor<?x3xf64>,
+    tensor<?x3xf64>
   ) -> tensor<26xf64>
   return %dtheta : tensor<26xf64>
 }
