@@ -40,6 +40,7 @@ OPENBLAS_OBJ = pathlib.Path.home() / ".local" / "OpenBLAS" / "lib" / "libopenbla
 class LAGradOptFlags:
     preprocess = [
         "-take-grads",
+        "-structured-sparsify",
         "-canonicalize",
         "-inline",
         "-linalg-canonicalize",
