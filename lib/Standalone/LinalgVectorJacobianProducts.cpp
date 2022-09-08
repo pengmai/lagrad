@@ -19,8 +19,8 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
   auto outputShape = output.getType().dyn_cast_or_null<ShapedType>();
   assert(outputShape && outputShape.hasRank() &&
          "output must be a ranked type");
-  auto generic_indexing_maps = op.getIndexingMaps();
-  auto op_count = op.getNumOperands();
+  SmallVector<AffineMap> generic_indexing_maps = op.getIndexingMaps();
+  unsigned int op_count = op.getNumOperands();
   SmallVector<Value> inputs;
   for (size_t i = 0; i < op_count; i++) {
     if (i == static_cast<size_t>(op_index)) {
@@ -33,6 +33,13 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
       } else {
         // The output has to map the shape of the current argument.
         indexing_maps[i + 1] = generic_indexing_maps[op_index];
+        // find the dimensions that don't appear in the results
+        AffineMap outputMap = generic_indexing_maps[op_index];
+        for (size_t idx = 0; idx < outputMap.getNumDims(); idx++) {
+          if (!outputMap.isFunctionOfDim(idx)) {
+            iterator_types[idx] = getReductionIteratorTypeName();
+          }
+        }
       }
       // Add the gradient signal as an argument at the end of the
       // inputs.

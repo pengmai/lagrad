@@ -142,6 +142,10 @@ memref_1d_int = [
     np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),
 ] + [ctypes.c_longlong] * 3
+memref_1d_index = [
+    np.ctypeslib.ndpointer(dtype=np.int64, ndim=1, flags="C_CONTIGUOUS"),
+    np.ctypeslib.ndpointer(dtype=np.int64, ndim=1, flags="C_CONTIGUOUS"),
+] + [ctypes.c_longlong] * 3
 memref_2d = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS"),
@@ -367,6 +371,9 @@ mlirlib.lagrad_mlp_batched.argtypes = mlp_args
 mlirlib.lagrad_mlp_batched.restype = NNGrad
 mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
 mlirlib.rowhot_insert.restype = F64Descriptor2D
+mlirlib.onehot_square.argtypes = memref_2d + memref_1d_index
+mlirlib.onehot_square.restype = F64Descriptor2D
+
 
 def wrap(mlir_func):
     def wrapped(*args):
@@ -425,3 +432,4 @@ else:
 mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
 lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
 rowhot_insert = wrap(mlirlib.rowhot_insert)
+onehot_square = wrap(mlirlib.onehot_square)
