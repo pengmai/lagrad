@@ -373,6 +373,10 @@ mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
 mlirlib.rowhot_insert.restype = F64Descriptor2D
 mlirlib.onehot_square.argtypes = memref_2d + memref_1d_index
 mlirlib.onehot_square.restype = F64Descriptor2D
+mlirlib.onehot_matmul_both_transposed.argtypes = memref_2d + memref_2d + memref_1d_index
+mlirlib.onehot_matmul_both_transposed.restype = F64Descriptor2D
+mlirlib.onehot_matmul.argtypes = memref_2d + memref_2d + memref_1d_index
+mlirlib.onehot_matmul.restype = F64Descriptor2D
 
 
 def wrap(mlir_func):
@@ -433,3 +437,5 @@ mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
 lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
 rowhot_insert = wrap(mlirlib.rowhot_insert)
 onehot_square = wrap(mlirlib.onehot_square)
+onehot_matmul_both_transposed = wrap(mlirlib.onehot_matmul_both_transposed)
+onehot_matmul = wrap(mlirlib.onehot_matmul)

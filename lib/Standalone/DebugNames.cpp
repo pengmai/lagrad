@@ -5,7 +5,7 @@
 #include <limits>
 #include <string>
 
-#define ENABLE_NAME_DEBUG true
+#define ENABLE_NAME_DEBUG false
 
 namespace mlir {
 using namespace mlir;
@@ -79,7 +79,11 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
   SmallVector<std::string> tokens;
 
   for (auto &op : region->getOps()) {
-    gotoLine(sourceFile, op.getLoc().cast<FileLineColLoc>().getLine());
+    auto loc = op.getLoc().dyn_cast<FileLineColLoc>();
+    if (!loc) {
+      return;
+    }
+    gotoLine(sourceFile, loc.getLine());
     getline(sourceFile, src);
     if (op.getNumResults() == 1) {
       assert(src.find('=') != std::string::npos &&
@@ -161,7 +165,10 @@ void DEBUGpopulateFunc(NameMap &debug_names, FuncOp funcOp) {
   }
   // Clearing the map makes printing everything less verbose
   // ctx.debug_names.clear();
-  auto loc = funcOp.getLoc().cast<FileLineColLoc>();
+  auto loc = funcOp.getLoc().dyn_cast<FileLineColLoc>();
+  if (!loc) {
+    return;
+  }
   std::string src, line, subs;
   std::fstream sourceFile(loc.getFilename().str());
   if (!sourceFile.is_open()) {
@@ -177,7 +184,11 @@ void DEBUGpopulateFunc(NameMap &debug_names, FuncOp funcOp) {
 
   SmallVector<std::string> tokens;
   parseCommaSepParens(src, tokens);
-  assert(tokens.size() == funcOp.getNumArguments());
+  if (tokens.size() != funcOp.getNumArguments()) {
+    errs() << "Debug name parsing failed for function: " << funcOp.getName()
+           << "\n";
+    return;
+  }
   for (size_t i = 0; i < tokens.size(); i++) {
     subs = tokens[i].substr(0, tokens[i].find(':'));
     debug_names[funcOp.getArgument(i)] = trim(subs);

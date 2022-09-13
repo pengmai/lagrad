@@ -109,6 +109,38 @@ bool isElementwiseOp(linalg::GenericOp op) {
   return hasOnlyIdentityIndexing && hasOnlyParallelIterators;
 }
 
+bool isReductionOneDim(linalg::GenericOp op) {
+  // Perhaps too much of a special case, but sparsity needs to be propagated for
+  // sum reductions along a given axis.
+  auto reductionAttr =
+      StringAttr::get(op.getContext(), getReductionIteratorTypeName());
+  int reductionCount = llvm::count(op.iterator_types(), reductionAttr);
+  return reductionCount == 1 && op.getNumInputs() == 1;
+}
+
+// Meant to detect a variety of possibly transposed matrix multiplications.
+// Currently specialized to work with the matmuls encountered in hand tracking.
+bool isMatmul(linalg::GenericOp op) {
+  ArrayAttr indexingMaps = op.indexing_maps();
+  if (indexingMaps.size() != 3) {
+    return false;
+  }
+  for (Attribute mapAttr : indexingMaps) {
+    AffineMap map = mapAttr.cast<AffineMapAttr>().getValue();
+    if (map.getNumInputs() != 3 || map.getNumResults() != 2) {
+      return false;
+    }
+  }
+
+  auto *context = op.getContext();
+  auto id = AffineMap::getMultiDimIdentityMap(3, context);
+  auto mapA = AffineMapAttr::get(id.getSubMap({1, 2}));
+  auto mapB = AffineMapAttr::get(id.getSubMap({1, 0}));
+  auto mapC = AffineMapAttr::get(id.getSubMap({2, 0}));
+  return indexingMaps == ArrayAttr::get(context, {mapA, mapB, mapC}) ||
+         indexingMaps == ArrayAttr::get(context, {mapC, mapB, mapA});
+}
+
 void SparsePropagation::propagateLinalgGeneric(linalg::GenericOp op) {
   // For now, just code some special cases that we know we encounter. We can
   // make it more general later.
@@ -117,7 +149,15 @@ void SparsePropagation::propagateLinalgGeneric(linalg::GenericOp op) {
       isElementwiseOp(op)) {
     sparsityTypes[op.getResult(0)] =
         getSparsityType(op.getInputOperand(0)->get()).getValue();
+    // TODO: I don't think this does anything because indices has not yet been
+    // populated.
     indices[op.getResult(0)] = indices[op.getOperand(0)];
+  }
+  if (isReductionOneDim(op)) {
+    //
+  }
+  if (isMatmul(op)) {
+    // if (getSparsityType(op.getInputOperand(1)->get()).hasValue())
   }
 }
 } // namespace mlir
@@ -231,15 +271,35 @@ bool matchSparsifyGenericOp(linalg::GenericOp op,
               .getSparsityType(op.getOutputOperand(0)->get())
               // We need this to just be a sparsity type other than empty.
               .getValueOr(HotSparsityType::OneHot) == HotSparsityType::Empty;
-  return hasEncoding && outputIsZero && isElementwiseOp(op);
+  return hasEncoding && outputIsZero && (isElementwiseOp(op) || isMatmul(op));
 }
 
+// Currently only works for one-hot case.
 SmallVector<Value> convertIndicesToValues(Location loc, Value memrefIndices,
                                           OpBuilder &builder) {
   Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
   Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
   return {builder.create<memref::LoadOp>(loc, memrefIndices, zero),
           builder.create<memref::LoadOp>(loc, memrefIndices, one)};
+}
+
+static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
+                                                     AffineMap map,
+                                                     ArrayRef<Value> vals) {
+  if (map.isEmpty())
+    return {};
+
+  assert(map.getNumInputs() == vals.size());
+  SmallVector<Value> res;
+  res.reserve(map.getNumResults());
+  auto dims = map.getNumDims();
+  for (auto e : map.getResults()) {
+    auto exprMap = AffineMap::get(dims, map.getNumSymbols(), e);
+    SmallVector<Value> operands(vals.begin(), vals.end());
+    canonicalizeMapAndOperands(&exprMap, &operands);
+    res.push_back(b.create<AffineApplyOp>(loc, exprMap, operands));
+  }
+  return res;
 }
 
 class SparsifyLinalgGenericOp : public OpConversionPattern<linalg::GenericOp> {
@@ -286,6 +346,72 @@ public:
             rewriter.create<tensor::InsertOp>(loc, toStore, output, indexing);
 
         rewriter.replaceOp(op, result);
+        return success();
+      }
+      default:
+        llvm_unreachable("not yet implemented");
+      }
+    } else if (isMatmul(op)) {
+      Value sparseOperand = op.getInputOperand(1)->get();
+      HotSparsityType spType =
+          spAnalysis.getSparsityType(sparseOperand).getValue();
+      switch (spType) {
+      case HotSparsityType::OneHot: {
+        Location loc = op.getLoc();
+        Value zero = rewriter.create<arith::ConstantOp>(
+            loc,
+            FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
+        Value lb = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+        Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+        Value ub = rewriter.create<tensor::DimOp>(
+            loc, op.getInputOperand(1)->get(), one);
+        BufferizeTypeConverter typeConverter;
+        Value space = rewriter.create<memref::AllocOp>(
+            loc, typeConverter.convertType(op.getResultTypes()[0])
+                     .cast<MemRefType>());
+        rewriter.create<linalg::FillOp>(loc, zero, space);
+        rewriter.create<scf::ForOp>(
+            loc, lb, ub, /*step=*/one,
+            /*iterArgs=*/llvm::None,
+            [&](OpBuilder &builder, Location loc, Value iv,
+                ValueRange iterArgs) {
+              // Emit reads to input views
+              ValueRange indexing = convertIndicesToValues(
+                  loc, spAnalysis.getIndices(sparseOperand).getValue(),
+                  builder);
+              // warning, not general
+              SmallVector<Value> allIvs{indexing[1], indexing[0], iv};
+              ValueRange indexedValues{
+                  rewriter.create<tensor::ExtractOp>(
+                      loc, op.getInputOperand(0)->get(),
+                      makeCanonicalAffineApplies(
+                          builder, loc, op.getIndexingMaps()[0], allIvs)),
+                  rewriter.create<tensor::ExtractOp>(loc, sparseOperand,
+                                                     indexing),
+                  rewriter.create<memref::LoadOp>(
+                      loc, space,
+                      makeCanonicalAffineApplies(
+                          builder, loc, op.getIndexingMaps()[2], allIvs))};
+
+              auto &block = op->getRegion(0).front();
+              BlockAndValueMapping map;
+              map.map(block.getArguments(), indexedValues);
+              for (auto &op : block.without_terminator()) {
+                auto *newOp = builder.clone(op, map);
+                map.map(op.getResults(), newOp->getResults());
+              }
+
+              Operation *terminator = block.getTerminator();
+              Value toStore = map.lookupOrDefault(terminator->getOperand(0));
+              builder.create<memref::StoreOp>(
+                  loc, toStore, space,
+                  makeCanonicalAffineApplies(builder, loc,
+                                             op.getIndexingMaps()[2], allIvs));
+
+              builder.create<scf::YieldOp>(loc);
+            });
+        rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
+        // rewriter.replaceOp(op, op.getOutputTensorOperands()[0]->get());
         return success();
       }
       default:
@@ -357,6 +483,7 @@ struct StructuredSparsifyPass
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
     registry.insert<sparse_tensor::SparseTensorDialect>();
+    registry.insert<scf::SCFDialect>();
   }
   StringRef getArgument() const override { return "structured-sparsify"; }
   StringRef getDescription() const override {
@@ -373,6 +500,7 @@ struct StructuredSparsifyPass
     ConversionTarget target(*context);
     target.addLegalDialect<arith::ArithmeticDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
+    target.addLegalDialect<scf::SCFDialect>();
     target.addDynamicallyLegalOp<FuncOp>([&](FuncOp funcOp) {
       return llvm::none_of(funcOp.getArguments(), [&sparsePropagation](
                                                       BlockArgument arg) {
@@ -381,11 +509,12 @@ struct StructuredSparsifyPass
       });
     });
     target.addLegalOp<tensor::ExtractOp, tensor::InsertOp,
-                      tensor::ExtractSliceOp>();
+                      tensor::ExtractSliceOp, tensor::DimOp>();
     target.addDynamicallyLegalOp<tensor::InsertSliceOp>(
         [&](tensor::InsertSliceOp op) {
           return !matchSparsifyInsertSlice(op, sparsePropagation);
         });
+    target.addLegalOp<linalg::FillOp, linalg::YieldOp>();
     target.addDynamicallyLegalOp<linalg::GenericOp>([&](linalg::GenericOp op) {
       return !matchSparsifyGenericOp(op, sparsePropagation);
     });

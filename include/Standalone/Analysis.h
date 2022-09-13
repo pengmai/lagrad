@@ -1,3 +1,4 @@
+#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Dominance.h"
 #include <string>
@@ -38,5 +39,6 @@ private:
   DenseMap<Value, HotSparsityType> sparsityTypes;
   DenseMap<Value, Value> indices;
   void propagateInsertSlice(tensor::InsertSliceOp op);
+  void propagateLinalgGeneric(linalg::GenericOp op);
 };
 } // namespace mlir
