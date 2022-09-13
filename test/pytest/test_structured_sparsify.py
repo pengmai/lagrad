@@ -3,6 +3,7 @@ import numpy as np
 from mlir_bindings import (
     rowhot_insert,
     onehot_square,
+    onehot_sumreduce,
     onehot_matmul,
     onehot_matmul_both_transposed,
     rowhot_broadcast_mul,
@@ -22,6 +23,14 @@ def test_onehot_square():
     x = np.zeros((10, 3))
     x[4, 2] = 5.6
     assert onehot_square(x, np.array([4, 2]).astype(np.int64)) == pytest.approx(x ** 2)
+
+
+def test_onehot_sumreduce():
+    x = np.zeros((544, 3))
+    x[501, 2] = -2.45
+    assert onehot_sumreduce(x, np.array([501, 2]).astype(np.int64)) == pytest.approx(
+        [0, 0, -2.45]
+    )
 
 
 def test_onehot_matmul():
