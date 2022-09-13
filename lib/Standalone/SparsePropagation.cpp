@@ -271,7 +271,7 @@ bool matchSparsifyGenericOp(linalg::GenericOp op,
               .getSparsityType(op.getOutputOperand(0)->get())
               // We need this to just be a sparsity type other than empty.
               .getValueOr(HotSparsityType::OneHot) == HotSparsityType::Empty;
-  return hasEncoding && outputIsZero && (isElementwiseOp(op) || isMatmul(op));
+  return hasEncoding && outputIsZero;
 }
 
 // Currently only works for one-hot case.
@@ -281,6 +281,21 @@ SmallVector<Value> convertIndicesToValues(Location loc, Value memrefIndices,
   Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
   return {builder.create<memref::LoadOp>(loc, memrefIndices, zero),
           builder.create<memref::LoadOp>(loc, memrefIndices, one)};
+}
+
+Value inlineRegion(linalg::GenericOp op, ValueRange indexedValues,
+                   OpBuilder &builder) {
+  auto &block = op->getRegion(0).front();
+  BlockAndValueMapping map;
+  map.map(block.getArguments(), indexedValues);
+  for (auto &op : block.without_terminator()) {
+    auto *newOp = builder.clone(op, map);
+    map.map(op.getResults(), newOp->getResults());
+  }
+
+  Operation *terminator = block.getTerminator();
+  Value toStore = map.lookupOrDefault(terminator->getOperand(0));
+  return toStore;
 }
 
 static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
@@ -300,6 +315,23 @@ static SmallVector<Value> makeCanonicalAffineApplies(OpBuilder &b, Location loc,
     res.push_back(b.create<AffineApplyOp>(loc, exprMap, operands));
   }
   return res;
+}
+
+static Value getSizeOfLoop(OpBuilder &b, linalg::LinalgOp op,
+                           unsigned position) {
+  for (OpOperand *operand : op.getInputAndOutputOperands()) {
+    AffineMap map = op.getTiedIndexingMap(operand);
+    if (map.isFunctionOfDim(position)) {
+      unsigned idx = 0;
+      for (AffineExpr expr : map.getResults()) {
+        if (expr.isFunctionOfDim(position) && expr.isa<AffineDimExpr>()) {
+          return b.create<tensor::DimOp>(op.getLoc(), operand->get(), idx);
+        }
+        idx++;
+      }
+    }
+  }
+  llvm_unreachable("Failed to find size of linalg op loop");
 }
 
 class SparsifyLinalgGenericOp : public OpConversionPattern<linalg::GenericOp> {
@@ -332,16 +364,7 @@ public:
             rewriter.create<tensor::ExtractOp>(loc, output, indexing)};
 
         // inline region and emit store
-        auto &block = op->getRegion(0).front();
-        BlockAndValueMapping map;
-        map.map(block.getArguments(), indexedValues);
-        for (auto &op : block.without_terminator()) {
-          auto *newOp = rewriter.clone(op, map);
-          map.map(op.getResults(), newOp->getResults());
-        }
-
-        Operation *terminator = block.getTerminator();
-        Value toStore = map.lookupOrDefault(terminator->getOperand(0));
+        Value toStore = inlineRegion(op, indexedValues, rewriter);
         Value result =
             rewriter.create<tensor::InsertOp>(loc, toStore, output, indexing);
 
@@ -353,25 +376,26 @@ public:
       }
     } else if (isMatmul(op)) {
       Value sparseOperand = op.getInputOperand(1)->get();
+      Value output = op.getOutputOperand(0)->get();
       HotSparsityType spType =
           spAnalysis.getSparsityType(sparseOperand).getValue();
+      Location loc = op.getLoc();
+      Value zero = rewriter.create<arith::ConstantOp>(
+          loc,
+          FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
+      BufferizeTypeConverter typeConverter;
+      Value zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+      Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+      Value space = rewriter.create<memref::AllocOp>(
+          loc,
+          typeConverter.convertType(op.getResultTypes()[0]).cast<MemRefType>());
+      rewriter.create<linalg::FillOp>(loc, zero, space);
       switch (spType) {
       case HotSparsityType::OneHot: {
-        Location loc = op.getLoc();
-        Value zero = rewriter.create<arith::ConstantOp>(
-            loc,
-            FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
-        Value lb = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-        Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
         Value ub = rewriter.create<tensor::DimOp>(
             loc, op.getInputOperand(1)->get(), one);
-        BufferizeTypeConverter typeConverter;
-        Value space = rewriter.create<memref::AllocOp>(
-            loc, typeConverter.convertType(op.getResultTypes()[0])
-                     .cast<MemRefType>());
-        rewriter.create<linalg::FillOp>(loc, zero, space);
         rewriter.create<scf::ForOp>(
-            loc, lb, ub, /*step=*/one,
+            loc, zeroIndex, ub, /*step=*/one,
             /*iterArgs=*/llvm::None,
             [&](OpBuilder &builder, Location loc, Value iv,
                 ValueRange iterArgs) {
@@ -392,31 +416,146 @@ public:
                       loc, space,
                       makeCanonicalAffineApplies(
                           builder, loc, op.getIndexingMaps()[2], allIvs))};
-
-              auto &block = op->getRegion(0).front();
-              BlockAndValueMapping map;
-              map.map(block.getArguments(), indexedValues);
-              for (auto &op : block.without_terminator()) {
-                auto *newOp = builder.clone(op, map);
-                map.map(op.getResults(), newOp->getResults());
-              }
-
-              Operation *terminator = block.getTerminator();
-              Value toStore = map.lookupOrDefault(terminator->getOperand(0));
+              Value toStore = inlineRegion(op, indexedValues, builder);
               builder.create<memref::StoreOp>(
                   loc, toStore, space,
                   makeCanonicalAffineApplies(builder, loc,
                                              op.getIndexingMaps()[2], allIvs));
-
               builder.create<scf::YieldOp>(loc);
             });
         rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
-        // rewriter.replaceOp(op, op.getOutputTensorOperands()[0]->get());
+        return success();
+      }
+      case HotSparsityType::RowHot: {
+        ValueRange lbs{zeroIndex, zeroIndex};
+        ValueRange ubs{rewriter.create<tensor::DimOp>(loc, output, one),
+                       rewriter.create<tensor::DimOp>(loc, output, zeroIndex)};
+        ValueRange steps{one, one};
+        // SmallVector<Value, 2> lbs, ubs, steps;
+        scf::buildLoopNest(
+            rewriter, loc, lbs, ubs, steps,
+            [&](OpBuilder &builder, Location loc, ValueRange ivs) {
+              // Don't know how general this is.
+              SmallVector<Value, 3> allIVs{
+                  ivs[0], spAnalysis.getIndices(sparseOperand).getValue(),
+                  ivs[1]};
+              SmallVector<Value, 3> indexedValues;
+              indexedValues.reserve(op.getNumInputsAndOutputs());
+              // Emit reads to input and output views
+              for (OpOperand *operand : op.getInputAndOutputOperands()) {
+                indexedValues.push_back(builder.create<tensor::ExtractOp>(
+                    loc, operand->get(),
+                    makeCanonicalAffineApplies(
+                        builder, loc, op.getTiedIndexingMap(operand), allIVs)));
+              }
+              // Inline region and emit store
+              Value toStore = inlineRegion(op, indexedValues, builder);
+              builder.create<memref::StoreOp>(
+                  loc, toStore, space,
+                  makeCanonicalAffineApplies(builder, loc,
+                                             op.getIndexingMaps()[2], allIVs));
+            });
+        rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
         return success();
       }
       default:
         llvm_unreachable("not yet implemented");
       }
+    } else {
+      // Currently just the broadcast multiply case
+      auto isSparse = [this](OpOperand *operand) {
+        return spAnalysis.getSparsityType(operand->get()).hasValue();
+      };
+      OpOperand *sparseOperand =
+          *llvm::find_if(op.getInputOperands(), isSparse);
+      assert(llvm::count_if(op.getInputOperands(), isSparse) == 1 &&
+             "Expected exactly 1 operand to have hot sparsity type (not yet "
+             "implemented)");
+      HotSparsityType spType =
+          spAnalysis.getSparsityType(sparseOperand->get()).getValue();
+      // how many loops do I need?
+      // size_t numLoops = 1;
+      // what are the bounds?
+      AffineMap sparseMap = op.getTiedIndexingMap(sparseOperand);
+      DenseSet<unsigned> sparseDims;
+      switch (spType) {
+      // case HotSparsityType::OneHot:
+      //   sparseDims.insert(sparseMap.getResult(0));
+      //   sparseDims.insert(sparseMap.getResult(1));
+      //   break;
+      // case HotSparsityType::ColHot:
+      //   sparseDims.insert(sparseMap.getResult(1));
+      //   break;
+      case HotSparsityType::RowHot:
+        sparseDims.insert(
+            sparseMap.getResult(0).cast<AffineDimExpr>().getPosition());
+        break;
+      default:
+        break;
+      }
+      SmallVector<Value, 4> lbs, ubs, steps;
+      Location loc = op.getLoc();
+      BufferizeTypeConverter typeConverter;
+      Value zero = rewriter.create<arith::ConstantOp>(
+          loc,
+          FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
+      Value idxZero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+      Value idxOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+      Value space = rewriter.create<memref::AllocOp>(
+          loc,
+          typeConverter.convertType(op.getResultTypes()[0]).cast<MemRefType>());
+      rewriter.create<linalg::FillOp>(loc, zero, space);
+      for (unsigned dim = 0; dim < sparseMap.getNumDims(); dim++) {
+        if (!sparseDims.contains(dim)) {
+          lbs.push_back(idxZero);
+          ubs.push_back(getSizeOfLoop(rewriter, op, dim));
+          steps.push_back(idxOne);
+        }
+      }
+      scf::buildLoopNest(
+          rewriter, loc, lbs, ubs, steps,
+          [&](OpBuilder &builder, Location loc, ValueRange ivs) {
+            // what are the iteration variables?
+            unsigned denseIdx = 0;
+            SmallVector<Value> allIvs;
+            allIvs.reserve(sparseMap.getNumDims());
+            for (unsigned dim = 0; dim < sparseMap.getNumDims(); dim++) {
+              if (sparseDims.contains(dim)) {
+                switch (spType) {
+                case HotSparsityType::RowHot:
+                  LLVM_FALLTHROUGH;
+                case HotSparsityType::ColHot:
+                  allIvs.push_back(
+                      spAnalysis.getIndices(sparseOperand->get()).getValue());
+                  break;
+                default:
+                  break;
+                }
+              } else {
+                allIvs.push_back(ivs[denseIdx]);
+                denseIdx++;
+              }
+            }
+
+            SmallVector<Value, 3> indexedValues;
+            indexedValues.reserve(op.getNumInputsAndOutputs());
+            // Emit reads to input and output views
+            for (OpOperand *operand : op.getInputAndOutputOperands()) {
+              indexedValues.push_back(builder.create<tensor::ExtractOp>(
+                  loc, operand->get(),
+                  makeCanonicalAffineApplies(
+                      builder, loc, op.getTiedIndexingMap(operand), allIvs)));
+            }
+            // Inline region and emit store
+            Value toStore = inlineRegion(op, indexedValues, builder);
+            builder.create<memref::StoreOp>(
+                loc, toStore, space,
+                makeCanonicalAffineApplies(
+                    builder, loc, op.getTiedIndexingMap(op.getOutputOperand(0)),
+                    allIvs));
+          });
+      rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
+      return success();
     }
     return failure();
   }

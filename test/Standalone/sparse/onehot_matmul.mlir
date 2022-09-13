@@ -7,6 +7,11 @@
 // this is:
 // km * kn -> nm
 // The result should be column-hot.
+
+// first arg: dense dense (d0, d1, d2) -> (d1, d2)
+// second arg: sparse sparse (d0, d1, d2) -> (d1, d0)
+// result: dense, sparse (d0, d1, d2) -> (d2, d0)
+// we need one loop across d2
 func @onehot_matmul(%4: tensor<544x3xf64>, %12: tensor<544x3xf64, "onehot">) -> tensor<3x3xf64> {
   %cst_2 = arith.constant dense<0.0> : tensor<3x3xf64>
   %15 = linalg.generic {indexing_maps = [#map6, #map5, #map10], iterator_types = ["parallel", "reduction", "parallel"]} ins(%4, %12 : tensor<544x3xf64>, tensor<544x3xf64, "onehot">) outs(%cst_2 : tensor<3x3xf64>) {
@@ -21,6 +26,11 @@ func @onehot_matmul(%4: tensor<544x3xf64>, %12: tensor<544x3xf64, "onehot">) -> 
 // both args are transposed
 // result is rowhot
 // [c0, ln3, iv]
+
+// first arg: dense dense (d0, d1, d2) -> (d2, d0)
+// second arg: sparse sparse (d0, d1, d2) -> (d1, d0)
+// result: sparse, dense (d0, d1, d2) -> (d1, d2)
+// we again need 1 loop across d2
 func @onehot_matmul_both_transposed(%8: tensor<3x3xf64>, %12: tensor<544x3xf64, "onehot">) -> tensor<544x3xf64> {
   %cst_3 = arith.constant dense<0.0> : tensor<544x3xf64>
   %16 = linalg.generic {indexing_maps = [#map10, #map5, #map6], iterator_types = ["reduction", "parallel", "parallel"]} ins(%8, %12 : tensor<3x3xf64>, tensor<544x3xf64, "onehot">) outs(%cst_3 : tensor<544x3xf64>) {

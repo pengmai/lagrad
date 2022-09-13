@@ -5,6 +5,8 @@ from mlir_bindings import (
     onehot_square,
     onehot_matmul,
     onehot_matmul_both_transposed,
+    rowhot_broadcast_mul,
+    rowhot_matmul,
 )
 
 
@@ -41,3 +43,21 @@ def test_onehot_matmul_transpose():
     assert onehot_matmul_both_transposed(y, x, indices) == pytest.approx(
         np.matmul(y, x.T).T
     )
+
+
+def test_rowhot_broadcast_mul():
+    np.random.seed(0)
+    y = np.random.randn(12)
+    x = np.zeros((12, 3))
+    idx = np.int64(3)
+    x[idx] = np.random.randn(3)
+    assert rowhot_broadcast_mul(y, x, idx) == pytest.approx((y * x.T).T)
+
+
+def test_rowhot_matmul():
+    np.random.seed(0)
+    y = np.random.randn(544, 4)
+    x = np.zeros((544, 4))
+    idx = np.int64(2)
+    x[idx] = np.random.randn(4)
+    assert rowhot_matmul(y, x, idx) == pytest.approx(np.matmul(y.T, x))

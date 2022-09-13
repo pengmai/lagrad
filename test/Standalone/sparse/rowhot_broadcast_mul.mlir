@@ -1,6 +1,15 @@
 #map8 = affine_map<(d0, d1) -> (d0, d1)>
 #map9 = affine_map<(d0, d1) -> (d0)>
 
+// first arg: dense, (d0, d1) -> (d0)
+// secnd arg: sparse, dense, (d0, d1) -> (d0, d1)
+// output : (d0, d1) -> (d0, d1)
+
+// d0 is a parallel iterator along a sparse dim
+// we need one loop, d1, across the dense dimension
+// ivs: sparse_index, d1
+
+// produces sparse x dense, the indexing map is also (d0, d1) -> (d0, d1)
 func @rowhot_broadcast_mul(%39: tensor<12xf64>, %16: tensor<12x3xf64, "rowhot">) -> tensor<12x3xf64> {
   %cst_3 = arith.constant dense<0.0> : tensor<12x3xf64>
   %40 = linalg.generic
