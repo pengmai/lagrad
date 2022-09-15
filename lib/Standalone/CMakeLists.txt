@@ -21,6 +21,7 @@ add_mlir_dialect_library(MLIRStandalone
         LinalgVectorJacobianProducts.cpp
         SCFVectorJacobianProducts.cpp
         SparsePropagation.cpp
+        LoopNestAnalysis.cpp
         Utils.cpp
         DebugNames.cpp
 

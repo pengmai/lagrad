@@ -285,188 +285,16 @@ public:
   }
 };
 
-struct LoopNest {
-  SmallVector<scf::ForOp> loops;
-  SmallVector<Value> inductionVars, inputTensorOperands, inputRegionArgs,
-      outputTensorOperands, outputRegionArgs;
-  SmallVector<AffineMap> inputMaps;
-  DenseSet<Operation *> ivComputation;
-};
-
-// Find the induction variable of a loop that may be iterating in reverse.
-Value getInductionVar(scf::ForOp op, LoopNest &loopNest) {
-  if (op.getInductionVar().hasOneUse()) {
-    if (auto subiOp =
-            dyn_cast<arith::SubIOp>(*op.getInductionVar().getUsers().begin())) {
-      // case 1: (ub - iv) - 1
-      if (subiOp.lhs() == op.upperBound() &&
-          subiOp.rhs() == op.getInductionVar() &&
-          subiOp.getResult().hasOneUse()) {
-        if (auto secondSubiOp = dyn_cast<arith::SubIOp>(
-                *subiOp.getResult().getUsers().begin())) {
-          auto rhs = dyn_cast_or_null<arith::ConstantIndexOp>(
-              secondSubiOp.rhs().getDefiningOp());
-          if (secondSubiOp.lhs() == subiOp.getResult() && rhs &&
-              rhs.value() == 1) {
-            loopNest.ivComputation.insert(subiOp);
-            loopNest.ivComputation.insert(secondSubiOp);
-            return secondSubiOp.getResult();
-          }
-        }
-      } else {
-        // case 2: (const ub - 1) - iv
-        auto constLHS = dyn_cast_or_null<arith::ConstantIndexOp>(
-            subiOp.lhs().getDefiningOp());
-        auto constUpperBound = dyn_cast_or_null<arith::ConstantIndexOp>(
-            op.upperBound().getDefiningOp());
-        if (subiOp.rhs() == op.getInductionVar() && constLHS &&
-            constUpperBound &&
-            constLHS.value() == constUpperBound.value() - 1) {
-          loopNest.ivComputation.insert(subiOp);
-          return subiOp.getResult();
-        }
-      }
-    }
-  }
-  return op.getInductionVar();
-}
-
 bool matchSparsifyForOp(scf::ForOp op, SparsePropagation &spAnalysis,
-                        LoopNest &loopNest) {
-  if (op->getParentOfType<scf::ForOp>()) {
+                        LoopNestAnalysis &lnAnalysis) {
+  auto maybeLoopNest = lnAnalysis.getLoopNest(op);
+  if (!maybeLoopNest.hasValue()) {
     return false;
   }
-
-  WalkResult result = op->walk<WalkOrder::PreOrder>([&](scf::ForOp forOp) {
-    auto childLoops = forOp.getBody()->getOps<scf::ForOp>();
-    loopNest.loops.push_back(forOp);
-    loopNest.inductionVars.push_back(getInductionVar(forOp, loopNest));
-    if (childLoops.empty()) {
-      // this is the innermost loop
-      // need to maybe collect reads and writes
-      if (!llvm::all_of(
-              forOp.getBody()->getOperations(), [](Operation &childOp) {
-                return isa<tensor::ExtractOp>(childOp) ||
-                       isa<tensor::InsertOp>(childOp) ||
-                       llvm::all_of(childOp.getResultTypes(), [](Type type) {
-                         return type.isIntOrIndexOrFloat();
-                       });
-              })) {
-        return WalkResult::interrupt();
-      }
-      if (llvm::none_of(
-              forOp.getBody()->getOps<tensor::ExtractOp>(),
-              [&](tensor::ExtractOp extractOp) {
-                return spAnalysis
-                    .getSparsityEncoding(
-                        extractOp.tensor().getType().cast<RankedTensorType>())
-                    .hasValue();
-              })) {
-        return WalkResult::interrupt();
-      }
-      // All yielded operands should be the result of insert ops
-      for (Value yieldOperand :
-           forOp.getBody()->getTerminator()->getOperands()) {
-        auto insertOp =
-            dyn_cast_or_null<tensor::InsertOp>(yieldOperand.getDefiningOp());
-        if (!insertOp) {
-          return WalkResult::interrupt();
-        }
-        // need to find all the reads that affect the scalar within the loop
-        // body
-        DenseSet<Operation *> activeReads;
-        SmallVector<Value> frontier{insertOp.scalar()};
-        while (!frontier.empty()) {
-          Value val = frontier.pop_back_val();
-          if (Operation *definingOp = val.getDefiningOp()) {
-            if (auto extractOp = dyn_cast<tensor::ExtractOp>(definingOp)) {
-              activeReads.insert(extractOp);
-            } else {
-              for (auto operand : definingOp->getOperands()) {
-                frontier.push_back(operand);
-              }
-            }
-          }
-        }
-
-        for (auto read : activeReads) {
-          auto extractOp = cast<tensor::ExtractOp>(read);
-          if (extractOp.tensor() == insertOp.dest()) {
-            // This extract op is an output operand
-            loopNest.outputRegionArgs.push_back(extractOp.tensor());
-            // TODO: reduce code duplication, this is a simpler bottom-up DFS
-            Value tensor = extractOp.tensor();
-            while (auto parentForOp = dyn_cast<scf::ForOp>(
-                       tensor.getParentRegion()->getParentOp())) {
-              auto iterOperand = llvm::find_if(
-                  parentForOp.getIterOpOperands(), [&](OpOperand &operand) {
-                    return parentForOp.getRegionIterArgForOpOperand(operand) ==
-                           tensor;
-                  });
-              tensor = iterOperand->get();
-            }
-            loopNest.outputTensorOperands.push_back(tensor);
-            continue;
-          } else {
-            SmallVector<AffineExpr, 4> resultExprs;
-            for (auto idxVal : extractOp.indices()) {
-              ptrdiff_t idx = std::distance(
-                  loopNest.inductionVars.begin(),
-                  std::find(loopNest.inductionVars.begin(),
-                            loopNest.inductionVars.end(), idxVal));
-              if (idx == static_cast<long>(loopNest.inductionVars.size())) {
-                // The read indices were not a function of the induction vars
-                return WalkResult::interrupt();
-              }
-              resultExprs.push_back(getAffineDimExpr(idx, op.getContext()));
-            }
-            loopNest.inputRegionArgs.push_back(extractOp.tensor());
-            loopNest.inputMaps.push_back(AffineMap::get(
-                loopNest.inductionVars.size(),
-                /*symbolCount=*/0, resultExprs, op.getContext()));
-            // extractOp.tensor().getParentRegion()->getParentOp()
-            Value tensor = extractOp.tensor();
-            while (auto parentForOp = dyn_cast<scf::ForOp>(
-                       tensor.getParentRegion()->getParentOp())) {
-              auto iterOperand = llvm::find_if(
-                  parentForOp.getIterOpOperands(), [&](OpOperand &operand) {
-                    return parentForOp.getRegionIterArgForOpOperand(operand) ==
-                           tensor;
-                  });
-              tensor = iterOperand->get();
-            }
-            loopNest.inputTensorOperands.push_back(tensor);
-          }
-        }
-      }
-    } else {
-      int numLoops = std::distance(childLoops.begin(), childLoops.end());
-      if (numLoops > 1 ||
-          !llvm::all_of(
-              forOp.getBody()->getOperations(), [](Operation &childOp) {
-                return isa<scf::ForOp>(childOp) ||
-                       llvm::all_of(childOp.getResultTypes(), [](Type type) {
-                         return type.isIntOrIndex();
-                       });
-              })) {
-        return WalkResult::interrupt();
-      }
-      scf::ForOp childLoop = *childLoops.begin();
-      if (!llvm::all_of_zip(forOp.getBody()->getTerminator()->getOperands(),
-                            childLoop.getResults(),
-                            [](Value yieldOperand, Value childResult) {
-                              return yieldOperand == childResult;
-                            })) {
-        return WalkResult::interrupt();
-      }
-    }
-    return WalkResult::advance();
+  LoopNest loopNest = maybeLoopNest.getValue();
+  return llvm::any_of(loopNest.inputTensorOperands, [&spAnalysis](Value val) {
+    return spAnalysis.getSparsityType(val).hasValue();
   });
-  if (result.wasInterrupted()) {
-    return false;
-  }
-  // errs() << "matched loop nest: " << op << "\n";
-  return true;
 }
 
 bool matchSparsifyGenericOp(linalg::GenericOp op,
@@ -658,6 +486,7 @@ public:
 class SparsifyForOp : public OpConversionPattern<scf::ForOp> {
 private:
   SparsePropagation &spAnalysis;
+  LoopNestAnalysis &lnAnalysis;
 
   void stripEncodingFromLoop(scf::ForOp op) const {
     for (OpOperand &operand : op.getIterOpOperands()) {
@@ -684,15 +513,18 @@ private:
   }
 
 public:
-  SparsifyForOp(SparsePropagation &spAnalysis, MLIRContext *ctx)
-      : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis} {}
+  SparsifyForOp(SparsePropagation &spAnalysis, LoopNestAnalysis &lnAnalysis,
+                MLIRContext *ctx)
+      : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis},
+        lnAnalysis{lnAnalysis} {}
+
   LogicalResult
   matchAndRewrite(scf::ForOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    LoopNest loopNest;
-    if (!matchSparsifyForOp(op, spAnalysis, loopNest)) {
+    if (!matchSparsifyForOp(op, spAnalysis, lnAnalysis)) {
       return failure();
     }
+    LoopNest loopNest = lnAnalysis.getLoopNest(op).getValue();
 
     if (loopNest.inputTensorOperands.size() == 1 &&
         loopNest.inputMaps.front().isIdentity()) {
@@ -815,6 +647,7 @@ struct StructuredSparsifyPass
   }
   void runOnOperation() final {
     auto *context = &getContext();
+    auto &loopNestAnalysis = getAnalysis<LoopNestAnalysis>();
     auto &sparsePropagation = getAnalysis<SparsePropagation>();
     RewritePatternSet patterns(context);
 
@@ -824,11 +657,9 @@ struct StructuredSparsifyPass
     target.addLegalDialect<arith::ArithmeticDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
-    target.addDynamicallyLegalOp<scf::ForOp>(
-        [&sparsePropagation](scf::ForOp op) {
-          LoopNest unused;
-          return !matchSparsifyForOp(op, sparsePropagation, unused);
-        });
+    target.addDynamicallyLegalOp<scf::ForOp>([&](scf::ForOp op) {
+      return !matchSparsifyForOp(op, sparsePropagation, loopNestAnalysis);
+    });
     target.addDynamicallyLegalOp<FuncOp>([&](FuncOp funcOp) {
       return llvm::none_of(funcOp.getArguments(), [&sparsePropagation](
                                                       BlockArgument arg) {
@@ -852,7 +683,8 @@ struct StructuredSparsifyPass
     patterns.add<SparsifyInsertSlice>(sparsePropagation, patterns.getContext());
     patterns.add<SparsifyLinalgGenericOp>(sparsePropagation,
                                           patterns.getContext());
-    patterns.add<SparsifyForOp>(sparsePropagation, patterns.getContext());
+    patterns.add<SparsifyForOp>(sparsePropagation, loopNestAnalysis,
+                                patterns.getContext());
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns)))) {
       signalPassFailure();
