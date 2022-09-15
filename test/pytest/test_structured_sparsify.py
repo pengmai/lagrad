@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 from mlir_bindings import (
+    onehot_adjoint_err_nest,
     rowhot_insert,
     onehot_square,
     onehot_sumreduce,
@@ -23,6 +24,16 @@ def test_onehot_square():
     x = np.zeros((10, 3))
     x[4, 2] = 5.6
     assert onehot_square(x, np.array([4, 2]).astype(np.int64)) == pytest.approx(x ** 2)
+
+
+def test_adjoint_err_nest():
+    x = np.zeros((2, 3))
+    indices = np.array([1, 2]).astype(np.int64)
+    x[indices[0], indices[1]] = 6.7
+    parents = np.array([100, 204]).astype(np.int32)
+    expected = np.zeros((544, 3))
+    expected[204, 2] = -x[indices[0], indices[1]]
+    assert onehot_adjoint_err_nest(x, indices, parents) == pytest.approx(expected)
 
 
 def test_onehot_sumreduce():

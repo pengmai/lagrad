@@ -369,6 +369,9 @@ mlirlib.mlir_mlp_batched.argtypes = mlp_args
 mlirlib.mlir_mlp_batched.restype = ctypes.c_float
 mlirlib.lagrad_mlp_batched.argtypes = mlp_args
 mlirlib.lagrad_mlp_batched.restype = NNGrad
+
+mlirlib.onehot_adjoint_err_nest.argtypes = memref_2d + memref_1d_index + memref_1d_int
+mlirlib.onehot_adjoint_err_nest.restype = F64Descriptor2D
 mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
 mlirlib.rowhot_insert.restype = F64Descriptor2D
 mlirlib.onehot_square.argtypes = memref_2d + memref_1d_index
@@ -441,6 +444,8 @@ else:
 
 mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
 lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
+
+onehot_adjoint_err_nest = wrap(mlirlib.onehot_adjoint_err_nest)
 rowhot_insert = wrap(mlirlib.rowhot_insert)
 onehot_square = wrap(mlirlib.onehot_square)
 onehot_sumreduce = wrap(mlirlib.onehot_sumreduce)
