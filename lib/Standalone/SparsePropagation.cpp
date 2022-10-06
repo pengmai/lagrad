@@ -30,8 +30,8 @@ inline raw_ostream &operator<<(raw_ostream &os, HotSparsityType type) {
   return os;
 }
 
-SparsePropagation::SparsePropagation(Operation *op) {
-  op->walk([&](FuncOp funcOp) { DEBUGpopulateFunc(debug_names, funcOp); });
+SparsePropagation::SparsePropagation(Operation *op, AnalysisManager &am) {
+  // op->walk([&](FuncOp funcOp) { DEBUGpopulateFunc(debug_names, funcOp); });
   op->walk([&](FuncOp funcOp) {
     for (BlockArgument arg : funcOp.getArguments()) {
       if (auto rankedTensorType = arg.getType().dyn_cast<RankedTensorType>()) {
@@ -60,8 +60,14 @@ SparsePropagation::SparsePropagation(Operation *op) {
       }
     }
   });
-  op->walk<WalkOrder::PreOrder>(
-      [&](scf::ForOp forOp) { propagateSCFFor(forOp); });
+  auto &lmAnalysis = am.getAnalysis<LoopNestAnalysis>();
+  op->walk<WalkOrder::PreOrder>([&](scf::ForOp forOp) {
+    propagateSCFFor(forOp);
+    auto maybeLoopNest = lmAnalysis.getLoopNest(forOp);
+    if (maybeLoopNest.hasValue()) {
+      propagateLoopNest(maybeLoopNest.getValue());
+    }
+  });
   op->walk(
       [&](linalg::GenericOp genericOp) { propagateLinalgGeneric(genericOp); });
   op->walk([&](tensor::InsertSliceOp insertSliceOp) {
@@ -112,22 +118,6 @@ void SparsePropagation::propagateInsertSlice(tensor::InsertSliceOp op) {
   indices[op.result()] = indices[op.source()];
 }
 
-bool isElementwiseOp(linalg::GenericOp op) {
-  SmallVector<AffineMap> indexingMaps = op.getIndexingMaps();
-  auto identityMap = AffineMap::getMultiDimIdentityMap(
-      indexingMaps.front().getNumDims(), op.getContext());
-  bool hasOnlyIdentityIndexing =
-      llvm::all_of(indexingMaps, [&identityMap](AffineMap map) {
-        return map == identityMap;
-      });
-  bool hasOnlyParallelIterators =
-      llvm::all_of(op.iterator_types(), [](Attribute attr) {
-        return attr.cast<StringAttr>().getValue() ==
-               getParallelIteratorTypeName();
-      });
-  return hasOnlyIdentityIndexing && hasOnlyParallelIterators;
-}
-
 void SparsePropagation::propagateLinalgGeneric(linalg::GenericOp op) {
   // TODO: Reduce code duplication with sparse codegen
   auto isSparse = [this](OpOperand *operand) {
@@ -142,10 +132,9 @@ void SparsePropagation::propagateLinalgGeneric(linalg::GenericOp op) {
   DenseSet<unsigned> sparseDims;
   switch (spType) {
   case HotSparsityType::OneHot:
-    sparseDims.insert(
-        sparseMap.getResult(0).cast<AffineDimExpr>().getPosition());
-    sparseDims.insert(
-        sparseMap.getResult(1).cast<AffineDimExpr>().getPosition());
+    for (auto result : sparseMap.getResults()) {
+      sparseDims.insert(result.cast<AffineDimExpr>().getPosition());
+    }
     break;
   case HotSparsityType::ColHot:
     sparseDims.insert(
@@ -182,6 +171,20 @@ void SparsePropagation::propagateSCFFor(scf::ForOp op) {
     if (spType.hasValue()) {
       sparsityTypes[op.getRegionIterArgForOpOperand(operand)] =
           spType.getValue();
+    }
+  }
+}
+
+void SparsePropagation::propagateLoopNest(LoopNest loopNest) {
+  if (loopNest.inputTensorOperands.size() == 1 &&
+      loopNest.outputTensorOperands.size() == 1 &&
+      loopNest.inputMaps[0].isIdentity()) {
+    Value inputOperand = loopNest.inputTensorOperands.front();
+    auto spType = getSparsityType(inputOperand);
+    auto destSpType = getSparsityType(loopNest.outputTensorOperands.front());
+    if (spType.hasValue() && spType.getValue() == HotSparsityType::OneHot &&
+        destSpType.hasValue() && destSpType == HotSparsityType::Empty) {
+      sparsityTypes[loopNest.results.front()] = spType.getValue();
     }
   }
 }
@@ -254,9 +257,15 @@ public:
           auto addIndexArgument = [&]() {
             Type indicesType;
             switch (spType.getValue()) {
-            case HotSparsityType::OneHot:
-              indicesType = MemRefType::get({2}, IndexType::get(ctx));
+            case HotSparsityType::OneHot: {
+              int64_t rank = arg.getType().cast<ShapedType>().getRank();
+              if (rank == 1) {
+                indicesType = IndexType::get(ctx);
+              } else {
+                indicesType = MemRefType::get({rank}, IndexType::get(ctx));
+              }
               break;
+            }
             case HotSparsityType::RowHot:
               LLVM_FALLTHROUGH;
             case HotSparsityType::ColHot:
@@ -303,18 +312,35 @@ bool matchSparsifyGenericOp(linalg::GenericOp op,
       llvm::any_of(op.getInputOperands(), [&spAnalysis](OpOperand *operand) {
         return spAnalysis.getSparsityType(operand->get()).hasValue();
       });
-  bool outputIsZero =
-      op.getNumOutputs() == 1 &&
-      spAnalysis
-              .getSparsityType(op.getOutputOperand(0)->get())
-              // We need this to just be a sparsity type other than empty.
-              .getValueOr(HotSparsityType::OneHot) == HotSparsityType::Empty;
-  return hasEncoding && outputIsZero;
+  // TODO: potentially dangerous to not use this. We currently need it to match
+  // a matmul in hand tracking because the zero value is propagated through loop
+  // iter args.
+
+  // bool outputIsZero =
+  //     op.getNumOutputs() == 1 &&
+  //     spAnalysis
+  //             .getSparsityType(op.getOutputOperand(0)->get())
+  //             // We need this to just be a sparsity type other than empty.
+  //             .getValueOr(HotSparsityType::OneHot) == HotSparsityType::Empty;
+  // if (op->hasAttr("debugme")) {
+  //   errs() << "debugme found. Output is zero: " << outputIsZero << "\n";
+  //   for (OpOperand *operand : op.getInputOperands()) {
+  //     if (spAnalysis.getSparsityType(operand->get()).hasValue()) {
+  //       errs() << "operand is sparse: "
+  //              << spAnalysis.getSparsityType(operand->get()).getValue() <<
+  //              "\n";
+  //     }
+  //   }
+  // }
+  return hasEncoding;
 }
 
-// Currently only works for one-hot case.
+// Currently only works for 2D one-hot case.
 SmallVector<Value> convertIndicesToValues(Location loc, Value memrefIndices,
                                           OpBuilder &builder) {
+  if (memrefIndices.getType().isa<IndexType>()) {
+    return {memrefIndices};
+  }
   Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
   Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
   return {builder.create<memref::LoadOp>(loc, memrefIndices, zero),
@@ -376,6 +402,21 @@ class SparsifyLinalgGenericOp : public OpConversionPattern<linalg::GenericOp> {
 private:
   SparsePropagation &spAnalysis;
 
+  Value allocateOutputSpace(Value tensor, Location loc, OpBuilder &b) const {
+    RankedTensorType resultType = tensor.getType().cast<RankedTensorType>();
+    BufferizeTypeConverter typeConverter;
+    SmallVector<Value> dynamicSizes;
+    dynamicSizes.reserve(resultType.getNumDynamicDims());
+    for (unsigned idx = 0; idx < resultType.getRank(); idx++) {
+      if (resultType.isDynamicDim(idx)) {
+        dynamicSizes.push_back(b.create<tensor::DimOp>(loc, tensor, idx));
+      }
+    }
+    return b.create<memref::AllocOp>(
+        loc, typeConverter.convertType(resultType).cast<MemRefType>(),
+        dynamicSizes);
+  }
+
 public:
   SparsifyLinalgGenericOp(SparsePropagation &spAnalysis, MLIRContext *ctx)
       : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis} {}
@@ -398,10 +439,9 @@ public:
     DenseSet<unsigned> sparseDims;
     switch (spType) {
     case HotSparsityType::OneHot:
-      sparseDims.insert(
-          sparseMap.getResult(0).cast<AffineDimExpr>().getPosition());
-      sparseDims.insert(
-          sparseMap.getResult(1).cast<AffineDimExpr>().getPosition());
+      for (auto result : sparseMap.getResults()) {
+        sparseDims.insert(result.cast<AffineDimExpr>().getPosition());
+      }
       break;
     case HotSparsityType::ColHot:
       sparseDims.insert(
@@ -422,9 +462,11 @@ public:
         FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
     Value idxZero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value idxOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-    Value space = rewriter.create<memref::AllocOp>(
-        loc,
-        typeConverter.convertType(op.getResultTypes()[0]).cast<MemRefType>());
+    Value space = rewriter.create<memref::BufferCastOp>(
+        loc, typeConverter.convertType(op.getOutputTensorTypes()[0]),
+        op.getOutputOperand(0)->get());
+    // Value space =
+    //     allocateOutputSpace(op.getOutputOperand(0)->get(), loc, rewriter);
     rewriter.create<linalg::FillOp>(loc, zero, space);
     for (unsigned dim = 0; dim < sparseMap.getNumDims(); dim++) {
       if (!sparseDims.contains(dim)) {
@@ -434,13 +476,21 @@ public:
       }
     }
 
-    ValueRange sparseIvs =
-        spType == HotSparsityType::OneHot
-            ? convertIndicesToValues(
-                  loc, spAnalysis.getIndices(sparseOperand->get()).getValue(),
-                  rewriter)
-            : llvm::makeArrayRef(
-                  spAnalysis.getIndices(sparseOperand->get()).getValue());
+    Optional<Value> sparseIndices = spAnalysis.getIndices(sparseOperand->get());
+    if (!sparseIndices.hasValue()) {
+      op.emitError() << "sparse op was missing indices\n";
+      return failure();
+    }
+
+    // The sparse induction vars must correspond to the dimensions of the sparse
+    // operand, hence the null value in the col-hot case.
+    ValueRange sparseIvs = spType == HotSparsityType::OneHot
+                               ? ValueRange{convertIndicesToValues(
+                                     loc, sparseIndices.getValue(), rewriter)}
+                           : spType == HotSparsityType::ColHot
+                               ? ValueRange{Value(), sparseIndices.getValue()}
+                               : ValueRange{sparseIndices.getValue()};
+
     scf::buildLoopNest(
         rewriter, loc, lbs, ubs, steps,
         [&](OpBuilder &builder, Location loc, ValueRange ivs) {
@@ -479,6 +529,39 @@ public:
                   allIvs));
         });
     rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
+
+    // propagate sparse indices
+    for (OpOperand *outOperand : op.getOutputOperands()) {
+      SmallVector<Value, 2> newSparseIdxVals;
+      AffineMap outMap = op.getTiedIndexingMap(outOperand);
+      for (auto result : outMap.getResults()) {
+        unsigned dim = result.cast<AffineDimExpr>().getPosition();
+        if (sparseDims.contains(dim)) {
+          for (auto pair : llvm::enumerate(sparseMap.getResults())) {
+            if (pair.value().isFunctionOfDim(dim)) {
+              newSparseIdxVals.push_back(sparseIvs[pair.index()]);
+              break;
+            }
+          }
+        }
+      }
+
+      if (newSparseIdxVals.size() == 1) {
+        spAnalysis.setIndices(op.getTiedOpResult(outOperand),
+                              newSparseIdxVals[0]);
+      } else {
+        auto newIndices = rewriter.create<memref::AllocaOp>(
+            loc, MemRefType::get(newSparseIdxVals.size(),
+                                 IndexType::get(rewriter.getContext())));
+        for (auto pair : llvm::enumerate(newSparseIdxVals)) {
+          Value spIdx =
+              rewriter.create<arith::ConstantIndexOp>(loc, pair.index());
+          rewriter.create<memref::StoreOp>(loc, pair.value(), newIndices,
+                                           spIdx);
+        }
+        spAnalysis.setIndices(op.getTiedOpResult(outOperand), newIndices);
+      }
+    }
     return success();
   }
 };
@@ -533,12 +616,11 @@ public:
       if (spType.hasValue() && spType.getValue() == HotSparsityType::OneHot) {
         Location loc = op.getLoc();
         BlockAndValueMapping map;
+        Value sparseIndices =
+            spAnalysis.getIndices(loopNest.inputTensorOperands.front())
+                .getValue();
         map.map(loopNest.inductionVars,
-                convertIndicesToValues(
-                    loc,
-                    spAnalysis.getIndices(loopNest.inputTensorOperands.front())
-                        .getValue(),
-                    rewriter));
+                convertIndicesToValues(loc, sparseIndices, rewriter));
         map.map(loopNest.inputRegionArgs, loopNest.inputTensorOperands);
         map.map(loopNest.outputRegionArgs, loopNest.outputTensorOperands);
 
@@ -562,6 +644,28 @@ public:
         SmallVector<Value> results;
         for (auto termOperand : terminator->getOperands()) {
           results.push_back(map.lookupOrDefault(termOperand));
+        }
+
+        for (auto tup :
+             llvm::zip(llvm::make_range(results.begin() +
+                                            loopNest.inputTensorOperands.size(),
+                                        results.end()),
+                       llvm::make_range(op.getResults().begin() +
+                                            loopNest.inputTensorOperands.size(),
+                                        op.getResults().end()))) {
+          // Need to update indices here
+          auto insertOp =
+              cast<tensor::InsertOp>(std::get<0>(tup).getDefiningOp());
+          OpResult originalResult = std::get<1>(tup);
+          auto newIndices = rewriter.create<memref::AllocaOp>(
+              op.getLoc(), sparseIndices.getType().cast<MemRefType>());
+          for (auto pair : llvm::enumerate(insertOp.indices())) {
+            Value spIdx =
+                rewriter.create<arith::ConstantIndexOp>(loc, pair.index());
+            rewriter.create<memref::StoreOp>(loc, pair.value(), newIndices,
+                                             spIdx);
+          }
+          spAnalysis.setIndices(originalResult, newIndices);
         }
         rewriter.replaceOp(op, results);
         return success();
@@ -589,6 +693,20 @@ bool matchSparsifyInsertSlice(tensor::InsertSliceOp op,
 class SparsifyInsertSlice : public OpConversionPattern<tensor::InsertSliceOp> {
 private:
   SparsePropagation &spAnalysis;
+  bool isRowInsertion(tensor::InsertSliceOp op) const {
+    auto inferredType =
+        tensor::ExtractSliceOp::inferResultType(
+            op.getType(), extractFromI64ArrayAttr(op.static_offsets()),
+            extractFromI64ArrayAttr(op.static_sizes()),
+            extractFromI64ArrayAttr(op.static_strides()))
+            .cast<RankedTensorType>();
+    Optional<llvm::SmallDenseSet<unsigned>> mask = computeRankReductionMask(
+        inferredType.getShape(), op.getSourceType().getShape());
+    if (!mask.hasValue()) {
+      return false;
+    }
+    return !mask.getValue().contains(inferredType.getRank() - 1);
+  }
 
 public:
   SparsifyInsertSlice(SparsePropagation &spAnalysis, MLIRContext *ctx)
@@ -602,12 +720,55 @@ public:
     }
     Optional<HotSparsityType> spType = spAnalysis.getSparsityType(op.result());
     Optional<Value> indices = spAnalysis.getIndices(op.source());
+    if (!indices.hasValue()) {
+      op.emitError() << "sparse op was missing indices\n";
+      return failure();
+    }
 
     Location loc = op.getLoc();
     auto intToAttr = [&](int64_t i) {
       return IntegerAttr::get(IntegerType::get(rewriter.getContext(), 64), i);
     };
     switch (spType.getValue()) {
+    case HotSparsityType::OneHot: {
+      if (indices.getValue().getType().isa<IndexType>()) {
+        assert(isRowInsertion(op) && "only row 1-d insertions supported");
+        SmallVector<Value> valueOffsets;
+
+        for (auto offset :
+             ArrayRef<OpFoldResult>{op.getMixedOffsets()}.drop_back(1)) {
+          if (offset.is<Value>()) {
+            valueOffsets.push_back(offset.get<Value>());
+          } else {
+            valueOffsets.push_back(rewriter.create<arith::ConstantIndexOp>(
+                loc, offset.get<Attribute>()
+                         .cast<IntegerAttr>()
+                         .getValue()
+                         .getSExtValue()));
+          }
+        }
+
+        APInt lastOffset = op.static_offsets()[op.static_offsets().size() - 1]
+                               .cast<IntegerAttr>()
+                               .getValue();
+        if (lastOffset.isZero()) {
+          valueOffsets.push_back(indices.getValue());
+        } else {
+          valueOffsets.push_back(rewriter.create<arith::AddIOp>(
+              loc,
+              rewriter.create<arith::ConstantIndexOp>(
+                  loc, lastOffset.getSExtValue()),
+              indices.getValue()));
+          // TODO: propagate indices properly
+          // spAnalysis
+        }
+        Value scalar = rewriter.create<tensor::ExtractOp>(loc, op.source(),
+                                                          indices.getValue());
+        rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, scalar, op.dest(),
+                                                      valueOffsets);
+      }
+      break;
+    }
     case HotSparsityType::RowHot: {
       SmallVector<OpFoldResult> offsets;
       SmallVector<OpFoldResult> sizes{op.getMixedSizes()};
@@ -627,8 +788,14 @@ public:
       break;
     }
     default:
+      errs() << op.getLoc() << "\n";
+      errs() << "sparsify tensor.insert_slice for " << spType.getValue()
+             << " not yet implemented\n";
       llvm_unreachable("Not yet implemented");
     }
+
+    // propagate indices
+    spAnalysis.setIndices(op.result(), indices.getValue());
     return success();
   }
 };
@@ -675,6 +842,8 @@ struct StructuredSparsifyPass
         });
     target.addLegalOp<linalg::FillOp, linalg::YieldOp>();
     target.addDynamicallyLegalOp<linalg::GenericOp>([&](linalg::GenericOp op) {
+      // errs() << "loops to shape map: " << op.getLoopsToShapesMap() << "\n";
+      // errs() << "shape to loops map: " << op.getShapesToLoopsMap() << "\n";
       return !matchSparsifyGenericOp(op, sparsePropagation);
     });
 

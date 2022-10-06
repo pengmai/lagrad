@@ -102,6 +102,7 @@ private:
     auto gradSignalAttr =
         gradOp->getAttr("grad_signal").dyn_cast_or_null<BoolAttr>();
     auto customGradSignal = gradSignalAttr && gradSignalAttr.getValue();
+    bool oneHotSparse = gradOp->hasAttrOfType<UnitAttr>("sparse");
 
     std::string adjointFuncName("__grad_");
     adjointFuncName += originalFuncOp.getName();
@@ -116,7 +117,8 @@ private:
     runActivityAnalysis(lagradctx, funcOp, gradientsOf);
     populatePrimalCaches(lagradctx, funcOp, rewriter);
     return differentiateFunction(funcOp, lagradctx, gradientsOf, rewriter,
-                                 /*topLevel=*/!customGradSignal);
+                                 /*topLevel=*/!customGradSignal,
+                                 /*onehotsparse=*/oneHotSparse);
   }
 };
 } // end anonymous namespace

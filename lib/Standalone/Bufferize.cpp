@@ -22,7 +22,7 @@
 
 using namespace mlir;
 using llvm::errs;
-// constexpr bool in_place = false;
+constexpr bool force_copy = false;
 
 namespace {
 
@@ -132,7 +132,7 @@ public:
     }
     // constexpr bool bufferize_insert_in_place = false;
     // if (bufferize_insert_in_place) {
-    if (!hasUseAfter) {
+    if (!hasUseAfter && !force_copy) {
       // This first implementation updates the tensor in place rather than
       // returning a copy per the spec. Watch out for bugs this may cause.
       rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
@@ -232,7 +232,7 @@ public:
     //     hasWriteAfter = true;
     //   }
     // }
-    if (!hasWriteAfter) {
+    if (!hasWriteAfter && !force_copy) {
       // rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op,
       //                                                   subview.getResult());
       rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),

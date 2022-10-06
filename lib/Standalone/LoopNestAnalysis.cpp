@@ -39,11 +39,15 @@ Value getInductionVar(scf::ForOp op, LoopNest &loopNest) {
   return op.getInductionVar();
 }
 
-Optional<Value> traverseTiedLoopOperands(Value regionArg) {
+using llvm::errs;
+Optional<std::pair<Value, Value>> traverseTiedLoopOperands(Value regionArg) {
+  // errs() << "traversing tied loop operands for region arg " << regionArg
+  //        << "\n";
   Value tensor = regionArg;
+  Value result;
   while (auto parentForOp =
              dyn_cast<scf::ForOp>(tensor.getParentRegion()->getParentOp())) {
-    auto iterOperand =
+    OpOperand *iterOperand =
         llvm::find_if(parentForOp.getIterOpOperands(), [&](OpOperand &operand) {
           return parentForOp.getRegionIterArgForOpOperand(operand) == tensor;
         });
@@ -51,8 +55,9 @@ Optional<Value> traverseTiedLoopOperands(Value regionArg) {
       return llvm::None;
     }
     tensor = iterOperand->get();
+    result = parentForOp.getResultForOpOperand(*iterOperand);
   }
-  return tensor;
+  return std::make_pair(tensor, result);
 }
 
 Optional<LoopNest> parseLoopNest(scf::ForOp op) {
@@ -94,6 +99,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
           if (Operation *definingOp = val.getDefiningOp()) {
             if (auto extractOp = dyn_cast<tensor::ExtractOp>(definingOp)) {
               activeReads.insert(extractOp);
+              errs() << "looking at active read: " << extractOp << "\n";
             } else {
               for (auto operand : definingOp->getOperands()) {
                 frontier.push_back(operand);
@@ -110,10 +116,12 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
             auto maybeOutputOperand =
                 traverseTiedLoopOperands(extractOp.tensor());
             if (!maybeOutputOperand.hasValue()) {
+              errs() << "interrupt 3\n";
               return WalkResult::interrupt();
             }
             loopNest.outputTensorOperands.push_back(
-                maybeOutputOperand.getValue());
+                maybeOutputOperand.getValue().first);
+            loopNest.results.push_back(maybeOutputOperand.getValue().second);
           } else {
             SmallVector<AffineExpr, 4> resultExprs;
             for (auto idxVal : extractOp.indices()) {
@@ -124,6 +132,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
               if (idx == static_cast<long>(loopNest.inductionVars.size())) {
                 // The read indices were not a function of the induction
                 // vars
+                // errs() << "interrupt 4\n";
                 return WalkResult::interrupt();
               }
               resultExprs.push_back(getAffineDimExpr(idx, op.getContext()));
@@ -138,22 +147,28 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
               return WalkResult::interrupt();
             }
             loopNest.inputTensorOperands.push_back(
-                maybeInputOperand.getValue());
+                maybeInputOperand.getValue().first);
           }
         }
       }
     } else {
+      // Ensure we only have one loop directly inside this one.
       int numLoops = std::distance(childLoops.begin(), childLoops.end());
       if (numLoops > 1 ||
           !llvm::all_of(
               forOp.getBody()->getOperations(), [](Operation &childOp) {
                 return isa<scf::ForOp>(childOp) ||
                        llvm::all_of(childOp.getResultTypes(), [](Type type) {
+                         // This is a placeholder to test that the bodies of
+                         // middle loops only contain the index reversal
+                         // computation.
                          return type.isIntOrIndex();
                        });
               })) {
         return WalkResult::interrupt();
       }
+      // Ensure the yield operands of this loop match the results of the child
+      // loop.
       scf::ForOp childLoop = *childLoops.begin();
       if (!llvm::all_of_zip(forOp.getBody()->getTerminator()->getOperands(),
                             childLoop.getResults(),

@@ -5,7 +5,7 @@
 #include <limits>
 #include <string>
 
-#define ENABLE_NAME_DEBUG false
+#define ENABLE_NAME_DEBUG true
 
 namespace mlir {
 using namespace mlir;

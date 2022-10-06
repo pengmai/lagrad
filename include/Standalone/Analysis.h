@@ -2,6 +2,7 @@
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/Pass/AnalysisManager.h"
 #include <string>
 
 namespace mlir {
@@ -28,8 +29,16 @@ private:
 
 enum class HotSparsityType { Empty, OneHot, RowHot, ColHot };
 
+struct LoopNest {
+  SmallVector<scf::ForOp> loops;
+  SmallVector<Value> inductionVars, inputTensorOperands, inputRegionArgs,
+      outputTensorOperands, outputRegionArgs, results;
+  SmallVector<AffineMap> inputMaps;
+  DenseSet<Operation *> ivComputation;
+};
+
 struct SparsePropagation {
-  SparsePropagation(Operation *op);
+  SparsePropagation(Operation *op, AnalysisManager &am);
   Optional<HotSparsityType> getSparsityType(Value val) const;
   Optional<HotSparsityType> getSparsityEncoding(RankedTensorType type) const;
   void setIndices(Value tensor, Value indices);
@@ -42,14 +51,7 @@ private:
   void propagateInsertSlice(tensor::InsertSliceOp op);
   void propagateLinalgGeneric(linalg::GenericOp op);
   void propagateSCFFor(scf::ForOp op);
-};
-
-struct LoopNest {
-  SmallVector<scf::ForOp> loops;
-  SmallVector<Value> inductionVars, inputTensorOperands, inputRegionArgs,
-      outputTensorOperands, outputRegionArgs;
-  SmallVector<AffineMap> inputMaps;
-  DenseSet<Operation *> ivComputation;
+  void propagateLoopNest(LoopNest loopNest);
 };
 
 struct LoopNestAnalysis {

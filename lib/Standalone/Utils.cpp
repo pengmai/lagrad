@@ -160,7 +160,7 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
 FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
                              ArrayAttr gradientsOf,
                              ConversionPatternRewriter &rewriter,
-                             bool topLevel = false) {
+                             bool topLevel = false, bool oneHotSparse = false) {
   Region *region = funcOp.getCallableRegion();
   if (!region) {
     funcOp->emitError("Function region cannot be null");
@@ -171,8 +171,14 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
   assert(funcOp.getType().getNumResults() == 1 &&
          "differentiating functions with more than one result not supported");
   if (!topLevel) {
-    funcOp.insertArgument(funcOp.getNumArguments(),
-                          funcOp.getType().getResult(0), {});
+    Type gradSignalType = funcOp.getType().getResult(0);
+    if (oneHotSparse && gradSignalType.isa<RankedTensorType>()) {
+      auto tensorType = gradSignalType.cast<RankedTensorType>();
+      gradSignalType = RankedTensorType::get(
+          tensorType.getShape(), tensorType.getElementType(),
+          StringAttr::get(rewriter.getContext(), "onehot"));
+    }
+    funcOp.insertArgument(funcOp.getNumArguments(), gradSignalType, {});
   }
 
   std::vector<Operation *> ops;
@@ -291,7 +297,7 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init) {
     return IntegerAttr::get(IntegerType::get(rewriter.getContext(), 64), i);
   };
   if (auto shapedType = operand.getType().dyn_cast<RankedTensorType>()) {
-    if (init) {
+    if (init || !shapedType.hasStaticShape()) {
       auto zero = rewriter.create<arith::ConstantOp>(
           loc, FloatAttr::get(shapedType.getElementType(), 0.0));
       SmallVector<OpFoldResult> shape;
