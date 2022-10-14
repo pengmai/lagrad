@@ -32,7 +32,7 @@ typedef struct MLPGrad {
   F32Descriptor1D b2b;
 } MLPGrad;
 
-void enzyme_primal(MLPModel *m, DataBatch *b);
+float enzyme_primal(MLPModel *m, DataBatch *b);
 MLPGrad enzyme_mlp(MLPModel *m, DataBatch *b);
 
 float mlir_mlp(/*input=*/float *, float *input, int64_t, int64_t, int64_t,
@@ -71,6 +71,17 @@ MLPGrad lagrad_mlp(
     /*b2=*/float *, float *b2, int64_t, int64_t, int64_t);
 
 MLPGrad lagrad_mlp_batched(
+    /*input=*/float *, float *input, int64_t, int64_t, int64_t, int64_t,
+    int64_t,
+    /*labels=*/int32_t *, int32_t *labels, int64_t, int64_t, int64_t,
+    /*w0=*/float *, float *w0, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*b0=*/float *, float *b0, int64_t, int64_t, int64_t,
+    /*w1=*/float *, float *w1, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*b1=*/float *, float *b1, int64_t, int64_t, int64_t,
+    /*w2=*/float *, float *w2, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*b2=*/float *, float *b2, int64_t, int64_t, int64_t);
+
+MLPGrad enzyme_mlir_mlp_batched(
     /*input=*/float *, float *input, int64_t, int64_t, int64_t, int64_t,
     int64_t,
     /*labels=*/int32_t *, int32_t *labels, int64_t, int64_t, int64_t,

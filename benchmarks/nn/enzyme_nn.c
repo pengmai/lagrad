@@ -10,97 +10,93 @@ void relu(int size, float *x) {
   }
 }
 
-float nn_crossentropy(const int length, const float *activations, int label) {
-  int i;
-  float sum, max;
-  float outp[length];
-  for (i = 1, max = activations[0]; i < length; i++) {
-    if (activations[i] > max) {
-      max = activations[i];
+void matmult(int M, int N, int K, const float *restrict A,
+             const float *restrict B, float *restrict C) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      for (int k = 0; k < K; k++) {
+        C[i * N + j] += A[i * K + k] * B[k * N + j];
+      }
     }
   }
-
-  for (i = 0, sum = 0; i < length; i++) {
-    sum += exp(activations[i] - max);
-  }
-
-  for (i = 0; i < length; i++) {
-    outp[i] = exp(activations[i] - max) / sum;
-  }
-  return -log(outp[label]);
 }
 
-// void nn_softmax(int length, const float *activations, float *outp) {
-//   int i;
-//   float sum, max;
-
-//   for (i = 1, max = activations[0]; i < length; i++) {
-//     if (activations[i] > max) {
-//       max = activations[i];
-//     }
-//   }
-
-//   for (i = 0, sum = 0; i < length; i++) {
-//     sum += exp(activations[i] - max);
-//   }
-
-//   for (i = 0; i < length; i++) {
-//     outp[i] = exp(activations[i] - max) / sum;
-//   }
-// }
-
-float enzyme_nn_hypothesis(const float *input, const int32_t *labels,
-                           const float *w0, const float *b0, const float *w1,
-                           const float *b1, const float *w2, const float *b2) {
-  float *hidden0 = malloc(HIDDEN_SIZE * sizeof(float));
-  float *hidden1 = malloc(HIDDEN_SIZE * sizeof(float));
-  float activations[OUTPUT_SIZE];
-  float loss = 0;
-  for (int b = 0; b < BATCH_SIZE; b++) {
-    memcpy(hidden0, b0, HIDDEN_SIZE * sizeof(float));
-    for (int i = 0; i < HIDDEN_SIZE; i++) {
-      for (int j = 0; j < INPUT_SIZE; j++) {
-        hidden0[i] += w0[i * INPUT_SIZE + j] * input[b * INPUT_SIZE + j];
-      }
+// h: [M, N]
+// b: [M]
+void broadcast_add(int M, int N, float *h, const float *b) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      h[i * N + j] += b[i];
     }
-    relu(HIDDEN_SIZE, hidden0);
-
-    memcpy(hidden1, b1, HIDDEN_SIZE * sizeof(float));
-    for (int i = 0; i < HIDDEN_SIZE; i++) {
-      for (int j = 0; j < HIDDEN_SIZE; j++) {
-        hidden1[i] += w1[i * HIDDEN_SIZE + j] * hidden0[j];
-      }
-    }
-    relu(HIDDEN_SIZE, hidden1);
-
-    memcpy(activations, b2, OUTPUT_SIZE * sizeof(float));
-    for (int i = 0; i < OUTPUT_SIZE; i++) {
-      for (int j = 0; j < HIDDEN_SIZE; j++) {
-        activations[i] += w2[i * HIDDEN_SIZE + j] * hidden1[j];
-      }
-    }
-    loss += nn_crossentropy(OUTPUT_SIZE, activations, labels[b]);
   }
+}
+
+float nn_crossentropy(const int b, const int length, const float *activations,
+                      const int32_t *labels) {
+  float maxs[b];
+  float sums[b];
+  for (int i = 0; i < b; i++) {
+    maxs[i] = activations[i];
+    sums[i] = 0;
+  }
+
+  for (int i = 0; i < length; i++) {
+    for (int j = 0; j < b; j++) {
+      maxs[j] =
+          activations[i * b + j] > maxs[j] ? activations[i * b + j] : maxs[j];
+    }
+  }
+
+  for (int i = 0; i < length; i++) {
+    for (int j = 0; j < b; j++) {
+      sums[j] += exp(activations[i * b + j] - maxs[j]);
+    }
+  }
+
+  float sum_output = 0;
+  for (int j = 0; j < b; j++) {
+    sum_output += -log(exp(activations[labels[j] * b + j] - maxs[j]) / sums[j]);
+  }
+  return sum_output / b;
+}
+
+float ec_mlp_batched(const float *input, const int32_t *labels, const float *w0,
+                     const float *b0, const float *w1, const float *b1,
+                     const float *w2, const float *b2) {
+  float *hidden0 = malloc(HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
+  float *hidden1 = malloc(HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
+  float *activations = malloc(OUTPUT_SIZE * BATCH_SIZE * sizeof(float));
+  memset(hidden0, 0, HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
+  memset(hidden1, 0, HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
+  memset(activations, 0, OUTPUT_SIZE * BATCH_SIZE * sizeof(float));
+
+  // first layer
+  matmult(HIDDEN_SIZE, BATCH_SIZE, INPUT_SIZE, w0, input, hidden0);
+  broadcast_add(HIDDEN_SIZE, BATCH_SIZE, hidden0, b0);
+  relu(HIDDEN_SIZE * BATCH_SIZE, hidden0);
+
+  // second layer
+  matmult(HIDDEN_SIZE, BATCH_SIZE, HIDDEN_SIZE, w1, hidden0, hidden1);
+  broadcast_add(HIDDEN_SIZE, BATCH_SIZE, hidden1, b1);
+  relu(HIDDEN_SIZE * BATCH_SIZE, hidden1);
+
+  // output layer
+  matmult(OUTPUT_SIZE, BATCH_SIZE, HIDDEN_SIZE, w2, hidden1, activations);
+  broadcast_add(OUTPUT_SIZE, BATCH_SIZE, activations, b2);
+  float loss = nn_crossentropy(BATCH_SIZE, OUTPUT_SIZE, activations, labels);
+
   free(hidden0);
   free(hidden1);
-  // printf("avg loss: %f\n", loss / BATCH_SIZE);
+  free(activations);
   return loss;
 }
-
-// float enzyme_nn_loss(const float *input, const int32_t *labels, const float
-// *w0,
-//                      const float *b0, const float *w1, const float *b1,
-//                      const float *w2, const float *b2) {
-//   float loss = 0.0f;
-
-// }
 
 extern int enzyme_const;
 extern void __enzyme_autodiff(void *, ...);
 
-void enzyme_primal(MLPModel *m, DataBatch *b) {
-  enzyme_nn_hypothesis(b->features, b->labels, m->weights0, m->bias0,
-                       m->weights1, m->bias1, m->weights2, m->bias2);
+float enzyme_primal(MLPModel *m, DataBatch *b) {
+  return ec_mlp_batched(b->features, b->labels, m->weights0, m->bias0,
+                        m->weights1, m->bias1, m->weights2, m->bias2);
 }
 
 MLPGrad enzyme_mlp(MLPModel *m, DataBatch *b) {
@@ -146,7 +142,7 @@ MLPGrad enzyme_mlp(MLPModel *m, DataBatch *b) {
                           .offset = 0,
                           .size = OUTPUT_SIZE,
                           .stride = 1}};
-  __enzyme_autodiff(enzyme_nn_hypothesis, enzyme_const, b->features, b->labels,
+  __enzyme_autodiff(ec_mlp_batched, enzyme_const, b->features, b->labels,
                     m->weights0, w0b, m->bias0, b0b, m->weights1, w1b, m->bias1,
                     b1b, m->weights2, w2b, m->bias2, b2b);
   return grad;
