@@ -86,12 +86,12 @@ public:
       size_t arg_index = 0;
       for (auto it = opIt.begin(); it != opIt.end(); it++) {
         // auto m = *arg;
-        auto arg = *it;
+        Value arg = *it;
         auto memrefType = arg.getType().dyn_cast_or_null<MemRefType>();
         if (constSet.contains(arg_index)) {
           assert(memrefType && "Operator marked const was not a MemRef");
         }
-        if (memrefType) {
+        if (memrefType && memrefType.getElementType().isa<FloatType>()) {
           auto pointeeType =
               LLVM::LLVMPointerType::get(memrefType.getElementType());
           auto rank = memrefType.getRank();
@@ -120,7 +120,7 @@ public:
 
           if (!constSet.contains(arg_index)) {
             // Shadow pointer has to follow the aligned pointer
-            auto shadow = *(++it);
+            Value shadow = *(++it);
             assert(shadow && shadow.getType().isa<MemRefType>() &&
                    "Shadow argument must be a Memref");
             auto shadowCasted =
