@@ -60,6 +60,21 @@ Optional<std::pair<Value, Value>> traverseTiedLoopOperands(Value regionArg) {
   return std::make_pair(tensor, result);
 }
 
+bool isPaired(tensor::ExtractOp read, tensor::InsertOp write) {
+  if (!(read.tensor() == write.dest() && read.indices() == write.indices())) {
+    return false;
+  }
+
+  // The read tensor should only be used by the write.
+  DominanceInfo dom;
+  for (Operation *user : read.tensor().getUsers()) {
+    if (dom.properlyDominates(read.getResult(), user) && user != write) {
+      return false;
+    }
+  }
+  return true;
+}
+
 Optional<LoopNest> parseLoopNest(scf::ForOp op) {
   if (op->getParentOfType<scf::ForOp>()) {
     return llvm::None;
@@ -83,6 +98,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
         return WalkResult::interrupt();
       }
       // All yielded operands should be the result of insert ops
+      DenseSet<Operation *> activeReads;
       for (Value yieldOperand :
            forOp.getBody()->getTerminator()->getOperands()) {
         auto insertOp =
@@ -92,14 +108,14 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
         }
         // need to find all the reads that affect the scalar within the loop
         // body
-        DenseSet<Operation *> activeReads;
         SmallVector<Value> frontier{insertOp.scalar()};
         while (!frontier.empty()) {
           Value val = frontier.pop_back_val();
           if (Operation *definingOp = val.getDefiningOp()) {
             if (auto extractOp = dyn_cast<tensor::ExtractOp>(definingOp)) {
-              activeReads.insert(extractOp);
-              errs() << "looking at active read: " << extractOp << "\n";
+              if (!activeReads.contains(definingOp)) {
+                activeReads.insert(definingOp);
+              }
             } else {
               for (auto operand : definingOp->getOperands()) {
                 frontier.push_back(operand);
@@ -112,11 +128,19 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
           auto extractOp = cast<tensor::ExtractOp>(read);
           if (extractOp.tensor() == insertOp.dest()) {
             // This extract op is an output operand
-            loopNest.outputRegionArgs.push_back(extractOp.tensor());
+            tensor::InsertOp tmpInsert = insertOp;
+            unsigned numWrites = 1;
+            while (auto prevWrite = dyn_cast_or_null<tensor::InsertOp>(
+                       tmpInsert.dest().getDefiningOp())) {
+              tmpInsert = prevWrite;
+              numWrites++;
+            }
+
+            loopNest.outputRegionArgs.push_back(tmpInsert.dest());
+            loopNest.outputPerIterWrites.push_back(numWrites);
             auto maybeOutputOperand =
-                traverseTiedLoopOperands(extractOp.tensor());
+                traverseTiedLoopOperands(tmpInsert.dest());
             if (!maybeOutputOperand.hasValue()) {
-              errs() << "interrupt 3\n";
               return WalkResult::interrupt();
             }
             loopNest.outputTensorOperands.push_back(
@@ -124,18 +148,26 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
             loopNest.results.push_back(maybeOutputOperand.getValue().second);
           } else {
             SmallVector<AffineExpr, 4> resultExprs;
-            for (auto idxVal : extractOp.indices()) {
+            for (Value idxVal : extractOp.indices()) {
               ptrdiff_t idx = std::distance(
                   loopNest.inductionVars.begin(),
                   std::find(loopNest.inductionVars.begin(),
                             loopNest.inductionVars.end(), idxVal));
-              if (idx == static_cast<long>(loopNest.inductionVars.size())) {
-                // The read indices were not a function of the induction
-                // vars
-                // errs() << "interrupt 4\n";
-                return WalkResult::interrupt();
+              if (idx < static_cast<long>(loopNest.inductionVars.size())) {
+                resultExprs.push_back(getAffineDimExpr(idx, op.getContext()));
+              } else if (auto constIndexOp =
+                             dyn_cast_or_null<arith::ConstantIndexOp>(
+                                 idxVal.getDefiningOp())) {
+                resultExprs.push_back(getAffineConstantExpr(
+                    constIndexOp.value(), op.getContext()));
+              } else {
+                // The read indices were not a function of the induction vars,
+                // nor were they constants.
+                // The value -1 here is used as a placeholder for "unknown".
+                resultExprs.push_back(
+                    getAffineConstantExpr(-1, op.getContext()));
+                // return WalkResult::interrupt();
               }
-              resultExprs.push_back(getAffineDimExpr(idx, op.getContext()));
             }
             loopNest.inputRegionArgs.push_back(extractOp.tensor());
             loopNest.inputMaps.push_back(AffineMap::get(
@@ -143,7 +175,10 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
                 /*symbolCount=*/0, resultExprs, op.getContext()));
             auto maybeInputOperand =
                 traverseTiedLoopOperands(extractOp.tensor());
+            // errs() << "looking at input operand: " << extractOp.tensor()
+            //        << "\n";
             if (!maybeInputOperand.hasValue()) {
+              // extractOp.emitWarning() << "interrupt 4";
               return WalkResult::interrupt();
             }
             loopNest.inputTensorOperands.push_back(
@@ -165,6 +200,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
                          return type.isIntOrIndex();
                        });
               })) {
+        // errs() << "interrupt 6\n";
         return WalkResult::interrupt();
       }
       // Ensure the yield operands of this loop match the results of the child
@@ -183,6 +219,10 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
   if (result.wasInterrupted()) {
     return llvm::None;
   }
+  // errs() << "successfully parsed loop nest\n";
+  // for (auto input : loopNest.inputTensorOperands) {
+  //   errs() << "input: " << input << "\n";
+  // }
   return loopNest;
 }
 

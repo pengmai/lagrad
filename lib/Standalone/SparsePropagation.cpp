@@ -113,9 +113,6 @@ void SparsePropagation::propagateInsertSlice(tensor::InsertSliceOp op) {
   }
 
   sparsityTypes[op.result()] = sourceSparsity.getValue();
-  // TODO: This isn't strictly correct because the insert_slice could appear
-  // with an offset.
-  indices[op.result()] = indices[op.source()];
 }
 
 void SparsePropagation::propagateLinalgGeneric(linalg::GenericOp op) {

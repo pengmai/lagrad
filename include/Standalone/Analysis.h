@@ -34,6 +34,7 @@ struct LoopNest {
   SmallVector<Value> inductionVars, inputTensorOperands, inputRegionArgs,
       outputTensorOperands, outputRegionArgs, results;
   SmallVector<AffineMap> inputMaps;
+  SmallVector<unsigned> outputPerIterWrites;
   DenseSet<Operation *> ivComputation;
 };
 
