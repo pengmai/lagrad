@@ -4,14 +4,13 @@
  */
 
 #include "Standalone/Passes.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
-#include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -34,7 +33,8 @@ public:
         })) {
       return failure();
     }
-    auto yieldOp = cast<scf::YieldOp>(forOp.region().front().getTerminator());
+    auto yieldOp =
+        cast<scf::YieldOp>(forOp.getRegion().front().getTerminator());
     SmallVector<Operation *, 4> allocsToHoist;
     forOp.walk([&](memref::AllocOp allocOp) {
       for (auto operand : yieldOp.getOperands()) {
@@ -47,8 +47,8 @@ public:
       return failure();
     }
     rewriter.updateRootInPlace(forOp, [&]() {
-      if (failed(forOp.moveOutOfLoop(allocsToHoist))) {
-        assert(false && "failed to move allocs out of loop");
+      for (Operation *alloc : allocsToHoist) {
+        forOp.moveOutOfLoop(alloc);
       }
     });
 
@@ -61,6 +61,8 @@ public:
 namespace {
 struct StandaloneLoopHoistingPass
     : public PassWrapper<StandaloneLoopHoistingPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StandaloneLoopHoistingPass)
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<scf::SCFDialect>();
   }

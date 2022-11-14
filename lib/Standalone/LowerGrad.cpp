@@ -2,10 +2,12 @@
 #include "Standalone/StandaloneDialect.h"
 #include "Standalone/StandaloneOps.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -27,8 +29,8 @@ public:
       return failure();
     }
 
-    auto funcVal = rewriter.create<mlir::ConstantOp>(
-        op->getLoc(), funcOp.getType(),
+    auto funcVal = rewriter.create<func::ConstantOp>(
+        op->getLoc(), funcOp.getFunctionType(),
         SymbolRefAttr::get(funcOp.getContext(), funcOp.getName()));
     op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
     rewriter.eraseOp(op);
@@ -60,8 +62,9 @@ private:
     return true;
   }
 
-  static FuncOp generateAdjointFunc(Operation *gradOp, ArrayRef<Value> operands,
-                                    ConversionPatternRewriter &rewriter) {
+  static func::FuncOp generateAdjointFunc(Operation *gradOp,
+                                          ArrayRef<Value> operands,
+                                          ConversionPatternRewriter &rewriter) {
     Value arg0 = operands[0];
     auto arg0Type = arg0.getType().dyn_cast<FunctionType>();
     if (!arg0Type) {
@@ -97,7 +100,7 @@ private:
 
     auto attr = definingOp->getAttrOfType<FlatSymbolRefAttr>("value");
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
-    auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
+    auto originalFuncOp = moduleOp.lookupSymbol<func::FuncOp>(attr);
     auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
     auto gradSignalAttr =
         gradOp->getAttr("grad_signal").dyn_cast_or_null<BoolAttr>();
@@ -109,7 +112,7 @@ private:
 
     // If we received request for a custom gradient signal, this is equivalent
     // to taking in the gradient signal as a parameter.
-    FuncOp funcOp =
+    func::FuncOp funcOp =
         copyFunctionDeclaration(originalFuncOp, adjointFuncName, rewriter);
     LAGradContext lagradctx{moduleOp};
     DEBUGpopulateFunc(lagradctx.debug_names, funcOp);
@@ -126,15 +129,15 @@ private:
 namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
-    addLegalDialect<mlir::StandardOpsDialect>();
-    addLegalDialect<mlir::arith::ArithmeticDialect>();
+    // addLegalDialect<mlir::StandardOpsDialect>();
+    addLegalDialect<mlir::arith::ArithDialect>();
     addLegalDialect<mlir::math::MathDialect>();
     addLegalDialect<mlir::memref::MemRefDialect>();
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
     addLegalDialect<linalg::LinalgDialect>();
     addLegalOp<standalone::PackOp>();
-    addLegalOp<FuncOp>();
+    addLegalOp<func::FuncOp>();
   }
 };
 } // end anonymous namespace
@@ -142,6 +145,8 @@ struct GradTarget : public ConversionTarget {
 namespace {
 struct GradConversionPass
     : public PassWrapper<GradConversionPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(GradConversionPass)
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect, memref::MemRefDialect>();
   }
@@ -157,7 +162,7 @@ void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp>();
 
-  OwningRewritePatternList patterns(&getContext());
+  RewritePatternSet patterns(&getContext());
   patterns.insert<GradOpLowering>(&getContext());
 
   auto mod = getOperation();

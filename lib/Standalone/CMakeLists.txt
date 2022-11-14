@@ -7,7 +7,6 @@ add_mlir_dialect_library(MLIRStandalone
         LinalgKnownLibraryCalls.cpp
         Bufferize.cpp
         TensorConstantFolding.cpp
-        ElementwiseToAffine.cpp
         TriangularLoops.cpp
         TriangularPacking.cpp
         StaticAllocs.cpp

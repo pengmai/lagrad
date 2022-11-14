@@ -49,7 +49,7 @@ struct FooBarSubstitute : public mlir::OpRewritePattern<FooOp> {
   }
 };
 
-void FooOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void FooOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                         MLIRContext *context) {
   results.insert<FooBarSubstitute>(context);
   // results.insert<DiffTransform>(context);

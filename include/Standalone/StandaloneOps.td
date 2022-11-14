@@ -9,10 +9,11 @@
 #ifndef STANDALONE_OPS
 #define STANDALONE_OPS
 
-include "StandaloneDialect.td"
+include "Standalone/StandaloneDialect.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def Standalone_FooOp : Standalone_Op<"foo", [NoSideEffect,
+def Standalone_FooOp : Standalone_Op<"foo", [Pure,
                                              SameOperandsAndResultType]> {
     let summary = "Illustrates how to define an operation.";
     let description = [{
@@ -41,7 +42,7 @@ def Standalone_FooOp : Standalone_Op<"foo", [NoSideEffect,
     }];
 }
 
-def Standalone_DiffOp : Standalone_Op<"diff", [NoSideEffect]> {
+def Standalone_DiffOp : Standalone_Op<"diff", [Pure]> {
     let summary = "Annotate a function for automatic differentiation via Enzyme";
     let description = [{
         The `standalone.diff` operation annotates a function for automatic differentiation via Enzyme.
@@ -55,7 +56,7 @@ def Standalone_DiffOp : Standalone_Op<"diff", [NoSideEffect]> {
     }];
 }
 
-def Standalone_GradOp : Standalone_Op<"grad", [NoSideEffect]> {
+def Standalone_GradOp : Standalone_Op<"grad", [Pure]> {
     let summary = "Reverse-mode autodiff a standard function.";
     let description = [{
         The `standalone.grad` operation performs a source transformation to compute the gradient of a std.func.
@@ -70,7 +71,7 @@ def Standalone_GradOp : Standalone_Op<"grad", [NoSideEffect]> {
 }
 
 // TODO: Look into interfaces to automate the verification
-def Standalone_PackOp : Standalone_Op<"pack", [NoSideEffect]> {
+def Standalone_PackOp : Standalone_Op<"pack", [Pure]> {
     let summary = "convert fully materialized triangular tensor to packed";
     let description = [{
         The `standalone.pack` operation denotes a conversion from a fully materialized strictly lower triangular tensor to a packed triangular tensor.

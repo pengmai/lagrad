@@ -1,5 +1,8 @@
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -10,12 +13,12 @@ static inline void markAsCache(Operation *op) {
   op->setAttr("lagrad_cache", UnitAttr::get(op->getContext()));
 }
 
-void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
+void populatePrimalCaches(LAGradContext &ctx, func::FuncOp primalFunc,
                           ConversionPatternRewriter &rewriter) {
   for (auto tbrVal : ctx.toBeRecorded) {
     auto &op =
         *(tbrVal.getDefiningOp() ?: tbrVal.getParentRegion()->getParentOp());
-    if (op.getParentOfType<FuncOp>() != primalFunc) {
+    if (op.getParentOfType<func::FuncOp>() != primalFunc) {
       continue;
     }
     auto loc = op.getLoc();
@@ -39,8 +42,8 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
     while (parent && !canAvoidCaching(parent)) {
       induction_vars.push_back(parent.getInductionVar());
       // Assume the step sizes are 1.
-      upper_bounds.push_back(parent.upperBound());
-      lower_bounds.push_back(parent.lowerBound());
+      upper_bounds.push_back(parent.getUpperBound());
+      lower_bounds.push_back(parent.getLowerBound());
       rewriter.setInsertionPoint(parent);
       parent = parent->getParentOfType<scf::ForOp>();
     }
@@ -96,12 +99,13 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
       markAsCache(view);
       ctx.debug_names[view] =
           "<write view for caching " + ctx.debug_names[tbrVal] + ">";
-      auto memref = rewriter.create<memref::BufferCastOp>(
+      auto memref = rewriter.create<bufferization::ToMemrefOp>(
           loc, MemRefType::get(rtt.getShape(), rtt.getElementType()), tbrVal);
       markAsCache(memref);
       ctx.debug_names[memref] =
           "<casted memref for writing " + ctx.debug_names[tbrVal] + ">";
-      markAsCache(rewriter.create<linalg::CopyOp>(loc, memref, view));
+      markAsCache(rewriter.create<linalg::CopyOp>(loc, memref.getResult(),
+                                                  view.getResult()));
       ctx.tbrCachedVals[tbrVal] = cache;
     } else {
       auto cache = rewriter.create<memref::AllocOp>(

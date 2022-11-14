@@ -6,14 +6,13 @@
 #include "Standalone/Logger.h"
 #include "Standalone/Passes.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
-#include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -31,22 +30,22 @@ public:
   LogicalResult matchAndRewrite(linalg::GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
     auto regionArgs = genericOp.getBodyRegion().getArguments();
-    auto regionInputArgs = regionArgs.take_front(genericOp.getNumInputs());
+    auto regionInputArgs = regionArgs.take_front(genericOp.getNumDpsInputs());
     bool canonicalize = false;
     SmallVector<Value> new_inputs;
-    new_inputs.reserve(genericOp.getNumInputs());
+    new_inputs.reserve(genericOp.getNumDpsInputs());
     SmallVector<Value> old_region_operands;
-    old_region_operands.reserve(genericOp.getNumInputs());
+    old_region_operands.reserve(genericOp.getNumDpsInputs());
     SmallVector<AffineMap> new_indexing_maps;
-    auto indexing_maps = genericOp.getIndexingMaps();
-    new_indexing_maps.reserve(genericOp.getNumInputsAndOutputs());
+    SmallVector<AffineMap> indexing_maps = genericOp.getIndexingMapsArray();
+    new_indexing_maps.reserve(genericOp->getNumOperands());
     for (size_t i = 0; i < regionInputArgs.size(); i++) {
       auto regionArg = regionInputArgs[i];
       bool unused = regionArg.use_empty();
       canonicalize |= unused;
 
       if (!unused) {
-        new_inputs.push_back(genericOp.getInputOperand(i)->get());
+        new_inputs.push_back(genericOp.getDpsInputOperand(i)->get());
         new_indexing_maps.push_back(indexing_maps[i]);
         old_region_operands.push_back(regionArg);
       }
@@ -56,8 +55,8 @@ public:
     }
 
     // Copy over the output indexing maps
-    for (int64_t i = genericOp.getNumInputs();
-         i < genericOp.getNumInputsAndOutputs(); i++) {
+    for (int64_t i = genericOp.getNumDpsInputs();
+         i < genericOp->getNumOperands(); i++) {
       new_indexing_maps.push_back(indexing_maps[i]);
     }
     for (auto output_arg : genericOp.getRegionOutputArgs()) {
@@ -65,13 +64,13 @@ public:
     }
 
     SmallVector<Value> outputs;
-    outputs.reserve(genericOp.getNumOutputs());
-    for (auto outputOperand : genericOp.getOutputOperands()) {
+    outputs.reserve(genericOp.getNumDpsInits());
+    for (auto outputOperand : genericOp.getDpsInitOperands()) {
       outputs.push_back(outputOperand->get());
     }
 
-    SmallVector<llvm::StringRef> iterator_types{
-        genericOp.iterator_types().getAsValueRange<StringAttr>()};
+    SmallVector<utils::IteratorType> iterator_types =
+        genericOp.getIteratorTypesArray();
 
     SmallVector<Value> genericOperands;
     for (Value arg : genericOp.getBodyRegion().getArguments()) {
@@ -96,8 +95,9 @@ public:
 bool isZeroTensor(Value value) {
   if (auto constantOp =
           dyn_cast_or_null<arith::ConstantOp>(value.getDefiningOp())) {
-    if (auto splatAttr = constantOp.valueAttr().dyn_cast<SplatElementsAttr>()) {
-      if (auto floatAttr = splatAttr.getSplatValue().dyn_cast<FloatAttr>()) {
+    if (auto splatAttr =
+            constantOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
+      if (auto floatAttr = splatAttr.getSplatValue<FloatAttr>()) {
         return !floatAttr.getValue().isNonZero();
       }
     }
@@ -130,14 +130,14 @@ public:
       return failure();
     }
     size_t idx = 0;
-    for (OpOperand *operand : op.getInputTensorOperands()) {
+    for (OpOperand *operand : op.getDpsInputOperands()) {
       if (isConstantOnesTensor(operand->get()) &&
           op.payloadUsesValueFromOperand(operand)) {
         BlockArgument regionArg = op.getBody()->getArgument(idx);
         for (Operation *user : regionArg.getUsers()) {
           if (auto mulfOp = dyn_cast<arith::MulFOp>(user)) {
-            Value other =
-                mulfOp.lhs() == regionArg ? mulfOp.rhs() : mulfOp.lhs();
+            Value other = mulfOp.getLhs() == regionArg ? mulfOp.getRhs()
+                                                       : mulfOp.getLhs();
             rewriter.updateRootInPlace(
                 op, [&]() { rewriter.replaceOp(mulfOp, other); });
             return success();
@@ -159,10 +159,10 @@ public:
       return failure();
     }
     bool isOutputZero =
-        op.getNumResults() == 1 && isZeroTensor(op.getOutputOperand(0)->get());
-    if (!(isOutputZero && op.getNumInputs() == 1 &&
+        op.getNumResults() == 1 && isZeroTensor(op.getDpsInitOperand(0)->get());
+    if (!(isOutputZero && op.getNumDpsInputs() == 1 &&
           op.getOperandTypes()[0].cast<RankedTensorType>() ==
-              op.getOutputTensorTypes()[0])) {
+              op->getResultTypes()[0])) {
       return failure();
     }
 
@@ -171,10 +171,10 @@ public:
             yieldOp.getOperand(0).getDefiningOp())) {
       BlockArgument inputArg = op.getBody()->getArgument(0);
       BlockArgument outputArg = op.getBody()->getArgument(1);
-      if ((addfOp.lhs() == inputArg && addfOp.rhs() == outputArg) ||
-          (addfOp.lhs() == outputArg && addfOp.rhs() == inputArg)) {
+      if ((addfOp.getLhs() == inputArg && addfOp.getRhs() == outputArg) ||
+          (addfOp.getLhs() == outputArg && addfOp.getRhs() == inputArg)) {
         errs() << "Replaced addtozero: " << op << "\n";
-        rewriter.replaceOp(op, op.getInputOperand(0)->get());
+        rewriter.replaceOp(op, op.getDpsInputOperand(0)->get());
         return success();
       }
     }
@@ -206,27 +206,27 @@ public:
         if (operand != extractSliceOp.getResult()) {
           if (auto linalgOp =
                   dyn_cast_or_null<linalg::LinalgOp>(operand.getDefiningOp())) {
-            assert(linalgOp.getNumOutputs() == 1 &&
+            assert(linalgOp.getNumDpsInits() == 1 &&
                    "expected linalg op to have 1 output");
             if (linalgOp.hasTensorSemantics() &&
-                dom.dominates(extractSliceOp.source(), linalgOp) &&
-                isZeroTensor(linalgOp.getOutputTensorOperands()[0]->get())) {
+                dom.dominates(extractSliceOp.getSource(), linalgOp) &&
+                isZeroTensor(linalgOp.getDpsInitOperand(0)->get())) {
               rewriter.setInsertionPoint(linalgOp);
               Location loc = op->getLoc();
               auto pairedInsertSlice =
                   ieAnalysis.getPairedInsertSlice(extractSliceOp);
               auto movedExtractSlice = rewriter.create<tensor::ExtractSliceOp>(
-                  loc, extractSliceOp.getType(), extractSliceOp.source(),
+                  loc, extractSliceOp.getType(), extractSliceOp.getSource(),
                   extractSliceOp.getMixedOffsets(),
                   extractSliceOp.getMixedSizes(),
                   extractSliceOp.getMixedStrides());
 
               SmallVector<Value> newOperands;
-              newOperands.reserve(linalgOp.getNumInputsAndOutputs());
-              for (OpOperand *opOperand : linalgOp.getInputTensorOperands()) {
+              newOperands.reserve(linalgOp->getNumOperands());
+              for (OpOperand *opOperand : linalgOp.getDpsInputOperands()) {
                 newOperands.push_back(opOperand->get());
               }
-              for (OpOperand *opOperand : linalgOp.getOutputTensorOperands()) {
+              for (OpOperand *opOperand : linalgOp.getDpsInitOperands()) {
                 if (isZeroTensor(opOperand->get())) {
                   newOperands.push_back(movedExtractSlice.getResult());
                 } else {
@@ -238,7 +238,8 @@ public:
               rewriter.replaceOp(extractSliceOp, movedExtractSlice.getResult());
               rewriter.replaceOp(linalgOp, clonedOp->getResults());
               // Creating a new insert slice op segfaults for some reason.
-              pairedInsertSlice.sourceMutable().assign(clonedOp->getResult(0));
+              pairedInsertSlice.getSourceMutable().assign(
+                  clonedOp->getResult(0));
               rewriter.eraseOp(user);
               // Logger::blue("Ran fuse paired insert extract");
               return success();
@@ -255,6 +256,8 @@ public:
 namespace {
 struct LinalgCanonicalizePass
     : public PassWrapper<LinalgCanonicalizePass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LinalgCanonicalizePass)
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
   }

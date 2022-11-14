@@ -1,13 +1,15 @@
 #include "Standalone/Logger.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 using llvm::errs;
 namespace mlir {
-void analyzeDynamicShapes(LAGradContext &ctx, FuncOp funcOp,
+void analyzeDynamicShapes(LAGradContext &ctx, func::FuncOp funcOp,
                           OpBuilder &builder) {
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointToStart(&funcOp.getBody().getBlocks().front());
@@ -33,27 +35,27 @@ void analyzeDynamicShapes(LAGradContext &ctx, FuncOp funcOp,
     }
   }
 
-  funcOp.walk([&](linalg::InitTensorOp op) {
-    RankedTensorType type = op.getType();
-    if (type.getNumDynamicDims() > 0) {
-      SmallVector<OpFoldResult> shape;
-      shape.reserve(type.getRank());
-      for (int64_t idx = 0; idx < type.getRank(); idx++) {
-        if (type.isDynamicDim(idx)) {
-          shape.push_back(op.getDynamicSize(idx));
-        } else {
-          shape.push_back(intToAttr(op.getStaticSize(idx)));
-        }
-      }
-      ctx.dynamic_shapes.insert(std::make_pair(op.getResult(), shape));
-    }
-  });
+  // funcOp.walk([&](linalg::InitTensorOp op) {
+  //   RankedTensorType type = op.getType();
+  //   if (type.getNumDynamicDims() > 0) {
+  //     SmallVector<OpFoldResult> shape;
+  //     shape.reserve(type.getRank());
+  //     for (int64_t idx = 0; idx < type.getRank(); idx++) {
+  //       if (type.isDynamicDim(idx)) {
+  //         shape.push_back(op.getDynamicSize(idx));
+  //       } else {
+  //         shape.push_back(intToAttr(op.getStaticSize(idx)));
+  //       }
+  //     }
+  //     ctx.dynamic_shapes.insert(std::make_pair(op.getResult(), shape));
+  //   }
+  // });
 
   funcOp.walk([&](linalg::LinalgOp op) {
-    if (isa<linalg::InitTensorOp>(op)) {
-      return;
-    }
-    for (OpOperand *operand : op.getOutputTensorOperands()) {
+    // if (isa<linalg::InitTensorOp>(op)) {
+    //   return;
+    // }
+    for (OpOperand *operand : op.getDpsInitOperands()) {
       if (auto type = operand->get().getType().cast<RankedTensorType>()) {
         if (type.getNumDynamicDims() > 0) {
           assert(ctx.dynamic_shapes.count(operand->get()) &&

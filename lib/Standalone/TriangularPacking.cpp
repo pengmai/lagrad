@@ -2,12 +2,15 @@
 #include "Standalone/Passes.h"
 #include "Standalone/StandaloneOps.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -35,8 +38,8 @@ bool hasPackedEncoding(linalg::LinalgOp op) {
   if (!op.hasTensorSemantics()) {
     return false;
   }
-  for (OpOperand *operand : op.getInputAndOutputOperands()) {
-    if (hasPackedEncoding(operand->get().getType())) {
+  for (Value operand : op->getOperands()) {
+    if (hasPackedEncoding(operand.getType())) {
       return true;
     }
   }
@@ -61,13 +64,16 @@ RankedTensorType convertToPackedType(RankedTensorType tensorType) {
 /// Taken from mlir/Dialect/Linalg/Utils/Utils.cpp
 /// Given a list of subview ranges, extract individual values for lower, upper
 /// bounds and steps and put them into the corresponding vectors.
-static void unpackRanges(ArrayRef<Range> ranges, SmallVectorImpl<Value> &lbs,
+static void unpackRanges(OpBuilder &builder, Location loc,
+                         ArrayRef<Range> ranges, SmallVectorImpl<Value> &lbs,
                          SmallVectorImpl<Value> &ubs,
                          SmallVectorImpl<Value> &steps) {
   for (Range range : ranges) {
-    lbs.emplace_back(range.offset);
-    ubs.emplace_back(range.size);
-    steps.emplace_back(range.stride);
+    lbs.emplace_back(
+        getValueOrCreateConstantIndexOp(builder, loc, range.offset));
+    ubs.emplace_back(getValueOrCreateConstantIndexOp(builder, loc, range.size));
+    steps.emplace_back(
+        getValueOrCreateConstantIndexOp(builder, loc, range.stride));
   }
 }
 
@@ -127,11 +133,11 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
                                                    ValueRange iterArgs,
                                                    linalg::LinalgOp linalgOp,
                                                    Value triDim) {
-  assert(iterArgs.size() == linalgOp.getOutputTensorOperands().size() &&
+  assert(iterArgs.size() == static_cast<size_t>(linalgOp.getNumDpsInits()) &&
          "Expected # of iter args to be equal to # of output tensor operands.");
 
   SmallVector<Value> indexedValues;
-  indexedValues.reserve(linalgOp.getNumInputsAndOutputs());
+  indexedValues.reserve(linalgOp->getNumOperands());
 
   auto allIvsPlusDims = SmallVector<Value>(allIvs.begin(), allIvs.end());
 
@@ -161,25 +167,25 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
 
   // 1.a. Emit load from input operands or for scalars access the operand
   // itself.
-  for (auto inputOperand : linalgOp.getInputOperands()) {
+  for (auto inputOperand : linalgOp.getDpsInputOperands()) {
     if (linalgOp.isScalar(inputOperand)) {
       indexedValues.push_back(inputOperand->get());
       continue;
     }
-    auto indexing = makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(inputOperand), allIvsPlusDims,
+    SmallVector<Value> indexing = makeCanonicalAffineApplies(
+        b, loc, linalgOp.getMatchingIndexingMap(inputOperand), allIvsPlusDims,
         inputOperand->get().getType(), trilIndices);
     indexedValues.push_back(
         b.create<tensor::ExtractOp>(loc, inputOperand->get(), indexing));
   }
 
   // 1.b. Emit load from output views.
-  for (auto pair : llvm::zip(linalgOp.getOutputOperands(), iterArgs)) {
+  for (auto pair : llvm::zip(linalgOp.getDpsInitOperands(), iterArgs)) {
     auto outputOperand = std::get<0>(pair);
     Value iterArg = std::get<1>(pair);
 
     auto indexing = makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims,
+        b, loc, linalgOp.getMatchingIndexingMap(outputOperand), allIvsPlusDims,
         outputOperand->get().getType(), trilIndices);
     indexedValues.push_back(
         b.create<tensor::ExtractOp>(loc, iterArg, indexing));
@@ -189,9 +195,9 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   // 3. Emit store.
   SmallVector<Value> outputTensors{iterArgs};
   SmallVector<SmallVector<Value>, 8> indexing;
-  for (auto outputOperand : linalgOp.getOutputTensorOperands()) {
+  for (auto outputOperand : linalgOp.getDpsInitOperands()) {
     indexing.push_back(makeCanonicalAffineApplies(
-        b, loc, linalgOp.getTiedIndexingMap(outputOperand), allIvsPlusDims,
+        b, loc, linalgOp.getMatchingIndexingMap(outputOperand), allIvsPlusDims,
         outputOperand->get().getType(), trilIndices));
   }
   return inlineRegionAndEmitStore(b, loc, linalgOp, indexedValues, indexing,
@@ -211,13 +217,13 @@ public:
     }
 
     auto loopRanges = op.createLoopRanges(rewriter, op.getLoc());
-    auto iteratorTypes = llvm::to_vector<4>(op.iterator_types().getValue());
+    SmallVector<utils::IteratorType> iteratorTypes = op.getIteratorTypesArray();
     SmallVector<Value, 4> lbs, ubs, steps;
-    unpackRanges(loopRanges, lbs, ubs, steps);
+    unpackRanges(rewriter, op.getLoc(), loopRanges, lbs, ubs, steps);
     // Initialize space for outputs
     SmallVector<Value> iterArgsInit;
-    iterArgsInit.reserve(op.getNumOutputs());
-    for (OpOperand *outTensor : op.getOutputTensorOperands()) {
+    iterArgsInit.reserve(op.getNumDpsInits());
+    for (OpOperand *outTensor : op.getDpsInitOperands()) {
       // TODO: This is a bandaid, need some way of determining when it's safe to
       // write.
       if (isa_and_nonnull<tensor::ExtractSliceOp>(
@@ -228,22 +234,24 @@ public:
 
         auto memrefType =
             hasPackedEncoding(outType)
-                ? BufferizeTypeConverter().convertType(
+                ? bufferization::BufferizeTypeConverter().convertType(
                       convertToPackedType(outType))
                 : MemRefType::get(outType.getShape(), outType.getElementType());
-        Value space = rewriter.create<linalg::InitTensorOp>(
+        Value space = rewriter.create<tensor::EmptyOp>(
             op.getLoc(), outType.getShape(), outType.getElementType());
+        // Value space = rewriter.create<linalg::InitTensorOp>(
+        //     op.getLoc(), outType.getShape(), outType.getElementType());
         if (hasPackedEncoding(outType)) {
           space =
               rewriter.create<standalone::PackOp>(op.getLoc(), outType, space);
         }
         if (op.payloadUsesValueFromOperand(outTensor)) {
-          auto castedSpace = rewriter.create<memref::BufferCastOp>(
+          auto castedSpace = rewriter.create<bufferization::ToMemrefOp>(
               op.getLoc(), memrefType, space);
-          auto memrefOutput = rewriter.create<memref::BufferCastOp>(
+          auto memrefOutput = rewriter.create<bufferization::ToMemrefOp>(
               op.getLoc(), memrefType, outTensor->get());
-          rewriter.create<linalg::CopyOp>(op.getLoc(), memrefOutput,
-                                          castedSpace);
+          rewriter.create<linalg::CopyOp>(op.getLoc(), memrefOutput.getResult(),
+                                          castedSpace.getResult());
         }
 
         iterArgsInit.push_back(space);
@@ -293,12 +301,12 @@ private:
   DenseSet<Operation *> cache;
 };
 
-class ErasePackedFuncOp : public OpRewritePattern<FuncOp> {
+class ErasePackedFuncOp : public OpRewritePattern<func::FuncOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
-  LogicalResult matchAndRewrite(FuncOp op,
+  LogicalResult matchAndRewrite(func::FuncOp op,
                                 PatternRewriter &rewriter) const override {
-    op.setType(stripEncodingFromFunc(op.getType()));
+    op.setType(stripEncodingFromFunc(op.getFunctionType()));
     rewriter.updateRootInPlace(op, [&]() {
       for (auto arg : op.getArguments()) {
         if (hasPackedEncoding(arg.getType())) {
@@ -333,13 +341,13 @@ private:
   }
 };
 
-class ErasePackedCallOp : public OpRewritePattern<CallOp> {
+class ErasePackedCallOp : public OpRewritePattern<func::CallOp> {
   using OpRewritePattern::OpRewritePattern;
-  LogicalResult matchAndRewrite(CallOp op,
+  LogicalResult matchAndRewrite(func::CallOp op,
                                 PatternRewriter &rewriter) const override {
     auto moduleOp = op->getParentOfType<ModuleOp>();
-    auto funcOp = cast<FuncOp>(moduleOp.lookupSymbol(op.calleeAttr()));
-    rewriter.replaceOpWithNewOp<CallOp>(op, funcOp, op.operands());
+    auto funcOp = cast<func::FuncOp>(moduleOp.lookupSymbol(op.getCalleeAttr()));
+    rewriter.replaceOpWithNewOp<func::CallOp>(op, funcOp, op.operands());
     return success();
   }
 };
@@ -360,8 +368,8 @@ public:
       return failure();
     }
 
-    rewriter.replaceOpWithNewOp<tensor::ExtractOp>(op, op.tensor(),
-                                                   op.indices().drop_back(1));
+    rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
+        op, op.getTensor(), op.getIndices().drop_back(1));
     return success();
   }
 };
@@ -380,8 +388,8 @@ public:
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
-    rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(), op.dest(),
-                                                  op.indices().drop_back(1));
+    rewriter.replaceOpWithNewOp<tensor::InsertOp>(
+        op, op.getScalar(), op.getDest(), op.getIndices().drop_back(1));
     return success();
   }
 };
@@ -419,7 +427,7 @@ public:
         IntegerAttr::get(IndexType::get(rewriter.getContext()), triSize);
 
     rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
-        op, convertToPackedType(op.getType()), op.source(), offsets, sizes,
+        op, convertToPackedType(op.getType()), op.getSource(), offsets, sizes,
         strides);
     return success();
   }
@@ -458,7 +466,7 @@ public:
         IntegerAttr::get(IndexType::get(rewriter.getContext()), triSize);
 
     rewriter.replaceOpWithNewOp<tensor::InsertSliceOp>(
-        op, op.source(), op.dest(), offsets, sizes, strides);
+        op, op.getSource(), op.getDest(), offsets, sizes, strides);
     return success();
   }
 };
@@ -476,7 +484,8 @@ public:
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
-    rewriter.replaceOpWithNewOp<tensor::CastOp>(op, op.getType(), op.source());
+    rewriter.replaceOpWithNewOp<tensor::CastOp>(op, op.getType(),
+                                                op.getSource());
     return success();
   }
 };
@@ -489,17 +498,17 @@ public:
     if (!hasPackedEncoding(op.getType())) {
       return failure();
     }
-    auto sourceType = op.source().getType().dyn_cast<RankedTensorType>();
+    auto sourceType = op.getSource().getType().dyn_cast<RankedTensorType>();
     auto destType = op.getType().dyn_cast<RankedTensorType>();
     // Meant to handle a specific case where an explicit pack op is used because
     // linalg.init_tensor can't make tensors with special encodings.
     if (!(sourceType && destType &&
           sourceType.getShape() == destType.getShape() &&
           sourceType.getElementType() == destType.getElementType() &&
-          isa_and_nonnull<linalg::InitTensorOp>(op.source().getDefiningOp()))) {
+          isa_and_nonnull<tensor::EmptyOp>(op.getSource().getDefiningOp()))) {
       return failure();
     }
-    rewriter.replaceOpWithNewOp<linalg::InitTensorOp>(
+    rewriter.replaceOpWithNewOp<tensor::EmptyOp>(
         op, convertToPackedType(destType).getShape(),
         destType.getElementType());
     return success();
@@ -523,38 +532,43 @@ public:
     }
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
-      if (auto valueAttr = constOp.valueAttr().dyn_cast<SplatElementsAttr>()) {
-        rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-            constOp,
-            DenseElementsAttr::get(
-                convertToPackedType(constOp.getType().cast<RankedTensorType>()),
-                valueAttr.getSplatValue()));
-      } else {
-        auto denseAttr = constOp.valueAttr().cast<DenseFPElementsAttr>();
-        auto tensorType = denseAttr.getType().cast<RankedTensorType>();
-        int64_t d = tensorType.getShape().back();
-        SmallVector<APFloat> packedValues;
-        packedValues.reserve(d * (d - 1) / 2);
-        int64_t dimIdx = 1;
-        for (int64_t dim : tensorType.getShape().drop_back(2)) {
-          int64_t stride = 1;
-          for (int64_t stride_dim : tensorType.getShape().drop_front(dimIdx)) {
-            stride *= stride_dim;
-          }
-          for (int64_t m = 0; m < dim; m++) {
-            for (int64_t i = 0; i < d; i++) {
-              for (int64_t j = i + 1; j < d; j++) {
-                packedValues.push_back(
-                    denseAttr.getFlatValue<APFloat>(m * stride + j * d + i));
-              }
-            }
-          }
-          dimIdx++;
-        }
-        auto packedAttr = DenseFPElementsAttr::get(
-            convertToPackedType(tensorType), packedValues);
-        rewriter.replaceOpWithNewOp<arith::ConstantOp>(constOp, packedAttr);
-      }
+      assert(false &&
+             "mid-refactoring, erase encoding for constants not yet supported");
+      // if (auto valueAttr =
+      //         constOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
+      //   // SplatElementsAttr::get()
+      //   rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+      //       constOp,
+      //       DenseElementsAttr::get(
+      //           convertToPackedType(constOp.getType().cast<RankedTensorType>()),
+      //           valueAttr.getSplatValue()));
+      // } else {
+      //   auto denseAttr = constOp.getValueAttr().cast<DenseFPElementsAttr>();
+      //   auto tensorType = denseAttr.getType().cast<RankedTensorType>();
+      //   int64_t d = tensorType.getShape().back();
+      //   SmallVector<APFloat> packedValues;
+      //   packedValues.reserve(d * (d - 1) / 2);
+      //   int64_t dimIdx = 1;
+      //   for (int64_t dim : tensorType.getShape().drop_back(2)) {
+      //     int64_t stride = 1;
+      //     for (int64_t stride_dim : tensorType.getShape().drop_front(dimIdx))
+      //     {
+      //       stride *= stride_dim;
+      //     }
+      //     for (int64_t m = 0; m < dim; m++) {
+      //       for (int64_t i = 0; i < d; i++) {
+      //         for (int64_t j = i + 1; j < d; j++) {
+      //           packedValues.push_back(
+      //               denseAttr.getFlatValue<APFloat>(m * stride + j * d + i));
+      //         }
+      //       }
+      //     }
+      //     dimIdx++;
+      //   }
+      //   auto packedAttr = DenseFPElementsAttr::get(
+      //       convertToPackedType(tensorType), packedValues);
+      //   rewriter.replaceOpWithNewOp<arith::ConstantOp>(constOp, packedAttr);
+      // }
     } else {
       rewriter.updateRootInPlace(op, [&]() {
         for (auto operand : op->getOperands()) {
@@ -598,6 +612,8 @@ public:
 
 struct PackTriangularPass
     : public PassWrapper<PackTriangularPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PackTriangularPass)
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<memref::MemRefDialect, scf::SCFDialect>();
   }
@@ -610,11 +626,11 @@ struct PackTriangularPass
     auto *context = &getContext();
     ConversionTarget target(*context);
     RewritePatternSet patterns(context);
-    target.addLegalDialect<arith::ArithmeticDialect>();
+    target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
-    target.addLegalOp<linalg::InitTensorOp>();
+    target.addLegalOp<tensor::EmptyOp>();
     target.addLegalOp<linalg::FillOp>();
     target.addLegalOp<linalg::CopyOp>();
     target.addLegalOp<linalg::YieldOp>();
@@ -637,8 +653,8 @@ struct PackTriangularPass
     };
     erasureTarget.addDynamicallyLegalDialect<tensor::TensorDialect>(
         packedPredicate);
-    erasureTarget.addDynamicallyLegalOp<CallOp>(packedPredicate);
-    erasureTarget.addDynamicallyLegalDialect<arith::ArithmeticDialect>(
+    erasureTarget.addDynamicallyLegalOp<func::CallOp>(packedPredicate);
+    erasureTarget.addDynamicallyLegalDialect<arith::ArithDialect>(
         [&](Operation *op) {
           auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
           return llvm::none_of(op->getOperandTypes(), isPacked) &&
@@ -650,7 +666,7 @@ struct PackTriangularPass
           return llvm::none_of(op->getOperandTypes(), isPacked) &&
                  llvm::none_of(op->getResultTypes(), isPacked);
         });
-    erasureTarget.addLegalOp<linalg::InitTensorOp>();
+    erasureTarget.addLegalDialect<bufferization::BufferizationDialect>();
     erasureTarget.addLegalOp<linalg::CopyOp>();
     // erasureTarget.addLegalOp<linalg::FillOp>();
     // erasureTarget.addLegalOp<linalg::YieldOp>();

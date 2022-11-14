@@ -1,7 +1,8 @@
 #include "Standalone/Analysis.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Dominance.h"
 
@@ -17,12 +18,12 @@ InsertExtractAnalysis::InsertExtractAnalysis(Operation *op) {
   op->walk([&](tensor::ExtractSliceOp op) {
     auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
     if (maybeInsertSliceOp.hasValue()) {
-      extract_to_insert[op] = maybeInsertSliceOp.getValue();
-      matchingInserts.insert(maybeInsertSliceOp.getValue());
+      extract_to_insert[op] = maybeInsertSliceOp.value();
+      matchingInserts.insert(maybeInsertSliceOp.value());
       for (auto &use : op.getResult().getUses()) {
         if (auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner())) {
           // Only handle the case where the linalg op has one output for now.
-          if (linalgOp.isOutputTensor(&use) && linalgOp.getNumOutputs() == 1 &&
+          if (linalgOp.isDpsInit(&use) && linalgOp.getNumDpsInits() == 1 &&
               linalgOp.hasTensorSemantics()) {
             linalgInPlaceOps.insert(linalgOp);
           }
@@ -59,10 +60,10 @@ InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
   // insert slice op.
   size_t domUseCount = 0;
   tensor::InsertSliceOp insertSliceOp;
-  for (Operation *user : op.source().getUsers()) {
+  for (Operation *user : op.getSource().getUsers()) {
     if (dom.properlyDominates(op.getResult(), user)) {
       if (auto iso = dyn_cast<tensor::InsertSliceOp>(user)) {
-        if (iso.dest() == op.source()) {
+        if (iso.getDest() == op.getSource()) {
           insertSliceOp = iso;
         }
       }
@@ -78,7 +79,7 @@ InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
   bool isWrittenInPlace = false;
   for (OpOperand &use : op.getResult().getUses()) {
     if (auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner())) {
-      if (linalgOp.isOutputTensor(&use)) {
+      if (linalgOp.isDpsInit(&use)) {
         isWrittenInPlace = true;
       }
     } else if (auto forOp = dyn_cast<scf::ForOp>(use.getOwner())) {
@@ -94,7 +95,7 @@ InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
     SmallVector<Value> frontier{op.getResult()};
     ValueSet derivedFromResult;
     runTopDownDFS(frontier, derivedFromResult);
-    linked = derivedFromResult.contains(insertSliceOp.source());
+    linked = derivedFromResult.contains(insertSliceOp.getSource());
   }
 
   if (linked && isWrittenInPlace && insertSliceOp &&

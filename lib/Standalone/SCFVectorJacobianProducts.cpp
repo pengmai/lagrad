@@ -1,8 +1,12 @@
 #include "Standalone/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 
 namespace mlir {
 using namespace mlir;
 using llvm::errs;
+
 void DEPRECATEDpopulatePrimalCache(
     scf::ForOp forOp, ConversionPatternRewriter &rewriter,
     SmallVector<std::pair<Value, Value>> &val_to_cached) {
@@ -29,8 +33,8 @@ void DEPRECATEDpopulatePrimalCache(
   rewriter.setInsertionPoint(forOp);
   auto cacheSize =
       rewriter
-          .create<arith::SubIOp>(forOp.getLoc(), forOp.upperBound(),
-                                 forOp.lowerBound())
+          .create<arith::SubIOp>(forOp.getLoc(), forOp.getUpperBound(),
+                                 forOp.getLowerBound())
           .getResult();
 
   SmallVector<Value> caches;
@@ -89,11 +93,12 @@ void DEPRECATEDpopulatePrimalCache(
           /*dynamic shapes=*/ValueRange(forOp.getInductionVar()), ValueRange(),
           ValueRange(),
           /*staticShapes=*/staticOffset, staticSize, staticStride);
-      auto memref = rewriter.create<memref::BufferCastOp>(
+      auto memref = rewriter.create<bufferization::ToMemrefOp>(
           valToCache.getLoc(),
           MemRefType::get(tensorType.getShape(), tensorType.getElementType()),
           valToCache);
-      rewriter.create<linalg::CopyOp>(valToCache.getLoc(), memref, view);
+      rewriter.create<linalg::CopyOp>(valToCache.getLoc(), memref.getResult(),
+                                      view.getResult());
     } else {
       rewriter.create<memref::StoreOp>(valToCache.getLoc(), valToCache, ccache,
                                        forOp.getInductionVar());
@@ -144,12 +149,13 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
 
   DenseMap<Value, Value> oldToCloned;
   auto adjointFor = rewriter.create<scf::ForOp>(
-      forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
-      iterArgsInit,
+      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+      forOp.getStep(), iterArgsInit,
       [&](OpBuilder &builder, Location loc, Value iv, ValueRange iterArgs) {
-        Value idx = builder.create<arith::SubIOp>(loc, forOp.upperBound(), iv);
+        Value idx =
+            builder.create<arith::SubIOp>(loc, forOp.getUpperBound(), iv);
         Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
-        idx = builder.create<arith::AddIOp>(loc, idx, forOp.lowerBound());
+        idx = builder.create<arith::AddIOp>(loc, idx, forOp.getLowerBound());
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         SmallVector<Value> regionArgs;
         regionArgs.push_back(idx);
@@ -214,13 +220,13 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
               ctx.debug_names[view] =
                   "<read view for caching " + ctx.debug_names[tbrVal] + ">";
               auto casted = builder.create<memref::CastOp>(
-                  loc, view.getResult(),
-                  MemRefType::get(rtt.getShape(), rtt.getElementType()));
+                  loc, MemRefType::get(rtt.getShape(), rtt.getElementType()),
+                  view.getResult());
               markAsCache(casted, ctx.debug_names[tbrVal]);
               ctx.debug_names[casted] =
                   "<casted memref for reading " + ctx.debug_names[tbrVal] + ">";
-              auto loaded =
-                  builder.create<memref::TensorLoadOp>(loc, casted.getResult());
+              auto loaded = builder.create<bufferization::ToTensorOp>(
+                  loc, casted.getResult());
               markAsCache(loaded, ctx.debug_names[tbrVal]);
               ctx.debug_names[loaded] =
                   "<loaded tensor from cached " + ctx.debug_names[tbrVal] + ">";
@@ -281,8 +287,8 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
         for (auto iterArg : forOp.getRegionIterArgs()) {
           // TODO: stop treating the result as a special case
           if (iterArg ==
-              forOp.getRegionIterArgForOpOperand(
-                  forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
+              forOp.getRegionIterArgForOpOperand(forOp.getOpOperandForResult(
+                  forOp.getResults()[result_idx]))) {
             vjp_op = iterArg;
           } else if (isFloatOrFloatTensor(iterArg.getType())) {
             // Need to map again from gradient spaces from op operands to iter
@@ -411,13 +417,14 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
     iterArgsInit.push_back(space);
   }
   auto adjointFor = rewriter.create<scf::ForOp>(
-      forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
-      iterArgsInit,
+      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+      forOp.getStep(), iterArgsInit,
       [&](OpBuilder &builder, Location loc, Value iv, ValueRange iterArgs) {
         SmallVector<Value> regionArgs;
-        Value idx = builder.create<arith::SubIOp>(loc, forOp.upperBound(), iv);
+        Value idx =
+            builder.create<arith::SubIOp>(loc, forOp.getUpperBound(), iv);
         Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
-        idx = builder.create<arith::AddIOp>(loc, idx, forOp.lowerBound());
+        idx = builder.create<arith::AddIOp>(loc, idx, forOp.getLowerBound());
         idx = builder.create<arith::SubIOp>(loc, idx, one);
         regionArgs.push_back(idx);
         regionArgs.push_back(forOp.getResult(result_idx));
@@ -464,18 +471,19 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
                   cpair.second.getLoc(),
                   MemRefType::get(tensorType.getShape(),
                                   tensorType.getElementType()));
-              builder.create<linalg::CopyOp>(cpair.second.getLoc(),
-                                             view.getResult(), dest);
+              builder.create<linalg::CopyOp>(
+                  cpair.second.getLoc(), view.getResult(), dest.getResult());
 
-              loaded = builder.create<memref::TensorLoadOp>(
+              loaded = builder.create<bufferization::ToTensorOp>(
                   cpair.second.getLoc(), dest.getResult());
             } else {
               // I don't know that this is always safe
               auto casted = builder.create<memref::CastOp>(
-                  cpair.second.getLoc(), view.getResult(),
+                  cpair.second.getLoc(),
                   MemRefType::get(tensorType.getShape(),
-                                  tensorType.getElementType()));
-              loaded = builder.create<memref::TensorLoadOp>(
+                                  tensorType.getElementType()),
+                  view.getResult());
+              loaded = builder.create<bufferization::ToTensorOp>(
                   cpair.second.getLoc(), casted.getResult());
             }
           } else {
@@ -486,8 +494,8 @@ void reverseForOpV1(scf::ForOp forOp, LAGradContext &ctx,
           // This is to fix the case where the vjp value must be updated in the
           // body of the adjoint loop. TODO: This might not work with vectors
           if (cpair.first ==
-              forOp.getRegionIterArgForOpOperand(
-                  forOp.getOpOperandForResult(forOp.results()[result_idx]))) {
+              forOp.getRegionIterArgForOpOperand(forOp.getOpOperandForResult(
+                  forOp.getResults()[result_idx]))) {
             vjp_op = loaded;
           } else if (isFloatOrFloatTensor(loaded.getType())) {
             replacedPrimalIterArgs.push_back(loaded);
@@ -654,9 +662,9 @@ Value reverseIfOpV2(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
   };
   auto adjointIf = rewriter.create<scf::IfOp>(
       ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
-      /*cond=*/ifOp.condition(),
-      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
-      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+      /*cond=*/ifOp.getCondition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.getThenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.getElseRegion()));
   // Replace ops referring to the old arguments to the new operands
   adjointIf.walk([&](Operation *op) {
     for (size_t i = 0; i < op->getNumOperands(); i++)
@@ -699,9 +707,9 @@ Value reverseIfOpV1(scf::IfOp ifOp, LAGradContext &ctx, Value freeOperand,
 
   auto adjointIf = rewriter.create<scf::IfOp>(
       ifOp->getLoc(), /*resultTypes=*/freeOperand.getType(),
-      /*cond=*/ifOp.condition(),
-      /*thenBuilder=*/reverseIfBlock(ifOp.thenRegion()),
-      /*elseBuilder=*/reverseIfBlock(ifOp.elseRegion()));
+      /*cond=*/ifOp.getCondition(),
+      /*thenBuilder=*/reverseIfBlock(ifOp.getThenRegion()),
+      /*elseBuilder=*/reverseIfBlock(ifOp.getElseRegion()));
   return adjointIf.getResult(0);
 }
 

@@ -2,17 +2,16 @@
  * A custom pass meant to fill gaps in bufferizing tensor ops.
  * Motivated by a lack of bufferization for the tensor.insert op.
  */
-#include "mlir/Transforms/Bufferize.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
 #include "Standalone/Analysis.h"
 #include "Standalone/Logger.h"
 #include "Standalone/Passes.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/Linalg/Transforms/ComprehensiveBufferize.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -33,9 +32,9 @@ void bufferizeLinalgOp(linalg::LinalgOp linalgOp, ValueRange outputBuffers,
   rewriter.setInsertionPoint(linalgOp);
 
   SmallVector<Value> newOperands;
-  newOperands.reserve(linalgOp.getNumInputsAndOutputs());
-  for (OpOperand *inputOperand : linalgOp.getInputTensorOperands()) {
-    newOperands.push_back(rewriter.create<memref::BufferCastOp>(
+  newOperands.reserve(linalgOp->getNumOperands());
+  for (OpOperand *inputOperand : linalgOp.getDpsInputOperands()) {
+    newOperands.push_back(rewriter.create<bufferization::ToMemrefOp>(
         linalgOp.getLoc(),
         typeConverter.convertType(inputOperand->get().getType()),
         inputOperand->get()));
@@ -76,31 +75,33 @@ public:
                           ->convertType(extractSliceOp.getSourceType())
                           .cast<MemRefType>();
 
-    auto resultType = eraseStridedLayout(
+    // TODO: Need to see if we need to manually make this layout dynamic.
+    auto resultType =
         memref::SubViewOp::inferRankReducedResultType(
             sliceType.getRank(), sourceType, extractSliceOp.getMixedOffsets(),
             extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides())
-            .cast<MemRefType>());
+            .cast<MemRefType>();
     auto identityResultType =
         getTypeConverter()->convertType(sliceType).cast<MemRefType>();
-    auto source = rewriter.create<memref::BufferCastOp>(
-        op->getLoc(), sourceType, extractSliceOp.source());
-    auto subview = rewriter.create<memref::SubViewOp>(
+    Value source = rewriter.create<bufferization::ToMemrefOp>(
+        op->getLoc(), sourceType, extractSliceOp.getSource());
+    Value subview = rewriter.create<memref::SubViewOp>(
         op->getLoc(), resultType, source, extractSliceOp.getMixedOffsets(),
         extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
-    auto casted = rewriter.create<memref::CastOp>(
-        op->getLoc(), subview.getResult(), identityResultType);
-    auto loaded = rewriter.create<memref::TensorLoadOp>(op->getLoc(), casted);
+    auto casted = rewriter.create<memref::CastOp>(op->getLoc(),
+                                                  identityResultType, subview);
+    auto loaded =
+        rewriter.create<bufferization::ToTensorOp>(op->getLoc(), casted);
     rewriter.replaceOp(op, loaded.getResult());
-    rewriter.replaceOp(insertSliceOp, extractSliceOp.source());
+    rewriter.replaceOp(insertSliceOp, extractSliceOp.getSource());
 
     // Need to ensure linalg ops that write to the extractSliceOp are bufferized
     // in-place.
     for (auto &use : extractSliceOp.getResult().getUses()) {
       if (ieAnalysis.isLinalgMarkedForBufferization(use.getOwner())) {
         auto linalgOp = dyn_cast<linalg::LinalgOp>(use.getOwner());
-        if (linalgOp.isOutputTensor(&use)) {
-          bufferizeLinalgOp(linalgOp, /*outputBuffers=*/subview.getResult(),
+        if (linalgOp.isDpsInit(&use)) {
+          bufferizeLinalgOp(linalgOp, /*outputBuffers=*/subview,
                             /*results=*/loaded.getResult(), *getTypeConverter(),
                             rewriter);
         }
@@ -119,13 +120,13 @@ public:
   LogicalResult
   matchAndRewrite(tensor::InsertOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    memref::TensorLoadOp loaded;
+    bufferization::ToTensorOp loaded;
 
     // This is very naïve.
     DominanceInfo dom;
     bool hasUseAfter = false;
 
-    for (auto user : op.dest().getUsers()) {
+    for (auto user : op.getDest().getUsers()) {
       if (dom.properlyDominates(op.getResult(), user)) {
         hasUseAfter = true;
       }
@@ -135,17 +136,17 @@ public:
     if (!hasUseAfter && !force_copy) {
       // This first implementation updates the tensor in place rather than
       // returning a copy per the spec. Watch out for bugs this may cause.
-      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(),
-                                       adaptor.dest(), adaptor.indices());
-      loaded =
-          rewriter.create<memref::TensorLoadOp>(op.getLoc(), adaptor.dest());
+      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.getScalar(),
+                                       adaptor.getDest(), adaptor.getIndices());
+      loaded = rewriter.create<bufferization::ToTensorOp>(op.getLoc(),
+                                                          adaptor.getDest());
     } else {
-      auto space = rewriter.create<memref::AllocOp>(
-          op.getLoc(), adaptor.dest().getType().cast<MemRefType>());
-      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), space);
-      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.scalar(), space,
-                                       adaptor.indices());
-      loaded = rewriter.create<memref::TensorLoadOp>(op.getLoc(), space);
+      Value space = rewriter.create<memref::AllocOp>(
+          op.getLoc(), adaptor.getDest().getType().cast<MemRefType>());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.getDest(), space);
+      rewriter.create<memref::StoreOp>(op.getLoc(), adaptor.getScalar(), space,
+                                       adaptor.getIndices());
+      loaded = rewriter.create<bufferization::ToTensorOp>(op.getLoc(), space);
     }
 
     op.replaceAllUsesWith(loaded.getResult());
@@ -185,33 +186,32 @@ public:
         op.getOffsetSizeAndStrideStartOperandIndex() != 1) {
       return failure();
     }
-    auto sourceType = adaptor.source().getType().cast<MemRefType>();
-    Value source = adaptor.source();
+    auto sourceType = adaptor.getSource().getType().cast<MemRefType>();
+    Value source = adaptor.getSource();
     // Ugly, brittle hack to get extract_slice with compressed GMMs working.
     // This results in the source having a fully dynamic layout map, which is
     // okay, but partial bufferization appears to expect an identity layout
     // map at the end of this transformation.
     if (sourceType.getDimSize(sourceType.getRank() - 1) == 1) {
-      source = rewriter.create<memref::CastOp>(
-          op.getLoc(), eraseStridedLayout(sourceType), source);
+      // removed make strided layout dynamic
+      source = rewriter.create<memref::CastOp>(op.getLoc(), sourceType, source);
     }
 
-    auto resultType =
-        eraseStridedLayout(memref::SubViewOp::inferRankReducedResultType(
-                               resultRank, sourceType, op.getMixedOffsets(),
-                               op.getMixedSizes(), op.getMixedStrides())
-                               .cast<MemRefType>());
+    auto resultType = memref::SubViewOp::inferRankReducedResultType(
+                          resultRank, sourceType, op.getMixedOffsets(),
+                          op.getMixedSizes(), op.getMixedStrides())
+                          .cast<MemRefType>();
     auto identityResultType =
         getTypeConverter()->convertType(resultTensorType).cast<MemRefType>();
 
-    auto subview = rewriter.create<memref::SubViewOp>(
+    Value subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(), resultType, source, op.getMixedOffsets(),
         op.getMixedSizes(), op.getMixedStrides());
 
     DominanceInfo dom;
     bool hasWriteAfter = false;
 
-    for (auto user : op.source().getUsers()) {
+    for (auto user : op.getSource().getUsers()) {
       if (dom.properlyDominates(op.getResult(), user)) {
         hasWriteAfter = true;
       }
@@ -235,13 +235,13 @@ public:
     if (!hasWriteAfter && !force_copy) {
       // rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op,
       //                                                   subview.getResult());
-      rewriter.replaceOpWithNewOp<memref::CastOp>(op, subview.getResult(),
-                                                  identityResultType);
+      rewriter.replaceOpWithNewOp<memref::CastOp>(op, identityResultType,
+                                                  subview);
     } else {
-      auto dest =
+      Value dest =
           rewriter.create<memref::AllocOp>(op.getLoc(), identityResultType);
       rewriter.create<linalg::CopyOp>(op.getLoc(), subview, dest);
-      rewriter.replaceOp(op, dest.getResult());
+      rewriter.replaceOp(op, dest);
     }
     return success();
   }
@@ -270,7 +270,7 @@ public:
     DominanceInfo dom;
     bool hasUseAfter = false;
 
-    for (auto user : op.dest().getUsers()) {
+    for (auto user : op.getDest().getUsers()) {
       if (dom.properlyDominates(op.getResult(), user)) {
         hasUseAfter = true;
       }
@@ -279,25 +279,27 @@ public:
     auto sliceType =
         memref::SubViewOp::inferRankReducedResultType(
             op.getSourceType().getRank(),
-            adaptor.dest().getType().cast<MemRefType>(), op.getMixedOffsets(),
-            op.getMixedSizes(), op.getMixedStrides())
+            adaptor.getDest().getType().cast<MemRefType>(),
+            op.getMixedOffsets(), op.getMixedSizes(), op.getMixedStrides())
             .cast<MemRefType>();
     if (!hasUseAfter) {
-      auto subview = rewriter.create<memref::SubViewOp>(
-          op.getLoc(), sliceType, adaptor.dest(), op.getMixedOffsets(),
+      Value subview = rewriter.create<memref::SubViewOp>(
+          op.getLoc(), sliceType, adaptor.getDest(), op.getMixedOffsets(),
           op.getMixedSizes(), op.getMixedStrides());
-      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
-      rewriter.replaceOp(op, adaptor.dest());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.getSource(),
+                                      subview);
+      rewriter.replaceOp(op, adaptor.getDest());
     } else {
-      auto dest = rewriter.create<memref::AllocOp>(
-          op.getLoc(), adaptor.dest().getType().dyn_cast<MemRefType>());
-      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.dest(), dest);
-      auto subview = rewriter.create<memref::SubViewOp>(
+      Value dest = rewriter.create<memref::AllocOp>(
+          op.getLoc(), adaptor.getDest().getType().dyn_cast<MemRefType>());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.getDest(), dest);
+      Value subview = rewriter.create<memref::SubViewOp>(
           op.getLoc(), sliceType, dest, op.getMixedOffsets(),
           op.getMixedSizes(), op.getMixedStrides());
 
-      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.source(), subview);
-      rewriter.replaceOp(op, dest.getResult());
+      rewriter.create<linalg::CopyOp>(op.getLoc(), adaptor.getSource(),
+                                      subview);
+      rewriter.replaceOp(op, dest);
     }
     return success();
   }
@@ -315,18 +317,18 @@ public:
     }
     DominanceInfo dom;
     bool hasUseAfter = false;
-    for (auto user : op.getOutputOperand(0)->get().getUsers()) {
+    for (auto user : op.getDpsInitOperand(0)->get().getUsers()) {
       if (dom.properlyDominates(op->getResult(0), user)) {
         hasUseAfter = true;
       }
     }
     SmallVector<Value> newOperands{operands.begin(), operands.end()};
     Operation *parentOp =
-        op.getOutputOperand(0)->get().getDefiningOp()
-            ?: op.getOutputOperand(0)->get().getParentRegion()->getParentOp();
+        op.getDpsInitOperand(0)->get().getDefiningOp()
+            ?: op.getDpsInitOperand(0)->get().getParentRegion()->getParentOp();
     bool isImmutableArg = false;
-    if (auto funcOp = dyn_cast<FuncOp>(parentOp)) {
-      auto blockArg = op.getOutputOperand(0)->get().cast<BlockArgument>();
+    if (auto funcOp = dyn_cast<func::FuncOp>(parentOp)) {
+      auto blockArg = op.getDpsInitOperand(0)->get().cast<BlockArgument>();
       // Function arguments are immutable by default.
       isImmutableArg = !static_cast<bool>(
           funcOp.getArgAttr(blockArg.getArgNumber(), "linalg.mutable"));
@@ -334,12 +336,12 @@ public:
     bool isConstantMemory = isa_and_nonnull<arith::ConstantOp>(parentOp);
     bool mustCopy = hasUseAfter || isConstantMemory || isImmutableArg;
 
-    assert(op.getNumOutputs() == 1);
+    assert(op.getNumDpsInits() == 1);
     if (mustCopy) {
       errs() << "Analysis determined we must copy: hasUseAfter " << hasUseAfter
              << " isConstantMemory: " << isConstantMemory
              << " isImmutableArg: " << isImmutableArg << "\n";
-      auto space = rewriter.create<memref::AllocOp>(
+      Value space = rewriter.create<memref::AllocOp>(
           op.getLoc(), newOperands.back().getType().cast<MemRefType>());
       rewriter.create<linalg::CopyOp>(op.getLoc(), newOperands.back(), space);
       newOperands[newOperands.size() - 1] = space;
@@ -355,8 +357,8 @@ public:
         rewriter, op.getLoc(), TypeRange{}, newOperands));
     rewriter.inlineRegionBefore(op->getRegion(0), newOp->getRegion(0),
                                 newOp->getRegion(0).begin());
-    for (auto outputBuffer : newOp.getOutputBufferOperands()) {
-      results.push_back(rewriter.create<memref::TensorLoadOp>(
+    for (auto outputBuffer : newOp.getDpsInitOperands()) {
+      results.push_back(rewriter.create<bufferization::ToTensorOp>(
           op.getLoc(), outputBuffer->get()));
     }
 
@@ -367,6 +369,8 @@ public:
 
 struct StandaloneBufferizePass
     : public PassWrapper<StandaloneBufferizePass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StandaloneBufferizePass)
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<memref::MemRefDialect, linalg::LinalgDialect>();
   }
@@ -377,14 +381,13 @@ struct StandaloneBufferizePass
   }
   void runOnOperation() final {
     auto *context = &getContext();
-    BufferizeTypeConverter typeConverter;
+    bufferization::BufferizeTypeConverter typeConverter;
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
     auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
 
     target.addLegalDialect<memref::MemRefDialect>();
-    target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
-                                      StandardOpsDialect>([&](Operation *op) {
+    target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
       return typeConverter.isLegal(op) || isa<arith::ConstantOp>(op);
     });
     target.addDynamicallyLegalDialect<linalg::LinalgDialect>(
@@ -392,14 +395,14 @@ struct StandaloneBufferizePass
           return typeConverter.isLegal(op) ||
                  !ieAnalysis.isLinalgMarkedForBufferization(op);
         });
-    target.addLegalOp<CallOp>();
-    target.addLegalOp<ReturnOp>();
+    target.addLegalOp<func::CallOp>();
+    target.addLegalOp<func::ReturnOp>();
     target.addLegalOp<linalg::CopyOp>();
     target.addLegalOp<linalg::YieldOp>();
-    target.addLegalOp<linalg::InitTensorOp>();
+    // target.addLegalOp<linalg::InitTensorOp>();
     target.addIllegalOp<tensor::InsertOp>();
     target.addLegalDialect<scf::SCFDialect>();
-    populateBufferizeMaterializationLegality(target);
+    bufferization::populateBufferizeMaterializationLegality(target);
 
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
     patterns.add<BufferizeInsertExtractPair>(ieAnalysis, typeConverter,

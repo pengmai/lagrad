@@ -1,7 +1,9 @@
 #include "Standalone/Logger.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include <algorithm>
 #include <string>
 #define VERBOSITY 0
@@ -91,10 +93,11 @@ void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
               }
             }
           }
-        } else if (auto callOp = dyn_cast_or_null<CallOp>(user)) {
+        } else if (auto callOp = dyn_cast_or_null<func::CallOp>(user)) {
           auto moduleOp = user->getParentOfType<ModuleOp>();
           assert(moduleOp && "moduleOp was null");
-          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+          auto callee =
+              moduleOp.lookupSymbol<func::FuncOp>(callOp.getCalleeAttr());
           assert(callee && "callee was null");
           // This will overestimate activity in the case that a function
           // argument isn't active in the callee
@@ -124,10 +127,11 @@ void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
           out.erase(val);
           continue;
         }
-        if (auto callOp = dyn_cast_or_null<CallOp>(definingOp)) {
+        if (auto callOp = dyn_cast_or_null<func::CallOp>(definingOp)) {
           auto moduleOp = definingOp->getParentOfType<ModuleOp>();
           assert(moduleOp && "moduleOp was null");
-          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+          auto callee =
+              moduleOp.lookupSymbol<func::FuncOp>(callOp.getCalleeAttr());
           assert(callee && "callee was null");
           assert(callee.getBody().hasOneBlock() &&
                  "expected callee to have one block");
@@ -179,7 +183,7 @@ void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
   }
 }
 
-void runTopDownAnalysis(LAGradContext &ctx, FuncOp primalFunc,
+void runTopDownAnalysis(LAGradContext &ctx, func::FuncOp primalFunc,
                         ArrayAttr gradientsOf, ValueSet &topDownActive) {
   SmallVector<Value> frontier;
   if (!gradientsOf) {
@@ -193,7 +197,7 @@ void runTopDownAnalysis(LAGradContext &ctx, FuncOp primalFunc,
   runTopDownDFS(frontier, topDownActive);
 }
 
-void runBottomUpAnalysis(FuncOp primalFunc, ValueSet &bottomUpActive) {
+void runBottomUpAnalysis(func::FuncOp primalFunc, ValueSet &bottomUpActive) {
   assert(primalFunc.getCallableResults().size() == 1 &&
          "Expected primal to have one result");
   assert(primalFunc.getBody().hasOneBlock() &&
@@ -234,39 +238,39 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
   for (auto &op : region.getOps()) {
     if (auto addOp = dyn_cast_or_null<arith::AddFOp>(&op)) {
       ValueSet addAdjU;
-      setUnion(addAdjU, adjU[addOp.lhs()]);
-      setUnion(addAdjU, adjU[addOp.rhs()]);
+      setUnion(addAdjU, adjU[addOp.getLhs()]);
+      setUnion(addAdjU, adjU[addOp.getRhs()]);
       adjU[addOp.getResult()] = addAdjU;
     } else if (auto subOp = dyn_cast_or_null<arith::SubFOp>(&op)) {
       ValueSet subAdjU;
-      setUnion(subAdjU, adjU[subOp.lhs()]);
-      setUnion(subAdjU, adjU[subOp.rhs()]);
+      setUnion(subAdjU, adjU[subOp.getLhs()]);
+      setUnion(subAdjU, adjU[subOp.getRhs()]);
       adjU[subOp.getResult()] = subAdjU;
     } else if (auto negOp = dyn_cast_or_null<arith::NegFOp>(&op)) {
       ValueSet negAdjU;
-      setUnion(negAdjU, adjU[negOp.operand()]);
+      setUnion(negAdjU, adjU[negOp.getOperand()]);
       adjU[negOp.getResult()] = negAdjU;
     } else if (auto mulOp = dyn_cast_or_null<arith::MulFOp>(&op)) {
       ValueSet mulAdjU;
-      if (activeValues.contains(mulOp.lhs())) {
-        mulAdjU.insert(mulOp.rhs());
-        setUnion(mulAdjU, adjU[mulOp.lhs()]);
+      if (activeValues.contains(mulOp.getLhs())) {
+        mulAdjU.insert(mulOp.getRhs());
+        setUnion(mulAdjU, adjU[mulOp.getLhs()]);
       }
-      if (activeValues.contains(mulOp.rhs())) {
-        mulAdjU.insert(mulOp.lhs());
-        setUnion(mulAdjU, adjU[mulOp.rhs()]);
+      if (activeValues.contains(mulOp.getRhs())) {
+        mulAdjU.insert(mulOp.getLhs());
+        setUnion(mulAdjU, adjU[mulOp.getRhs()]);
       }
       adjU[mulOp.getResult()] = mulAdjU;
     } else if (auto divOp = dyn_cast_or_null<arith::DivFOp>(&op)) {
       ValueSet divAdjU;
-      if (activeValues.contains(divOp.lhs())) {
-        divAdjU.insert(divOp.rhs());
-        setUnion(divAdjU, adjU[divOp.lhs()]);
+      if (activeValues.contains(divOp.getLhs())) {
+        divAdjU.insert(divOp.getRhs());
+        setUnion(divAdjU, adjU[divOp.getLhs()]);
       }
-      if (activeValues.contains(divOp.rhs())) {
-        divAdjU.insert(divOp.rhs());
-        divAdjU.insert(divOp.lhs());
-        setUnion(divAdjU, adjU[divOp.rhs()]);
+      if (activeValues.contains(divOp.getRhs())) {
+        divAdjU.insert(divOp.getRhs());
+        divAdjU.insert(divOp.getLhs());
+        setUnion(divAdjU, adjU[divOp.getRhs()]);
       }
       adjU[divOp.getResult()] = divAdjU;
     } else if (auto logOp = dyn_cast_or_null<math::LogOp>(&op)) {
@@ -287,9 +291,9 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
       tanhAdjU.insert(tanhOp.getOperand());
       setUnion(tanhAdjU, adjU[tanhOp.getOperand()]);
       adjU[tanhOp.getResult()] = tanhAdjU;
-    } else if (auto selectOp = dyn_cast<SelectOp>(&op)) {
+    } else if (auto selectOp = dyn_cast<arith::SelectOp>(&op)) {
       ValueSet selectAdjU;
-      selectAdjU.insert(selectOp.condition());
+      selectAdjU.insert(selectOp.getCondition());
       adjU[selectOp.getResult()] = selectAdjU;
     } else if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
       ValueSet genericAdjU;
@@ -326,10 +330,10 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
                op.getName().getStringRef() == "linalg.batch_matmul") {
       ValueSet linalgAdjU;
       auto linalgOp = cast<linalg::LinalgOp>(&op);
-      assert(linalgOp.getNumInputs() == 2 &&
+      assert(linalgOp.getNumDpsInputs() == 2 &&
              "Expected named linalg op to have 2 inputs");
-      auto lhs = linalgOp.getInputOperand(0)->get();
-      auto rhs = linalgOp.getInputOperand(1)->get();
+      auto lhs = linalgOp.getDpsInputOperand(0)->get();
+      auto rhs = linalgOp.getDpsInputOperand(1)->get();
       if (activeValues.contains(lhs)) {
         linalgAdjU.insert(rhs);
         setUnion(linalgAdjU, adjU[lhs]);
@@ -341,17 +345,17 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
       adjU[linalgOp->getResult(0)] = linalgAdjU;
     } else if (auto extractOp = dyn_cast_or_null<tensor::ExtractOp>(&op)) {
       ValueSet extractAdjU;
-      setUnion(extractAdjU, adjU[extractOp.tensor()]);
-      for (auto idx : extractOp.indices()) {
+      setUnion(extractAdjU, adjU[extractOp.getTensor()]);
+      for (auto idx : extractOp.getIndices()) {
         extractAdjU.insert(idx);
       }
       adjU[extractOp.getResult()] = extractAdjU;
     } else if (auto insertOp = dyn_cast_or_null<tensor::InsertOp>(&op)) {
-      if (activeValues.contains(insertOp.scalar())) {
+      if (activeValues.contains(insertOp.getScalar())) {
         ValueSet insertAdjU;
-        setUnion(insertAdjU, adjU[insertOp.scalar()]);
-        setUnion(insertAdjU, adjU[insertOp.dest()]);
-        for (auto idx : insertOp.indices()) {
+        setUnion(insertAdjU, adjU[insertOp.getScalar()]);
+        setUnion(insertAdjU, adjU[insertOp.getDest()]);
+        for (auto idx : insertOp.getIndices()) {
           insertAdjU.insert(idx);
         }
         adjU[insertOp.getResult()] = insertAdjU;
@@ -359,7 +363,7 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
     } else if (auto extractSliceOp =
                    dyn_cast_or_null<tensor::ExtractSliceOp>(&op)) {
       ValueSet extractSliceAdjU;
-      setUnion(extractSliceAdjU, adjU[extractSliceOp.source()]);
+      setUnion(extractSliceAdjU, adjU[extractSliceOp.getSource()]);
       for (auto offs : extractSliceOp.getMixedOffsets()) {
         if (auto val = offs.dyn_cast<Value>()) {
           extractSliceAdjU.insert(val);
@@ -368,10 +372,10 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
       adjU[extractSliceOp.getResult()] = extractSliceAdjU;
     } else if (auto insertSliceOp =
                    dyn_cast_or_null<tensor::InsertSliceOp>(&op)) {
-      if (activeValues.contains(insertSliceOp.source())) {
+      if (activeValues.contains(insertSliceOp.getSource())) {
         ValueSet insertSliceAdjU;
-        setUnion(insertSliceAdjU, adjU[insertSliceOp.source()]);
-        setUnion(insertSliceAdjU, adjU[insertSliceOp.dest()]);
+        setUnion(insertSliceAdjU, adjU[insertSliceOp.getSource()]);
+        setUnion(insertSliceAdjU, adjU[insertSliceOp.getDest()]);
         for (auto offs : insertSliceOp.getMixedOffsets()) {
           if (auto val = offs.dyn_cast<Value>()) {
             insertSliceAdjU.insert(val);
@@ -382,8 +386,8 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
       if (ifOp.getNumResults() > 0) {
         ValueSet ifAdjU;
-        populateAdjointUseSets(ctx, activeValues, ifOp.thenRegion(), adjU);
-        populateAdjointUseSets(ctx, activeValues, ifOp.elseRegion(), adjU);
+        populateAdjointUseSets(ctx, activeValues, ifOp.getThenRegion(), adjU);
+        populateAdjointUseSets(ctx, activeValues, ifOp.getElseRegion(), adjU);
         for (auto operand : ifOp.thenBlock()->getTerminator()->getOperands()) {
           setUnion(ifAdjU, adjU[operand]);
         }
@@ -405,10 +409,11 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
       for (auto result : forOp.getResults()) {
         adjU[result] = forAdjU;
       }
-    } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
+    } else if (auto callOp = dyn_cast_or_null<func::CallOp>(&op)) {
       ValueSet callAdjU;
       auto &callRegion =
-          ctx.moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr()).getBody();
+          ctx.moduleOp.lookupSymbol<func::FuncOp>(callOp.getCalleeAttr())
+              .getBody();
       populateAdjointUseSets(ctx, activeValues, callRegion, adjU);
       if (callRegion.hasOneBlock()) {
         for (auto returnOperand :
@@ -433,7 +438,7 @@ void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
   }
 }
 
-void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
+void runEffectiveUseAnalysis(LAGradContext &ctx, func::FuncOp primalFunc) {
   // adjU maps results to sets of effectively used values
   if (VERBOSITY >= 1) {
     llvm::errs() << "Running TBR Analysis for func " << primalFunc.getName()
@@ -506,7 +511,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
 }
 } // namespace mlir
 
-void mlir::runActivityAnalysis(LAGradContext &ctx, FuncOp primalFunc,
+void mlir::runActivityAnalysis(LAGradContext &ctx, func::FuncOp primalFunc,
                                ArrayAttr gradientsOf) {
   llvm::SmallDenseSet<Value> topDownActive;
   llvm::SmallDenseSet<Value> bottomUpActive;

@@ -1,8 +1,8 @@
 #include "Standalone/Analysis.h"
 #include "Standalone/Logger.h"
 #include "Standalone/Utils.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
@@ -87,10 +87,10 @@ void runLinalgGenericActivityAnalysis(LAGradContext &ctx, linalg::GenericOp op,
   }
 }
 
-linalg::OpOperandVector
-runLinalgEffectiveUseAnalysis(linalg::GenericOp op, LAGradContext &ctx,
-                              Value operand, int op_index,
-                              ValueSet &effectivelyUsed) {
+OpOperandVector runLinalgEffectiveUseAnalysis(linalg::GenericOp op,
+                                              LAGradContext &ctx, Value operand,
+                                              int op_index,
+                                              ValueSet &effectivelyUsed) {
   ValueSet activeValues;
   llvm::SmallDenseMap<Value, ValueSet> adjU;
   runLinalgGenericActivityAnalysis(ctx, op, operand, op_index, activeValues);
@@ -111,9 +111,9 @@ runLinalgEffectiveUseAnalysis(linalg::GenericOp op, LAGradContext &ctx,
   // }
 
   // Need to determine which input operands have dependencies to an adjU value.
-  linalg::OpOperandVector requiredInputs;
+  OpOperandVector requiredInputs;
   ValueSet dependents;
-  for (auto pair : llvm::enumerate(op.getInputOperands())) {
+  for (auto pair : llvm::enumerate(op.getDpsInputOperands())) {
     dependents.clear();
     traverseDependencies(op.getBlock()->getArgument(pair.index()), dependents);
     if (llvm::any_of(effectivelyUsed, [&dependents](Value used) {
@@ -132,16 +132,16 @@ Value reverseGenericOpV1(linalg::GenericOp op, LAGradContext &ctx,
   // Need to ensure:
   // if (op_index > (size_t)genericOp.getNumInputs() - 1)
   //   continue;
-  auto numIterators = op.iterator_types().size();
+  auto numIterators = op.getIteratorTypes().size();
   SmallVector<AffineMap, 6> indexing_maps(
       op->getNumOperands() + 1, rewriter.getMultiDimIdentityMap(numIterators));
-  SmallVector<StringRef, 6> iterator_types(numIterators,
-                                           getParallelIteratorTypeName());
+  SmallVector<utils::IteratorType, 6> iterator_types(
+      numIterators, utils::IteratorType::parallel);
 
   auto outputShape = output.getType().dyn_cast_or_null<ShapedType>();
   assert(outputShape && outputShape.hasRank() &&
          "output must be a ranked type");
-  SmallVector<AffineMap> generic_indexing_maps = op.getIndexingMaps();
+  SmallVector<AffineMap> generic_indexing_maps = op.getIndexingMapsArray();
   unsigned int op_count = op.getNumOperands();
   SmallVector<Value> inputs;
   for (size_t i = 0; i < op_count; i++) {
@@ -159,7 +159,7 @@ Value reverseGenericOpV1(linalg::GenericOp op, LAGradContext &ctx,
         AffineMap outputMap = generic_indexing_maps[op_index];
         for (size_t idx = 0; idx < outputMap.getNumDims(); idx++) {
           if (!outputMap.isFunctionOfDim(idx)) {
-            iterator_types[idx] = getReductionIteratorTypeName();
+            iterator_types[idx] = utils::IteratorType::reduction;
           }
         }
       }
@@ -253,7 +253,7 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
   // if (op_index > (size_t)genericOp.getNumInputs() - 1)
   //   continue;
   ValueSet effectivelyUsed;
-  linalg::OpOperandVector requiredInputs = runLinalgEffectiveUseAnalysis(
+  OpOperandVector requiredInputs = runLinalgEffectiveUseAnalysis(
       op, ctx, operand, op_index, effectivelyUsed);
   // if (ctx.debug_names[op.getResult(0)] == "%vx_next") {
   //   Logger::blue("Required inputs");
@@ -269,25 +269,25 @@ Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
   // }
 
   SmallVector<AffineMap, 6> indexingMaps;
-  indexingMaps.reserve(op.getNumInputsAndOutputs() + 1);
+  indexingMaps.reserve(op->getNumOperands() + 1);
   for (OpOperand *opOp : requiredInputs) {
-    indexingMaps.push_back(op.getTiedIndexingMap(opOp));
+    indexingMaps.push_back(op.getMatchingIndexingMap(opOp));
   }
   // vjp indexing map
-  indexingMaps.push_back(op.getTiedIndexingMap(op.getOutputOperand(0)));
+  indexingMaps.push_back(op.getMatchingIndexingMap(op.getDpsInitOperand(0)));
   // output indexing map (with inferred iterator types).
-  auto numIterators = op.iterator_types().size();
-  SmallVector<StringRef, 6> iterator_types(numIterators,
-                                           getParallelIteratorTypeName());
+  auto numIterators = op.getIteratorTypes().size();
+  SmallVector<utils::IteratorType, 6> iterator_types(
+      numIterators, utils::IteratorType::parallel);
   AffineMap outputMap =
       op_index == -1
           // free variables are assumed to be 0d
           ? rewriter.getMultiDimIdentityMap(numIterators).getSubMap({})
-          : op.getTiedIndexingMap(op.getInputOperand(op_index));
+          : op.getMatchingIndexingMap(op.getDpsInputOperand(op_index));
   indexingMaps.push_back(outputMap);
   for (size_t idx = 0; idx < outputMap.getNumDims(); idx++) {
     if (!outputMap.isFunctionOfDim(idx)) {
-      iterator_types[idx] = getReductionIteratorTypeName();
+      iterator_types[idx] = utils::IteratorType::reduction;
     }
   }
 
