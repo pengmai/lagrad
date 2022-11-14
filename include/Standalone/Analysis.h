@@ -1,3 +1,5 @@
+#pragma once
+#include "Standalone/Utils.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -6,6 +8,10 @@
 #include <string>
 
 namespace mlir {
+void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
+                            Region &region,
+                            llvm::SmallDenseMap<Value, ValueSet> &adjU);
+
 struct InsertExtractAnalysis {
   InsertExtractAnalysis(Operation *op);
 

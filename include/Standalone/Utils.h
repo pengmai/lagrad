@@ -1,3 +1,4 @@
+#pragma once
 #include "Standalone/StandaloneDialect.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -20,6 +21,8 @@ public:
   ValueSet toBeRecorded;
   DenseMap<Value, Value> tbrCachedVals;
 };
+
+void printSet(LAGradContext &ctx, const ValueSet &set, bool pretty = true);
 
 bool isFloatOrFloatTensor(Type typ);
 
@@ -67,8 +70,8 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
 
 FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
                              ArrayAttr gradientsOf,
-                             ConversionPatternRewriter &rewriter,
-                             bool topLevel, bool onehotSparse);
+                             ConversionPatternRewriter &rewriter, bool topLevel,
+                             bool onehotSparse);
 
 Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
                        Value vjp_value, int op_index, Value output,

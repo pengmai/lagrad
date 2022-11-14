@@ -10,12 +10,39 @@ using namespace mlir;
 using llvm::errs;
 
 namespace mlir {
+void printSet(LAGradContext &ctx, const ValueSet &set, bool pretty) {
+  if (pretty) {
+    SmallVector<std::string> names;
+    for (auto v : set) {
+      if (ctx.debug_names.count(v) == 1) {
+        names.push_back(ctx.debug_names[v]);
+      } else {
+        // Hopefully these values aren't important
+        // names.push_back("<value not registered>");
+      }
+    }
+    std::sort(names.begin(), names.end());
+    llvm::errs() << "{";
+    size_t i = 0;
+    for (auto name : names) {
+      llvm::errs() << name;
+      if (i != names.size() - 1) {
+        llvm::errs() << ", ";
+      }
+      i++;
+    }
+    llvm::errs() << "}\n";
+  }
+}
 void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
   while (!frontier.empty()) {
     Value val = frontier.pop_back_val();
     if (!out.contains(val)) {
       out.insert(val);
       for (auto user : val.getUsers()) {
+        if (auto dimOp = dyn_cast<tensor::DimOp>(user)) {
+          continue;
+        }
         if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(user)) {
           for (auto tup : llvm::zip(genericOp.getOperands(),
                                     genericOp.getBodyRegion().getArguments())) {
@@ -183,32 +210,6 @@ static inline void setUnion(ValueSet &a, const ValueSet &b) {
   }
 }
 
-static inline void printSet(LAGradContext &ctx, const ValueSet &set,
-                            bool pretty = true) {
-  if (pretty) {
-    SmallVector<std::string> names;
-    for (auto v : set) {
-      if (ctx.debug_names.count(v) == 1) {
-        names.push_back(ctx.debug_names[v]);
-      } else {
-        // Hopefully these values aren't important
-        // names.push_back("<value not registered>");
-      }
-    }
-    std::sort(names.begin(), names.end());
-    llvm::errs() << "{";
-    size_t i = 0;
-    for (auto name : names) {
-      llvm::errs() << name;
-      if (i != names.size() - 1) {
-        llvm::errs() << ", ";
-      }
-      i++;
-    }
-    llvm::errs() << "}\n";
-  }
-}
-
 static inline void printAllAdjU(LAGradContext &ctx,
                                 llvm::SmallDenseMap<Value, ValueSet> &adjU) {
   llvm::errs() << "*** PRINTING ALL ADJU SETS***\n";
@@ -227,8 +228,8 @@ static inline void printAllAdjU(LAGradContext &ctx,
   llvm::errs() << "*** DONE ***\n";
 }
 
-// void runDepsForIterArgs(LAGradContext &ctx)
-void populateAdjointUseSets(LAGradContext &ctx, Region &region,
+void populateAdjointUseSets(LAGradContext &ctx, ValueSet &activeValues,
+                            Region &region,
                             llvm::SmallDenseMap<Value, ValueSet> &adjU) {
   for (auto &op : region.getOps()) {
     if (auto addOp = dyn_cast_or_null<arith::AddFOp>(&op)) {
@@ -247,22 +248,23 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       adjU[negOp.getResult()] = negAdjU;
     } else if (auto mulOp = dyn_cast_or_null<arith::MulFOp>(&op)) {
       ValueSet mulAdjU;
-      if (ctx.activeValues.contains(mulOp.lhs())) {
+      if (activeValues.contains(mulOp.lhs())) {
         mulAdjU.insert(mulOp.rhs());
         setUnion(mulAdjU, adjU[mulOp.lhs()]);
       }
-      if (ctx.activeValues.contains(mulOp.rhs())) {
+      if (activeValues.contains(mulOp.rhs())) {
         mulAdjU.insert(mulOp.lhs());
         setUnion(mulAdjU, adjU[mulOp.rhs()]);
       }
       adjU[mulOp.getResult()] = mulAdjU;
     } else if (auto divOp = dyn_cast_or_null<arith::DivFOp>(&op)) {
       ValueSet divAdjU;
-      if (ctx.activeValues.contains(divOp.lhs())) {
+      if (activeValues.contains(divOp.lhs())) {
         divAdjU.insert(divOp.rhs());
         setUnion(divAdjU, adjU[divOp.lhs()]);
       }
-      if (ctx.activeValues.contains(divOp.rhs())) {
+      if (activeValues.contains(divOp.rhs())) {
+        divAdjU.insert(divOp.rhs());
         divAdjU.insert(divOp.lhs());
         setUnion(divAdjU, adjU[divOp.rhs()]);
       }
@@ -277,6 +279,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto expOp = dyn_cast_or_null<math::ExpOp>(&op)) {
       ValueSet expAdjU;
       expAdjU.insert(expOp.getOperand());
+      expAdjU.insert(expOp.getResult());
       setUnion(expAdjU, adjU[expOp.getOperand()]);
       adjU[expOp.getResult()] = expAdjU;
     } else if (auto tanhOp = dyn_cast_or_null<math::TanhOp>(&op)) {
@@ -290,7 +293,8 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       adjU[selectOp.getResult()] = selectAdjU;
     } else if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
       ValueSet genericAdjU;
-      populateAdjointUseSets(ctx, genericOp.getBodyRegion(), adjU);
+      populateAdjointUseSets(ctx, activeValues, genericOp.getBodyRegion(),
+                             adjU);
       for (auto yieldOperand :
            genericOp.getBody()->getTerminator()->getOperands()) {
         // Add free operands that are in adjU
@@ -326,11 +330,11 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
              "Expected named linalg op to have 2 inputs");
       auto lhs = linalgOp.getInputOperand(0)->get();
       auto rhs = linalgOp.getInputOperand(1)->get();
-      if (ctx.activeValues.contains(lhs)) {
+      if (activeValues.contains(lhs)) {
         linalgAdjU.insert(rhs);
         setUnion(linalgAdjU, adjU[lhs]);
       }
-      if (ctx.activeValues.contains(rhs)) {
+      if (activeValues.contains(rhs)) {
         linalgAdjU.insert(lhs);
         setUnion(linalgAdjU, adjU[rhs]);
       }
@@ -343,7 +347,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       }
       adjU[extractOp.getResult()] = extractAdjU;
     } else if (auto insertOp = dyn_cast_or_null<tensor::InsertOp>(&op)) {
-      if (ctx.activeValues.contains(insertOp.scalar())) {
+      if (activeValues.contains(insertOp.scalar())) {
         ValueSet insertAdjU;
         setUnion(insertAdjU, adjU[insertOp.scalar()]);
         setUnion(insertAdjU, adjU[insertOp.dest()]);
@@ -364,7 +368,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       adjU[extractSliceOp.getResult()] = extractSliceAdjU;
     } else if (auto insertSliceOp =
                    dyn_cast_or_null<tensor::InsertSliceOp>(&op)) {
-      if (ctx.activeValues.contains(insertSliceOp.source())) {
+      if (activeValues.contains(insertSliceOp.source())) {
         ValueSet insertSliceAdjU;
         setUnion(insertSliceAdjU, adjU[insertSliceOp.source()]);
         setUnion(insertSliceAdjU, adjU[insertSliceOp.dest()]);
@@ -378,8 +382,8 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
       if (ifOp.getNumResults() > 0) {
         ValueSet ifAdjU;
-        populateAdjointUseSets(ctx, ifOp.thenRegion(), adjU);
-        populateAdjointUseSets(ctx, ifOp.elseRegion(), adjU);
+        populateAdjointUseSets(ctx, activeValues, ifOp.thenRegion(), adjU);
+        populateAdjointUseSets(ctx, activeValues, ifOp.elseRegion(), adjU);
         for (auto operand : ifOp.thenBlock()->getTerminator()->getOperands()) {
           setUnion(ifAdjU, adjU[operand]);
         }
@@ -394,7 +398,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       }
     } else if (auto forOp = dyn_cast_or_null<scf::ForOp>(&op)) {
       ValueSet forAdjU;
-      populateAdjointUseSets(ctx, forOp.getBodyRegion(), adjU);
+      populateAdjointUseSets(ctx, activeValues, forOp.getBodyRegion(), adjU);
       for (auto operand : forOp.getBody()->getTerminator()->getOperands()) {
         setUnion(forAdjU, adjU[operand]);
       }
@@ -405,7 +409,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       ValueSet callAdjU;
       auto &callRegion =
           ctx.moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr()).getBody();
-      populateAdjointUseSets(ctx, callRegion, adjU);
+      populateAdjointUseSets(ctx, activeValues, callRegion, adjU);
       if (callRegion.hasOneBlock()) {
         for (auto returnOperand :
              callRegion.back().getTerminator()->getOperands()) {
@@ -442,7 +446,7 @@ void runEffectiveUseAnalysis(LAGradContext &ctx, FuncOp primalFunc) {
         llvm::errs() << BOLDCYAN << "Running Effective-Use Analysis for loop "
                      << ctx.debug_names[forOp.getResult(0)] << RESET << "\n";
       }
-      populateAdjointUseSets(ctx, forOp.getLoopBody(), adjU);
+      populateAdjointUseSets(ctx, ctx.activeValues, forOp.getLoopBody(), adjU);
       if (VERBOSITY >= 3) {
         printAllAdjU(ctx, adjU);
       }

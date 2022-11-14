@@ -299,7 +299,8 @@ bool matchSparsifyForOp(scf::ForOp op, SparsePropagation &spAnalysis,
   }
   LoopNest loopNest = maybeLoopNest.getValue();
   return llvm::any_of(loopNest.inputTensorOperands, [&spAnalysis](Value val) {
-    return spAnalysis.getSparsityType(val).hasValue();
+    auto maybeSpType = spAnalysis.getSparsityType(val);
+    return maybeSpType && maybeSpType.getValue() != HotSparsityType::Empty;
   });
 }
 
@@ -459,11 +460,11 @@ public:
         FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
     Value idxZero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value idxOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-    Value space = rewriter.create<memref::BufferCastOp>(
-        loc, typeConverter.convertType(op.getOutputTensorTypes()[0]),
-        op.getOutputOperand(0)->get());
-    // Value space =
-    //     allocateOutputSpace(op.getOutputOperand(0)->get(), loc, rewriter);
+    // Value space = rewriter.create<memref::BufferCastOp>(
+    //     loc, typeConverter.convertType(op.getOutputTensorTypes()[0]),
+    //     op.getOutputOperand(0)->get());
+    Value space =
+        allocateOutputSpace(op.getOutputOperand(0)->get(), loc, rewriter);
     rewriter.create<linalg::FillOp>(loc, zero, space);
     for (unsigned dim = 0; dim < sparseMap.getNumDims(); dim++) {
       if (!sparseDims.contains(dim)) {

@@ -113,6 +113,7 @@ cloneBasicBlock(llvm::iterator_range<Region::OpIterator> bbOps,
 
   for (auto &op : bbOps) {
     auto clonedOp = builder.clone(op);
+    // oldToNew.map(op.getResults(), clonedOp->getResults());
     if (ctx) {
       for (auto tup : llvm::zip(op.getResults(), clonedOp->getResults())) {
         ctx->debug_names[std::get<1>(tup)] =
@@ -537,11 +538,63 @@ void populateVJP(Operation *op, LAGradContext &ctx,
     reverseForOp(forOp, ctx, free_operand_vec, vjp_value, result_idx, env,
                  rewriter);
     return;
+  } else if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+    // Differentiate w.r.t. free operands here, regular arguments are
+    // differentiated below.
+    // Also update the output gradients.
+    for (auto it :
+         llvm::zip(genericOp.getOutputOperands(), genericOp.getResults())) {
+      env[std::get<0>(it)->get()] = env[std::get<1>(it)];
+    }
+    Value vjp_value = env[genericOp.getResult(0)];
+    // We assume the value is dead if it hasn't been come across yet.
+    if (!vjp_value) {
+      return;
+    }
+    llvm::SmallDenseSet<Value> freeOperands;
+    collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
+                    freeOperands);
+    for (auto freeOperand : freeOperands) {
+      using llvm::errs;
+      if (!ctx.activeValues.contains(freeOperand)) {
+        continue;
+      }
+      assert(freeOperand.getType().isa<FloatType>() &&
+             "Expected linalg.generic free operand to be a float");
+      // Not totally sure if we can use the VJP value as-is, watch out
+      // for bugs.
+      auto zeroDTensorType = RankedTensorType::get({}, freeOperand.getType());
+      auto denseFPAttr = freeOperand.getType().getIntOrFloatBitWidth() == 32
+                             ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
+                             : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
+      Value output =
+          rewriter.create<arith::ConstantOp>(genericOp.getLoc(), denseFPAttr);
+      auto out = reverseGenericOp(genericOp, ctx, freeOperand, vjp_value, -1,
+                                  output, rewriter);
+      auto result =
+          rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
+      if (!env[freeOperand]) {
+        env[freeOperand] = result;
+      } else {
+        env[freeOperand] = rewriter.create<arith::AddFOp>(
+            freeOperand.getLoc(), result, env[freeOperand]);
+      }
+    }
+  }
+  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
+    for (OpOperand *outOperand : linalgOp.getOutputOperands()) {
+      if (ctx.activeValues.contains(outOperand->get())) {
+        env[outOperand->get()] = env[linalgOp.getTiedOpResult(outOperand)];
+      }
+    }
   }
 
   for (size_t op_index = 0; op_index < op->getNumOperands(); op_index++) {
     Value operand = op->getOperand(op_index);
     // TODO: This is a bandaid over proper activity analysis
+    if (!ctx.activeValues.contains(operand)) {
+      continue;
+    }
     if (!isFloatOrFloatTensor(operand.getType())) {
       continue;
     }
@@ -734,49 +787,6 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       auto genericOp = dyn_cast<linalg::GenericOp>(op);
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
         continue;
-
-      // Additionally compute adjoints for all free variables. We only want
-      // this to run once, hence the if op_index == 0.
-      if (op_index == 0) {
-        // Also update the output gradients
-        for (auto it :
-             llvm::zip(genericOp.getOutputOperands(), genericOp.getResults())) {
-          env[std::get<0>(it)->get()] = env[std::get<1>(it)];
-        }
-        llvm::SmallDenseSet<Value> freeOperands;
-        collectFreeVars(genericOp.getBody(), genericOp.getBodyRegion(),
-                        freeOperands);
-        for (auto freeOperand : freeOperands) {
-          if (!isFloatOrFloatTensor(freeOperand.getType())) {
-            continue;
-          }
-          assert(freeOperand.getType().isa<FloatType>() &&
-                 "Expected linalg.generic free operand to be a float");
-          // Not totally sure if we can use the VJP value as-is, watch out
-          // for bugs.
-          auto zeroDTensorType =
-              RankedTensorType::get({}, freeOperand.getType());
-          auto denseFPAttr =
-              freeOperand.getType().getIntOrFloatBitWidth() == 32
-                  ? DenseFPElementsAttr::get(zeroDTensorType, {0.0f})
-                  : DenseFPElementsAttr::get(zeroDTensorType, {0.0});
-          Value output =
-              rewriter.create<arith::ConstantOp>(operand.getLoc(), denseFPAttr);
-          auto out = reverseGenericOp(genericOp, ctx, freeOperand, vjp_value,
-                                      -1, output, rewriter);
-          auto result =
-              rewriter.create<tensor::ExtractOp>(freeOperand.getLoc(), out);
-          if (!env[freeOperand]) {
-            env[freeOperand] = result;
-          } else {
-            env[freeOperand] = rewriter.create<arith::AddFOp>(
-                freeOperand.getLoc(), result, env[freeOperand]);
-          }
-        }
-      }
-      if (!isFloatOrFloatTensor(operand.getType())) {
-        continue;
-      }
       Value output = getZero(genericOp.getLoc(), operand, rewriter);
       vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
                                    output, rewriter);
