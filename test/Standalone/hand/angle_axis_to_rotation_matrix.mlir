@@ -1,4 +1,4 @@
-func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
+func.func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -17,7 +17,7 @@ func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf
   } -> tensor<f64>
   %sqsum_v = tensor.extract %sqsum[] : tensor<f64>
   %norm = math.sqrt %sqsum_v : f64
-  %res_space = linalg.init_tensor [3, 3] : tensor<3x3xf64>
+  %res_space = tensor.empty() : tensor<3x3xf64>
   %tol = arith.constant 1.0e-4 : f64
   %pred = arith.cmpf "olt", %norm, %tol : f64
   %res = scf.if %pred -> tensor<3x3xf64> {
@@ -82,18 +82,18 @@ func @axis_angles_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf
   return %res : tensor<3x3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %a = arith.constant dense<[1., 2., 3.]> : tensor<3xf64>
   %primal_0 = call @axis_angles_to_rotation_matrix(%a) : (tensor<3xf64>) -> tensor<3x3xf64>
   %U0 = tensor.cast %primal_0 : tensor<3x3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U0) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U0) : (tensor<*xf64>) -> ()
 
   %f = constant @axis_angles_to_rotation_matrix : (tensor<3xf64>) -> tensor<3x3xf64>
   %df = standalone.grad %f {of = [0]}: (tensor<3xf64>) -> tensor<3x3xf64>, (tensor<3xf64>) -> tensor<3xf64>
   %adjoint_0 = call_indirect %df(%a) : (tensor<3xf64>) -> tensor<3xf64>
   %U1 = tensor.cast %adjoint_0 : tensor<3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U1) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U1) : (tensor<*xf64>) -> ()
   return
 }

@@ -210,7 +210,7 @@ void reverseForOpV2(scf::ForOp forOp, LAGradContext &ctx,
               }
               auto resultType =
                   memref::SubViewOp::inferRankReducedResultType(
-                      rtt.getRank(), cache.getType().cast<MemRefType>(),
+                      rtt.getShape(), cache.getType().cast<MemRefType>(),
                       mixedOffsets, mixedSizes, mixedStrides)
                       .cast<MemRefType>();
               auto view = builder.create<memref::SubViewOp>(

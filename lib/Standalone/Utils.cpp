@@ -199,16 +199,16 @@ func::FuncOp differentiateFunction(func::FuncOp funcOp, LAGradContext &ctx,
   for (auto it = ops.rbegin(); it != ops.rend(); it++) {
     Operation *op = *it;
     auto opName = op->getName().getStringRef();
-    if (opName == "std.return") {
+    if (auto returnOp = dyn_cast<func::ReturnOp>(op)) {
       // This is the exit point
-      rewriter.setInsertionPoint(op);
-      assert(op->getNumOperands() == 1 &&
+      rewriter.setInsertionPoint(returnOp);
+      assert(returnOp.getNumOperands() == 1 &&
              "Expected function to return 1 value");
-      Value operand = op->getOperand(0);
+      Value operand = returnOp.getOperand(0);
       // Initialize the gradient signal to 1.0
       if (topLevel) {
         env[operand] =
-            onesLike(ctx, op->getLoc(), operand, rewriter, /*init=*/true);
+            onesLike(ctx, returnOp.getLoc(), operand, rewriter, /*init=*/true);
       } else {
         env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
@@ -244,6 +244,12 @@ func::FuncOp differentiateFunction(func::FuncOp funcOp, LAGradContext &ctx,
     returnType[0] = region->getArgument(0).getType();
     returnValue.resize(1);
     if (!env[region->getArgument(0)]) {
+      using llvm::errs;
+      errs() << "populated map:\n";
+      for (auto pair : env) {
+        errs() << pair.first << ": " << pair.second << "\n";
+      }
+      errs() << "done\n";
       funcOp.emitError("Gradient of first argument not found");
       return nullptr;
     }
@@ -320,10 +326,8 @@ Value getZero(Location loc, Value operand, OpBuilder &rewriter, bool init) {
         }
       }
       // init_tensor ops don't support encodings out of the box.
-      assert(false && "mid refactor, case not supported yet");
-      Value space;
-      // Value space = rewriter.create<bufferization::AllocTensorOp>(
-      //     loc, shape, shapedType.getElementType());
+      Value space = rewriter.create<tensor::EmptyOp>(
+          loc, shape, shapedType.getElementType());
       if (shapedType.getEncoding()) {
         space = rewriter.create<standalone::PackOp>(loc, shapedType, space);
         // space = rewriter.create<tensor::CastOp>(loc, shapedType, space);
@@ -603,9 +607,9 @@ void populateVJP(Operation *op, LAGradContext &ctx,
   for (size_t op_index = 0; op_index < op->getNumOperands(); op_index++) {
     Value operand = op->getOperand(op_index);
     // TODO: This is a bandaid over proper activity analysis
-    if (!ctx.activeValues.contains(operand)) {
-      continue;
-    }
+    // if (!ctx.activeValues.contains(operand)) {
+    //   continue;
+    // }
     if (!isFloatOrFloatTensor(operand.getType())) {
       continue;
     }
@@ -709,12 +713,11 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           rewriter.create<math::PowFOp>(
               loc, powFOp.getLhs(),
               rewriter.create<arith::SubFOp>(loc, powFOp.getRhs(), one)));
-    } else if (opName == "std.call") {
+    } else if (auto callOp = dyn_cast<func::CallOp>(op)) {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseCallOp(dyn_cast<func::CallOp>(op), ctx, vjp_value,
-                                op_index, rewriter);
+      vjp_value = reverseCallOp(callOp, ctx, vjp_value, op_index, rewriter);
     } else if (opName == "tensor.extract") {
       if (op_index > 0) {
         continue;

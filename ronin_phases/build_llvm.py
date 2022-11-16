@@ -29,10 +29,12 @@ LAGRAD_LLVM_DYLIB = (
     / "libProfilerPass.dylib"
 )
 
-LOCAL_LIB = pathlib.Path.home() / ".local" / "lib"
+LOCAL_LIB = pathlib.Path.home() / ".local" / "LLVM16" / "lib"
+LOCAL_BIN = pathlib.Path.home() / ".local" / "LLVM16" / "bin"
 LOCAL_INCLUDE = pathlib.Path.home() / ".local" / "include"
 LAGRAD_UTILS = LOCAL_LIB / "lagrad_utils.dylib"
 MLIR_RUNNER_UTILS = LOCAL_LIB / "libmlir_runner_utils.dylib"
+MLIR_C_UTILS = LOCAL_LIB / "libmlir_c_runner_utils.dylib"
 OPENBLAS_INCLUDE = pathlib.Path.home() / ".local" / "OpenBLAS" / "include"
 OPENBLAS_OBJ = pathlib.Path.home() / ".local" / "OpenBLAS" / "lib" / "libopenblas.a"
 
@@ -40,19 +42,20 @@ OPENBLAS_OBJ = pathlib.Path.home() / ".local" / "OpenBLAS" / "lib" / "libopenbla
 class LAGradOptFlags:
     preprocess = [
         "-take-grads",
-        "-structured-sparsify",
         "-canonicalize",
         "-inline",
         "-linalg-canonicalize",
         "-pack-triangular",
         "-standalone-dce",
+        # "-structured-sparsify",
         "-symbol-dce",
         "-convert-elementwise-to-linalg",
         "-convert-linalg-triangular-to-loops",
         "-canonicalize",
     ]
     bufferize = [
-        "-tensor-constant-bufferize",
+        "-empty-tensor-to-alloc-tensor",
+        "-arith-bufferize",
         "-tensor-bufferize",
         "-standalone-bufferize",
         "-linalg-bufferize",
@@ -61,10 +64,11 @@ class LAGradOptFlags:
         "-finalizing-bufferize",
         "-buffer-hoisting",
         "-buffer-loop-hoisting",
-        "-standalone-loop-hoisting",
+        # "-standalone-loop-hoisting",
         "-promote-buffers-to-stack",
         "-buffer-deallocation",
         "-canonicalize",
+        "-convert-bufferization-to-memref",
     ]
     lower_to_llvm = [
         # "-convert-linalg-to-library",
@@ -72,11 +76,12 @@ class LAGradOptFlags:
         # "-convert-linalg-to-affine-loops",
         # "-affine-loop-unroll",
         "-lower-affine",
-        "-convert-scf-to-std",
+        "-convert-scf-to-cf",
         "-convert-memref-to-llvm",
         "-convert-math-to-llvm",
         "-convert-math-to-libm",
-        "-convert-std-to-llvm",
+        "-convert-arith-to-llvm",
+        "-convert-func-to-llvm",
         "-reconcile-unrealized-casts",
         "-llvm-legalize-for-export",
     ]
@@ -201,7 +206,9 @@ class MLIRTranslateExecutor(ExecutorWithArguments):
     def __init__(self, command: str = None):
         super(MLIRTranslateExecutor, self).__init__()
         self.command = lambda ctx: which(
-            ctx.fallback(command, "lagrad.translate_command", "mlir-translate")
+            ctx.fallback(
+                command, "lagrad.translate_command", f"{str(LOCAL_BIN)}/mlir-translate"
+            )
         )
         self.add_argument_unfiltered("$in")
         self.add_argument_unfiltered("-o", "$out")
@@ -213,7 +220,7 @@ class MLIRTranslateExecutor(ExecutorWithArguments):
 class LLCExecutor(ExecutorWithArguments):
     def __init__(self):
         super(LLCExecutor, self).__init__()
-        self.command = lambda ctx: which("llc")
+        self.command = lambda ctx: which(f"{str(LOCAL_BIN)}/llc")
         self.add_argument_unfiltered("$in")
         self.add_argument_unfiltered("-o", "$out")
         self.output_type = "object"
@@ -261,7 +268,7 @@ def compile_enzyme(
         executor=emit_llvm,
     )
 
-    run_enzyme = OptExecutor("opt-12").run_enzyme()
+    run_enzyme = OptExecutor("opt-12", asm=True).run_enzyme()
     postenzyme = Phase(
         project=project,
         name="Enzyme AD",
@@ -455,7 +462,12 @@ def clang_link(
     linker = GccLink("clang-12")
     linker.add_argument("-rpath", pathlib.Path.home() / ".local" / "lib")
     linker.optimize(3)
-    inputs = [str(MLIR_RUNNER_UTILS), str(LAGRAD_UTILS)]
+    inputs = [
+        str(MLIR_RUNNER_UTILS),
+        str(MLIR_C_UTILS),
+        str(LAGRAD_UTILS),
+        "/usr/local/lib/libomp.a",
+    ]
     if link_openblas:
         inputs.append(str(OPENBLAS_OBJ))
     Phase(
@@ -478,7 +490,7 @@ def clang_dynamiclib(project: Project, inputs_from: list[Phase], output: str):
         project=project,
         name="Build dynamic lib",
         inputs_from=inputs_from,
-        inputs=[str(MLIR_RUNNER_UTILS)],
+        inputs=[str(MLIR_RUNNER_UTILS), str(MLIR_C_UTILS)],
         executor=build,
         output=output,
     )

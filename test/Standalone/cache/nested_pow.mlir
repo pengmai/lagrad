@@ -1,4 +1,4 @@
-func @pow(%x: f64, %n: index) -> f64 {
+func.func @pow(%x: f64, %n: index) -> f64 {
   %r_init = arith.constant 1.0 : f64
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -48,9 +48,9 @@ func @pow(%x: f64, %n: index) -> f64 {
 //   return %2#1 : f64
 // }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %x = arith.constant 1.3 : f64
   %n = arith.constant 4 : index
 
@@ -59,9 +59,9 @@ func @main() {
   %res = call_indirect %df(%x, %n) : (f64, index) -> f64
   // %res = call @__grad_pow(%x, %n) : (f64, index) -> f64
   // %res = call @pow(%x, %n) : (f64, index) -> f64
-  %t = linalg.init_tensor [] : tensor<f64>
+  %t = tensor.empty() : tensor<f64>
   %t_1 = tensor.insert %res into %t[] : tensor<f64>
   %U = tensor.cast %t_1 : tensor<f64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

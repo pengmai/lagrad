@@ -91,7 +91,7 @@ void populatePrimalCaches(LAGradContext &ctx, func::FuncOp primalFunc,
         mixedStrides.push_back(intToAttr(1));
       }
       auto resultType = memref::SubViewOp::inferRankReducedResultType(
-                            rtt.getRank(), cache.getType(), mixedOffsets,
+                            rtt.getShape(), cache.getType(), mixedOffsets,
                             mixedSizes, mixedStrides)
                             .cast<MemRefType>();
       auto view = rewriter.create<memref::SubViewOp>(

@@ -3,7 +3,7 @@
 // This appears to be relevant because of correctness issues surrounding choosing to cache
 // certain tensor iter_arguments.
 
-func @skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: tensor<544x4xf64>, %weights: tensor<544x22xf64>) -> tensor<544x3xf64> {
+func.func @skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: tensor<544x4xf64>, %weights: tensor<544x22xf64>) -> tensor<544x3xf64> {
   %positions_init = arith.constant dense<0.0> : tensor<544x3xf64>
   %zero = arith.constant 0.0 : f64
   %curr_positions_init = arith.constant dense<0.0> : tensor<544x4xf64>
@@ -49,7 +49,7 @@ func @skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: te
   return %positions : tensor<544x3xf64>
 }
 
-func @lagrad_skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: tensor<544x4xf64>, %weights: tensor<544x22xf64>) -> tensor<22x4x4xf64> {
+func.func @lagrad_skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: tensor<544x4xf64>, %weights: tensor<544x22xf64>) -> tensor<22x4x4xf64> {
   %f = constant @skinned_vertex_subset : (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<544x3xf64>
   %df = standalone.grad %f {of = [0]} :
     (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<544x3xf64>,

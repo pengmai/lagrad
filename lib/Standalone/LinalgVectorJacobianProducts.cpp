@@ -126,9 +126,9 @@ OpOperandVector runLinalgEffectiveUseAnalysis(linalg::GenericOp op,
 }
 
 // version 1
-Value reverseGenericOpV1(linalg::GenericOp op, LAGradContext &ctx,
-                         Value operand, Value vjp_value, int op_index,
-                         Value output, ConversionPatternRewriter &rewriter) {
+Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
+                       Value vjp_value, int op_index, Value output,
+                       ConversionPatternRewriter &rewriter) {
   // Need to ensure:
   // if (op_index > (size_t)genericOp.getNumInputs() - 1)
   //   continue;
@@ -246,9 +246,9 @@ Value reverseGenericOpV1(linalg::GenericOp op, LAGradContext &ctx,
   return adjoint.getResult(0);
 }
 
-Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
-                       Value vjp_value, int op_index, Value output,
-                       ConversionPatternRewriter &rewriter) {
+Value reverseGenericOpV2(linalg::GenericOp op, LAGradContext &ctx,
+                         Value operand, Value vjp_value, int op_index,
+                         Value output, ConversionPatternRewriter &rewriter) {
   // Need to ensure:
   // if (op_index > (size_t)genericOp.getNumInputs() - 1)
   //   continue;

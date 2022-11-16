@@ -1,6 +1,6 @@
 #map = affine_map<(d0) -> (d0)>
 
-func @mlir_compute_reproj_error(
+func.func @mlir_compute_reproj_error(
   %cam: tensor<11xf64>,
   %X: tensor<3xf64>,
   %w: f64,
@@ -222,14 +222,14 @@ func @mlir_compute_reproj_error(
   return %err : tensor<2xf64>
 }
 
-func @mlir_compute_zach_weight_error(%w: f64) -> f64 {
+func.func @mlir_compute_zach_weight_error(%w: f64) -> f64 {
   %one = arith.constant 1.0 : f64
   %0 = arith.mulf %w, %w : f64
   %1 = arith.subf %one, %0 : f64
   return %1 : f64
 }
 
-func @lagrad_compute_reproj_error(
+func.func @lagrad_compute_reproj_error(
   %cam: tensor<11xf64>,
   %X: tensor<3xf64>,
   %w: f64,
@@ -242,7 +242,7 @@ func @lagrad_compute_reproj_error(
   return %res#0, %res#1, %res#2 : tensor<11xf64>, tensor<3xf64>, f64
 }
 
-func @lagrad_compute_w_error(%w: f64) -> f64 {
+func.func @lagrad_compute_w_error(%w: f64) -> f64 {
   %f = constant @mlir_compute_zach_weight_error : (f64) -> f64
   %df = standalone.grad %f {of = [0]} : (f64) -> f64, (f64) -> f64
   %res = call_indirect %df(%w) : (f64) -> f64

@@ -1,4 +1,4 @@
-func @mangle_axis_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
+func.func @mangle_axis_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -17,7 +17,7 @@ func @mangle_axis_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf
   } -> tensor<f64>
   %sqsum_v = tensor.extract %sqsum[] : tensor<f64>
   %norm = math.sqrt %sqsum_v : f64
-  %res_space = linalg.init_tensor [3, 3] : tensor<3x3xf64>
+  %res_space = tensor.empty() : tensor<3x3xf64>
   %tol = arith.constant 1.0e-4 : f64
   %pred = arith.cmpf "olt", %norm, %tol : f64
   %res = scf.if %pred -> tensor<3x3xf64> {
@@ -82,7 +82,7 @@ func @mangle_axis_to_rotation_matrix(%angle_axis: tensor<3xf64>) -> tensor<3x3xf
   return %res : tensor<3x3xf64>
 }
 
-func @mapply_global_transform(%pose_params: tensor<25x3xf64>, %positions: tensor<544x3xf64>) -> tensor<544x3xf64> {
+func.func @mapply_global_transform(%pose_params: tensor<25x3xf64>, %positions: tensor<544x3xf64>) -> tensor<544x3xf64> {
   %angle_axis = tensor.extract_slice %pose_params[0, 0] [1, 3] [1, 1] : tensor<25x3xf64> to tensor<3xf64>
   %pose_slice = tensor.extract_slice %pose_params[1, 0] [1, 3] [1, 1] : tensor<25x3xf64> to tensor<3xf64>
   %pose_slice_2 = tensor.extract_slice %pose_params[2, 0] [1, 3] [1, 1] : tensor<25x3xf64> to tensor<3xf64>
@@ -138,9 +138,9 @@ func @mapply_global_transform(%pose_params: tensor<25x3xf64>, %positions: tensor
   return %positions_new : tensor<544x3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %c1 = arith.constant 1 : index
   %c3 = arith.constant 3 : index
   %A = tensor.generate {
@@ -166,6 +166,6 @@ func @main() {
   %df = standalone.grad %f : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<544x3xf64>, (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<25x3xf64>
   %res = call_indirect %df(%A, %B) : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<25x3xf64>
   %U = tensor.cast %res : tensor<25x3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

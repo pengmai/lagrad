@@ -1,6 +1,7 @@
 """An entrypoint into the lagrad-opt compiler."""
 
 import os.path as osp
+import pathlib
 import subprocess
 from typing import List, Literal
 
@@ -9,11 +10,12 @@ OPT_12 = osp.join(LLVM_12_BIN, "opt")
 CLANG_12 = osp.join(LLVM_12_BIN, "clang")
 LLC_12 = osp.join(LLVM_12_BIN, "llc")
 BIN = osp.join(osp.dirname(__file__), "..", "..", "build", "bin")
+LLVM_16_BIN = pathlib.Path.home() / ".local" / "LLVM16" / "bin"
 MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
 TENSOR_PREPROCESS = ["-canonicalize", "-convert-elementwise-to-linalg"]
 BUFFERIZE = [
-    "-tensor-constant-bufferize",
-    "-std-bufferize",
+    "-empty-tensor-to-alloc-tensor",
+    "-arith-bufferize",
     "-tensor-bufferize",
     "-standalone-bufferize",
     "-linalg-bufferize",
@@ -24,12 +26,13 @@ BUFFERIZE = [
 LOWERING = [
     "-convert-linalg-to-loops",
     "-lower-affine",
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
     "-convert-math-to-libm",
     "-convert-linalg-to-llvm",
-    "-convert-std-to-llvm",
+    "-convert-arith-to-llvm",
+    "-convert-func-to-llvm",
     "-reconcile-unrealized-casts",
     "-llvm-legalize-for-export",
 ]
@@ -54,8 +57,8 @@ ENZYME_DYLIB = osp.join(
     "Enzyme",
     "LLVMEnzyme-12.dylib",
 )
-LIB = osp.expanduser(osp.join("~", ".local", "lib"))
-LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
+LIB = osp.expanduser(osp.join("~", ".local", "LLVM16", "lib"))
+LIBS = f"{osp.join(LIB, 'libmlir_runner_utils.dylib')},{osp.join(LIB, 'libmlir_c_runner_utils.dylib')}"
 
 # Can't run tests in parallel
 TMP_DIR = osp.join(osp.dirname(__file__), "tmp")
@@ -224,7 +227,11 @@ def jit(contents: bytes, args=None, debug=False, linalg_generalize=False) -> str
     )
     try:
         runner = subprocess.run(
-            ["mlir-cpu-runner", "-entry-point-result=void", f"-shared-libs={LIBS}"],
+            [
+                f"{str(LLVM_16_BIN)}/mlir-cpu-runner",
+                "-entry-point-result=void",
+                f"-shared-libs={LIBS}",
+            ],
             input=dialect_ir,
             check=True,
             capture_output=True,

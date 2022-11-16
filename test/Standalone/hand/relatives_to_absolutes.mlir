@@ -1,11 +1,11 @@
-func @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
+func.func @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c3 = arith.constant 3 : index
   %n_one = arith.constant -1 : i32
   %cb = arith.constant 22 : index
   %matmul_init = arith.constant dense<0.0> : tensor<4x4xf64>
-  %absolute_space = linalg.init_tensor [22, 4, 4] : tensor<22x4x4xf64>
+  %absolute_space = tensor.empty() : tensor<22x4x4xf64>
   %absolutes = scf.for %iv = %c0 to %cb step %c1 iter_args(%a_iter = %absolute_space) -> (tensor<22x4x4xf64>) {
     %parent_i = tensor.extract %parents[%iv] : tensor<22xi32>
     %rel_i = tensor.extract_slice %relatives[%iv, 0, 0] [1, 4, 4] [1, 1, 1] : tensor<22x4x4xf64> to tensor<4x4xf64>
@@ -192,7 +192,7 @@ func @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<2
 // }
 
 // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-func @lagrad_relatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
+func.func @lagrad_relatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
   %f = constant @mrelatives_to_absolutes : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
   %df = standalone.grad %f {of = [0]} : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>, (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
   %res = call_indirect %df(%relatives, %parents) : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>

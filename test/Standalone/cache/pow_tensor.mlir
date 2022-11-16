@@ -1,9 +1,9 @@
-func @pow(%x: tensor<4xf64>, %i: index) -> tensor<4xf64> {
+func.func @pow(%x: tensor<4xf64>, %i: index) -> tensor<4xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %one = arith.constant 1.0 : f64
-  %p_space = linalg.init_tensor [4] : tensor<4xf64>
-  %p_init = linalg.fill(%one, %p_space) : f64, tensor<4xf64> -> tensor<4xf64>
+  %p_space = tensor.empty() : tensor<4xf64>
+  %p_init = linalg.fill ins(%one: f64) outs(%p_space: tensor<4xf64>) -> tensor<4xf64>
   %res = scf.for %iv = %c0 to %i step %c1 iter_args(%p = %p_init) -> tensor<4xf64> {
     %1 = arith.mulf %p, %x : tensor<4xf64>
     scf.yield %1 : tensor<4xf64>
@@ -54,9 +54,9 @@ func @pow(%x: tensor<4xf64>, %i: index) -> tensor<4xf64> {
 //   return %7#1 : tensor<4xf64>
 // }
 
-func private @print_memref_f64(tensor<*xf64>) attributes {llvm.emit_c_interface}
+func.func private @printMemrefF64(tensor<*xf64>) attributes {llvm.emit_c_interface}
 
-func @main() {
+func.func @main() {
   %arg = arith.constant dense<[1.3, 1.4, 1.5, 1.6]> : tensor<4xf64>
   %c4 = arith.constant 4 : index
   %f = constant @pow : (tensor<4xf64>, index) -> tensor<4xf64>
@@ -66,7 +66,7 @@ func @main() {
   // %res = call @__grad_pow(%arg, %c4) : (tensor<4xf64>, index) -> tensor<4xf64>
 
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
 
   // %x = arith.constant 1 : index
   // %c5 = arith.constant 5 : index

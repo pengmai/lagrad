@@ -1,9 +1,9 @@
-func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
+func.func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
   %zero = arith.constant 0.0 : f64
   %one = arith.constant 1.0 : f64
   %ones = arith.constant dense<1.0> : tensor<3xf64>
-  %pose_params_space = linalg.init_tensor [25, 3] : tensor<25x3xf64>
-  %pose_params_init = linalg.fill(%zero, %pose_params_space) : f64, tensor<25x3xf64> -> tensor<25x3xf64>
+  %pose_params_space = tensor.empty() : tensor<25x3xf64>
+  %pose_params_init = linalg.fill ins(%zero: f64) outs(%pose_params_space: tensor<25x3xf64>) -> tensor<25x3xf64>
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -45,7 +45,7 @@ func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
   return %pp_2#0 : tensor<25x3xf64>
 }
 
-func @lagrad_to_pose_params(%theta: tensor<26xf64>) -> tensor<26xf64> {
+func.func @lagrad_to_pose_params(%theta: tensor<26xf64>) -> tensor<26xf64> {
   %f = constant @mto_pose_params : (tensor<26xf64>) -> tensor<25x3xf64>
   %df = standalone.grad %f {of = [0]}: (tensor<26xf64>) -> tensor<25x3xf64>, (tensor<26xf64>) -> tensor<26xf64>
   %res = call_indirect %df(%theta) : (tensor<26xf64>) -> tensor<26xf64>

@@ -1,5 +1,5 @@
-func @compute_err(%vertex_positions: tensor<544x3xf64>, %points: tensor<2x3xf64>, %correspondences: tensor<2xi32>) -> tensor<2x3xf64> { 
-  %err_init = linalg.init_tensor [2, 3] : tensor<2x3xf64>
+func.func @compute_err(%vertex_positions: tensor<544x3xf64>, %points: tensor<2x3xf64>, %correspondences: tensor<2xi32>) -> tensor<2x3xf64> { 
+  %err_init = tensor.empty() : tensor<2x3xf64>
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c3 = arith.constant 3 : index
@@ -19,9 +19,9 @@ func @compute_err(%vertex_positions: tensor<544x3xf64>, %points: tensor<2x3xf64>
   return %err : tensor<2x3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %c1 = arith.constant 1 : index
   %c3 = arith.constant 3 : index
   %vertex_positions = tensor.generate {
@@ -40,6 +40,6 @@ func @main() {
   %df = standalone.grad %f {of = [0]}: (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<2x3xf64>, (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<544x3xf64>
   %adjoint = call_indirect %df(%vertex_positions, %points, %correspondences) : (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<544x3xf64>
   %U = tensor.cast %adjoint : tensor<544x3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

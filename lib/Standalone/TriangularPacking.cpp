@@ -284,6 +284,8 @@ public:
 };
 
 struct PackedTensorUsageAnalysis {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PackedTensorUsageAnalysis)
+
   PackedTensorUsageAnalysis(Operation *op) {
     op->walk([&](Operation *childOp) {
       auto packedPredicate = [&](Type type) { return hasPackedEncoding(type); };

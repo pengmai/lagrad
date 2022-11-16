@@ -3,6 +3,7 @@
 #include "Standalone/StandaloneOps.h"
 #include "Standalone/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -130,14 +131,15 @@ namespace {
 struct GradTarget : public ConversionTarget {
   GradTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
     // addLegalDialect<mlir::StandardOpsDialect>();
-    addLegalDialect<mlir::arith::ArithDialect>();
-    addLegalDialect<mlir::math::MathDialect>();
-    addLegalDialect<mlir::memref::MemRefDialect>();
+    addLegalDialect<arith::ArithDialect>();
+    addLegalDialect<math::MathDialect>();
+    addLegalDialect<bufferization::BufferizationDialect>();
+    addLegalDialect<memref::MemRefDialect>();
     addLegalDialect<tensor::TensorDialect>();
-    addLegalDialect<mlir::scf::SCFDialect>();
+    addLegalDialect<scf::SCFDialect>();
+    addLegalDialect<func::FuncDialect>();
     addLegalDialect<linalg::LinalgDialect>();
     addLegalOp<standalone::PackOp>();
-    addLegalOp<func::FuncOp>();
   }
 };
 } // end anonymous namespace
@@ -148,7 +150,8 @@ struct GradConversionPass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(GradConversionPass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<linalg::LinalgDialect, memref::MemRefDialect>();
+    registry.insert<linalg::LinalgDialect, memref::MemRefDialect,
+                    bufferization::BufferizationDialect>();
   }
   StringRef getArgument() const override { return "take-grads"; }
   StringRef getDescription() const override {

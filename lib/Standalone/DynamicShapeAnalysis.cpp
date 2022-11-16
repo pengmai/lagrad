@@ -35,26 +35,15 @@ void analyzeDynamicShapes(LAGradContext &ctx, func::FuncOp funcOp,
     }
   }
 
-  // funcOp.walk([&](linalg::InitTensorOp op) {
-  //   RankedTensorType type = op.getType();
-  //   if (type.getNumDynamicDims() > 0) {
-  //     SmallVector<OpFoldResult> shape;
-  //     shape.reserve(type.getRank());
-  //     for (int64_t idx = 0; idx < type.getRank(); idx++) {
-  //       if (type.isDynamicDim(idx)) {
-  //         shape.push_back(op.getDynamicSize(idx));
-  //       } else {
-  //         shape.push_back(intToAttr(op.getStaticSize(idx)));
-  //       }
-  //     }
-  //     ctx.dynamic_shapes.insert(std::make_pair(op.getResult(), shape));
-  //   }
-  // });
+  funcOp.walk([&](tensor::EmptyOp op) {
+    RankedTensorType type = op.getType();
+    if (type.getNumDynamicDims() > 0) {
+      ctx.dynamic_shapes.insert(
+          std::make_pair(op.getResult(), op.getMixedSizes()));
+    }
+  });
 
   funcOp.walk([&](linalg::LinalgOp op) {
-    // if (isa<linalg::InitTensorOp>(op)) {
-    //   return;
-    // }
     for (OpOperand *operand : op.getDpsInitOperands()) {
       if (auto type = operand->get().getType().cast<RankedTensorType>()) {
         if (type.getNumDynamicDims() > 0) {
