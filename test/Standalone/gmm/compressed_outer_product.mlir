@@ -1,4 +1,4 @@
-func @outer_product(%x: tensor<5xf64>, %y: tensor<5xf64>, %out_init: tensor<10xf64>) -> tensor<10xf64> {
+func.func @outer_product(%x: tensor<5xf64>, %y: tensor<5xf64>, %out_init: tensor<10xf64>) -> tensor<10xf64> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
@@ -27,16 +27,16 @@ func @outer_product(%x: tensor<5xf64>, %y: tensor<5xf64>, %out_init: tensor<10xf
   return %out : tensor<10xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %zero = arith.constant 0.0 : f64
   %x = arith.constant dense<[1.2, -3.1, 6.5, -4.2, 1.2]> : tensor<5xf64>
   %y = arith.constant dense<[3.3, -3.2, 2.1, 1.2, 0.6]> : tensor<5xf64>
-  %space = linalg.init_tensor [10] : tensor<10xf64>
-  %init = linalg.fill(%zero, %space) : f64, tensor<10xf64> -> tensor<10xf64>
+  %space = tensor.empty() : tensor<10xf64>
+  %init = linalg.fill ins(%zero: f64) outs(%space: tensor<10xf64>) -> tensor<10xf64>
   %res = call @outer_product(%x, %y, %init) : (tensor<5xf64>, tensor<5xf64>, tensor<10xf64>) -> tensor<10xf64>
   %U = tensor.cast %res : tensor<10xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

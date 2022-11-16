@@ -3,9 +3,9 @@
 #map9 = affine_map<(d0) -> (d0)>
 #map11 = affine_map<(d0) -> ()>
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func private @main_term(
+func.func private @main_term(
   %alphas: tensor<4xf64>,
   %means: tensor<4x2xf64>,
   %Qs: tensor<4x2xf64>,
@@ -13,12 +13,12 @@ func private @main_term(
   %x: tensor<10x2xf64>
 ) -> f64 {
   %zero = arith.constant 0.0 : f64
-  %Qdiags_space = linalg.init_tensor [4, 2] : tensor<4x2xf64>
+  %Qdiags_space = tensor.empty() : tensor<4x2xf64>
   %sum_qs_space = arith.constant dense<0.0> : tensor<4xf64>
   %len_d_zero = arith.constant dense<0.0> : tensor<2xf64>
-  %main_term_space = linalg.init_tensor [4] : tensor<4xf64>
+  %main_term_space = tensor.empty() : tensor<4xf64>
   %zerod_tensor = arith.constant dense<0.0> : tensor<f64>
-  %max_space = linalg.init_tensor [] : tensor<f64>
+  %max_space = tensor.empty() : tensor<f64>
 
   // This is the preprocess Qs implementation in the original function.
   %Qdiags = linalg.generic
@@ -90,7 +90,7 @@ func private @main_term(
       outs(%max_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = select %p, %arg0, %arg1 : f64
+      %next = arith.select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
@@ -114,7 +114,7 @@ func private @main_term(
   return %slse : f64
 }
 
-func @main() {
+func.func @main() {
   %alphas = arith.constant dense<[0.0000, 0.1315, 0.7556, 0.4587]> : tensor<4xf64>
   %means = arith.constant dense<[
     [0.5328, 0.2190], [0.0470, 0.6789],
@@ -176,12 +176,12 @@ func @main() {
   )
 
   %U0 = tensor.cast %res#0 : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U0) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U0) : (tensor<*xf64>) -> ()
   %U1 = tensor.cast %res#1 : tensor<4x2xf64> to tensor<*xf64>
-  call @print_memref_f64(%U1) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U1) : (tensor<*xf64>) -> ()
   %U2 = tensor.cast %res#2 : tensor<4x2xf64> to tensor<*xf64>
-  call @print_memref_f64(%U2) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U2) : (tensor<*xf64>) -> ()
   %U3 = tensor.cast %res#3 : tensor<4x2x2xf64> to tensor<*xf64>
-  call @print_memref_f64(%U3) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U3) : (tensor<*xf64>) -> ()
   return
 }

@@ -14,8 +14,7 @@
 #map13 = affine_map<() -> ()>
 #map14 = affine_map<(d0, d1) -> ()>
 module  {
-  func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-  func @gmm_objective_full(
+  func.func @gmm_objective_full(
     %alphas: tensor<3xf64>,
     %means: tensor<3x2xf64>,
     %Qs: tensor<3x2xf64>,
@@ -25,13 +24,13 @@ module  {
     %wishart_m: i64
   ) -> f64 {
     %zero = arith.constant 0.0 : f64
-    %Qdiags_space = linalg.init_tensor [3, 2] : tensor<3x2xf64>
+    %Qdiags_space = tensor.empty() : tensor<3x2xf64>
     %sum_qs_space = arith.constant dense<0.0> : tensor<3xf64>
     %len_d_zero = arith.constant dense<0.0> : tensor<2xf64>
-    %trmv_space = linalg.init_tensor [2] : tensor<2xf64>
-    %main_term_space = linalg.init_tensor [3] : tensor<3xf64>
+    %trmv_space = tensor.empty() : tensor<2xf64>
+    %main_term_space = tensor.empty() : tensor<3xf64>
     %zerod_tensor = arith.constant dense<0.0> : tensor<f64>
-    %max_space = linalg.init_tensor [] : tensor<f64>
+    %max_space = tensor.empty() : tensor<f64>
 
     // This is the preprocess Qs implementation in the original function.
     %Qdiags = linalg.generic
@@ -114,13 +113,19 @@ module  {
       %max_init_val = tensor.extract %main_term[%c0] : tensor<3xf64>
       %max_init = tensor.insert %max_init_val into %max_space[] : tensor<f64>
 
+      // %max = scf.for %iv = %c0 to %ck step %c1 iter_args(%max_it = %max_init_val) -> f64 {
+      //   %v = tensor.extract %main_term[%iv] : tensor<3xf64>
+      //   %p = arith.cmpf "ogt", %v, %max_it : f64
+      //   %next = arith.select %p, %v, %max_it : f64
+      //   scf.yield %next : f64
+      // }
       %max_t = linalg.generic
         {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
         ins(%main_term : tensor<3xf64>)
         outs(%max_init : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-        %next = select %p, %arg0, %arg1 : f64
+        %next = arith.select %p, %arg0, %arg1 : f64
         linalg.yield %next : f64
       } -> tensor<f64>
 
@@ -147,13 +152,19 @@ module  {
     %amax_init_val = tensor.extract %alphas[%c0] : tensor<3xf64>
     %amax_init = tensor.insert %amax_init_val into %max_space[] : tensor<f64>
 
+    // %amax = scf.for %iv = %c0 to %ck step %c1 iter_args(%max_it = %amax_init_val) -> f64 {
+    //   %v = tensor.extract %alphas[%iv] : tensor<3xf64>
+    //   %p = arith.cmpf ogt, %v, %max_it : f64
+    //   %next = arith.select %p, %v, %max_it : f64
+    //   scf.yield %next : f64
+    // }
     %amax_t = linalg.generic
       {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]}
       ins(%alphas : tensor<3xf64>)
       outs(%amax_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = select %p, %arg0, %arg1 : f64
+      %next = arith.select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
@@ -221,7 +232,7 @@ module  {
     return %final : f64
   }
 
-  func @lagrad_gmm_full(
+  func.func @lagrad_gmm_full(
     %arg0: tensor<3xf64>,
     %arg1: tensor<3x2xf64>,
     %arg2: tensor<3x2xf64>,

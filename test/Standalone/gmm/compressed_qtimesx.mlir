@@ -1,7 +1,7 @@
-func @Qtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> tensor<5xf64> {
+func.func @Qtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> tensor<5xf64> {
   %zero = arith.constant 0.0 : f64
-  %trmv_space = linalg.init_tensor [5] : tensor<5xf64>
-  %trmv_init = linalg.fill(%zero, %trmv_space) : f64, tensor<5xf64> -> tensor<5xf64>
+  %trmv_space = tensor.empty() : tensor<5xf64>
+  %trmv_init = linalg.fill ins(%zero: f64) outs(%trmv_space: tensor<5xf64>) -> tensor<5xf64>
 
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -37,15 +37,15 @@ func @Qtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> tensor<
 //   %0 = arith.index_cast %arg0 : index to i64
 //   memref.store %0, %u[] : memref<i64>
 //   %U = memref.cast %u : memref<i64> to memref<*xi64>
-//   call @print_memref_i64(%U) : (memref<*xi64>) -> ()
+//   call @printMemrefI64(%U) : (memref<*xi64>) -> ()
 //   return
 // }
 
 // Gradient of xcentered
-func @gradQtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> tensor<5xf64> {
-  %dx_space = linalg.init_tensor [5] : tensor<5xf64>
+func.func @gradQtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> tensor<5xf64> {
+  %dx_space = tensor.empty() : tensor<5xf64>
   %zero = arith.constant 0.0 : f64
-  %dx_init = linalg.fill(%zero, %dx_space) : f64, tensor<5xf64> -> tensor<5xf64>
+  %dx_init = linalg.fill ins(%zero: f64) outs(%dx_space: tensor<5xf64>) -> tensor<5xf64>
   %g = arith.constant dense<1.0> : tensor<5xf64>
 
   %c0 = arith.constant 0 : index
@@ -124,10 +124,10 @@ func @gradQtimesx(%Ltri_slice: tensor<10xf64>, %xcentered: tensor<5xf64>) -> ten
 //   return %dLtri : tensor<10xf64>
 // }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-func private @print_memref_i64(memref<*xi64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefI64(memref<*xi64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %Ltri_slice = arith.constant dense<[1.2, 4.3, -2.1, 0.0, -5.3, 1.1, 10.6, 4.3, -8.7, 9.1]> : tensor<10xf64>
   %xcentered = arith.constant dense<[5.3, 1.9, 4.4, -10.1, 4.3]> : tensor<5xf64>
   %f = constant @Qtimesx : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
@@ -136,6 +136,6 @@ func @main() {
   %res = call_indirect %df(%Ltri_slice, %xcentered) : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
   // %res = call @gradQtimesx(%Ltri_slice, %xcentered) : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
   %U = tensor.cast %res : tensor<5xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }
