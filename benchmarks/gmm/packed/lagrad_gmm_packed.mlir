@@ -14,9 +14,7 @@
 #map13 = affine_map<() -> ()>
 #map14 = affine_map<(d0, d1) -> ()>
 module  {
-  // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-
-  func @mlir_gmm_packed(
+  func.func @mlir_gmm_packed(
     %alphas: tensor<{{k}}xf64>,
     %means: tensor<{{k}}x{{d}}xf64>,
     %Qs: tensor<{{k}}x{{d}}xf64>,
@@ -26,13 +24,13 @@ module  {
     %wishart_m: i64
   ) -> f64 {
     %zero = arith.constant 0.0 : f64
-    %Qdiags_space = linalg.init_tensor [{{k}}, {{d}}] : tensor<{{k}}x{{d}}xf64>
+    %Qdiags_space = tensor.empty() : tensor<{{k}}x{{d}}xf64>
     %sum_qs_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
     %len_d_zero = arith.constant dense<0.0> : tensor<{{d}}xf64>
-    %trmv_space = linalg.init_tensor [{{d}}] : tensor<{{d}}xf64>
-    %main_term_space = linalg.init_tensor [{{k}}] : tensor<{{k}}xf64>
+    %trmv_space = tensor.empty() : tensor<{{d}}xf64>
+    %main_term_space = tensor.empty() : tensor<{{k}}xf64>
     %zerod_tensor = arith.constant dense<0.0> : tensor<f64>
-    %max_space = linalg.init_tensor [] : tensor<f64>
+    %max_space = tensor.empty() : tensor<f64>
 
     // This is the preprocess Qs implementation in the original function.
     %Qdiags = linalg.generic
@@ -92,6 +90,7 @@ module  {
           linalg.yield %1 : f64
         } -> tensor<{{d}}xf64>
 
+        // %Qxcentered = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<?x?xf64, "pltri">, tensor<?xf64>) outs(%)
         %Qxcentered = arith.addf %out_0, %out_1 {lagrad_should_cache} : tensor<{{d}}xf64>
         %msqnorm_t = linalg.generic {indexing_maps = [#map9, #map11], iterator_types = ["reduction"]} ins(%Qxcentered : tensor<{{d}}xf64>) outs(%zerod_tensor : tensor<f64>) {
         ^bb0(%arg0: f64, %arg1: f64):
@@ -120,7 +119,7 @@ module  {
         outs(%max_init : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-        %next = select %p, %arg0, %arg1 : f64
+        %next = arith.select %p, %arg0, %arg1 : f64
         linalg.yield %next : f64
       } -> tensor<f64>
 
@@ -153,7 +152,7 @@ module  {
       outs(%amax_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = select %p, %arg0, %arg1 : f64
+      %next = arith.select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
@@ -221,7 +220,7 @@ module  {
     return %final : f64
   }
 
-  func @lagrad_gmm_packed(
+  func.func @lagrad_gmm_packed(
     %arg0: tensor<{{k}}xf64>,
     %arg1: tensor<{{k}}x{{d}}xf64>,
     %arg2: tensor<{{k}}x{{d}}xf64>,
