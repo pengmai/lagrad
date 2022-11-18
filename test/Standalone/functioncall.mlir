@@ -1,13 +1,13 @@
 // An autodiff example that includes a function call
 
-func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
-func @square(%arg0: f32) -> f32 {
+func.func @square(%arg0: f32) -> f32 {
   %0 = arith.mulf %arg0, %arg0 : f32
   return %0 : f32
 }
 
-func @mymul(%arg0: f32, %arg1: f32) -> f32 {
+func.func @mymul(%arg0: f32, %arg1: f32) -> f32 {
   %0 = arith.mulf %arg0, %arg1 : f32
   return %0 : f32
 }
@@ -16,14 +16,14 @@ func @mymul(%arg0: f32, %arg1: f32) -> f32 {
 // ans is leftover from the forward pass
 
 // function calls. The args are from the forward pass.
-func @f(%arg0: f32, %arg1: f32) -> f32 {
+func.func @f(%arg0: f32, %arg1: f32) -> f32 {
   %0 = call @square(%arg0) : (f32) -> f32
   %1 = call @square(%0) : (f32) -> f32
   %2 = call @mymul(%1, %arg1) : (f32, f32) -> f32
   return %2 : f32
 }
 
-func @main() {
+func.func @main() {
   %f = constant @f : (f32, f32) -> f32
   %df = standalone.grad %f {of = [0]} : (f32, f32) -> f32, (f32, f32) -> f32
 
@@ -34,6 +34,6 @@ func @main() {
   %m = memref.alloca() : memref<f32>
   memref.store %res, %m[] : memref<f32>
   %U = memref.cast %m : memref<f32> to memref<*xf32>
-  call @print_memref_f32(%U) : (memref<*xf32>) -> ()
+  call @printMemrefF32(%U) : (memref<*xf32>) -> ()
   return
 }

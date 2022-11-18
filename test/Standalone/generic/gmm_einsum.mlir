@@ -1,6 +1,6 @@
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @gmm_einsum(%arg0: tensor<3x4x4xf64>, %arg1: tensor<2x3x4xf64>) -> tensor<2x3x4xf64>{
+func.func @gmm_einsum(%arg0: tensor<3x4x4xf64>, %arg1: tensor<2x3x4xf64>) -> tensor<2x3x4xf64>{
   %cst = arith.constant dense<0.0> : tensor<2x3x4xf64>
   %0 = linalg.generic
     {
@@ -21,7 +21,7 @@ func @gmm_einsum(%arg0: tensor<3x4x4xf64>, %arg1: tensor<2x3x4xf64>) -> tensor<2
   return %0 : tensor<2x3x4xf64>
 }
 
-func @main() {
+func.func @main() {
   %a = arith.constant dense<[
     [[ 0.,  1.,  2.,  3.], [ 4.,  5.,  6.,  7.], [ 8.,  9., 10., 11.], [12., 13., 14., 15.]],
     [[16., 17., 18., 19.], [20., 21., 22., 23.], [24., 25., 26., 27.], [28., 29., 30., 31.]],
@@ -35,6 +35,6 @@ func @main() {
   %res = call @gmm_einsum(%a, %b) : (tensor<3x4x4xf64>, tensor<2x3x4xf64>) -> tensor<2x3x4xf64>
 
   %U = tensor.cast %res : tensor<2x3x4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

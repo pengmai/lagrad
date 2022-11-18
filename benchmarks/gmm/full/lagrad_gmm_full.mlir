@@ -14,9 +14,7 @@
 #map13 = affine_map<() -> ()>
 #map14 = affine_map<(d0, d1) -> ()>
 module  {
-  // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
-
-  func @mlir_gmm_opt_full(
+  func.func @mlir_gmm_opt_full(
     %alphas: tensor<{{k}}xf64>,
     %means: tensor<{{k}}x{{d}}xf64>,
     %Qs: tensor<{{k}}x{{d}}xf64>,
@@ -26,13 +24,13 @@ module  {
     %wishart_m: i64
   ) -> f64 {
     %zero = arith.constant 0.0 : f64
-    %Qdiags_space = linalg.init_tensor [{{k}}, {{d}}] : tensor<{{k}}x{{d}}xf64>
+    %Qdiags_space = tensor.empty() : tensor<{{k}}x{{d}}xf64>
     %sum_qs_space = arith.constant dense<0.0> : tensor<{{k}}xf64>
     %len_d_zero = arith.constant dense<0.0> : tensor<{{d}}xf64>
-    %trmv_space = linalg.init_tensor [{{d}}] : tensor<{{d}}xf64>
-    %main_term_space = linalg.init_tensor [{{k}}] : tensor<{{k}}xf64>
+    %trmv_space = tensor.empty() : tensor<{{d}}xf64>
+    %main_term_space = tensor.empty() : tensor<{{k}}xf64>
     %zerod_tensor = arith.constant dense<0.0> : tensor<f64>
-    %max_space = linalg.init_tensor [] : tensor<f64>
+    %max_space = tensor.empty() : tensor<f64>
 
     // This is the preprocess Qs implementation in the original function.
     %Qdiags = linalg.generic
@@ -79,20 +77,21 @@ module  {
         %out_0 = arith.mulf %Qdiags_slice, %xcentered : tensor<{{d}}xf64>
 
         // The triangular matrix-vector multiplication
-        %out_1 = linalg.generic
-          {
-            doc = "Triangular Matrix-Vector Multiplication",
-            indexing_maps = [affine_map<(d0, d1) -> (d1, d0)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d1)>],
-            iterator_types = ["reduction", "parallel"]
-          }
-          // ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "pltri">, tensor<{{d}}xf64>)
-          ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64>, tensor<{{d}}xf64>)
-          outs(%len_d_zero : tensor<{{d}}xf64>) {
-        ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
-          %0 = arith.mulf %arg0, %arg1 : f64
-          %1 = arith.addf %0, %arg2 : f64
-          linalg.yield %1 : f64
-        } -> tensor<{{d}}xf64>
+        %out_1 = linalg.matvec ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64>, tensor<{{d}}xf64>) outs(%len_d_zero : tensor<{{d}}xf64>) -> tensor<{{d}}xf64>
+        // %out_1 = linalg.generic
+        //   {
+        //     doc = "Triangular Matrix-Vector Multiplication",
+        //     indexing_maps = [affine_map<(d0, d1) -> (d1, d0)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d1)>],
+        //     iterator_types = ["reduction", "parallel"]
+        //   }
+        //   // ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64, "pltri">, tensor<{{d}}xf64>)
+        //   ins(%Ltri_slice, %xcentered : tensor<{{d}}x{{d}}xf64>, tensor<{{d}}xf64>)
+        //   outs(%len_d_zero : tensor<{{d}}xf64>) {
+        // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+        //   %0 = arith.mulf %arg0, %arg1 : f64
+        //   %1 = arith.addf %0, %arg2 : f64
+        //   linalg.yield %1 : f64
+        // } -> tensor<{{d}}xf64>
 
         %Qxcentered = arith.addf %out_0, %out_1 {lagrad_should_cache} : tensor<{{d}}xf64>
         // %Qxcentered_squared = arith.mulf %Qxcentered, %Qxcentered {lagrad_should_cache} : tensor<{{d}}xf64>
@@ -123,7 +122,7 @@ module  {
         outs(%max_init : tensor<f64>) {
       ^bb0(%arg0: f64, %arg1: f64):
         %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-        %next = select %p, %arg0, %arg1 : f64
+        %next = arith.select %p, %arg0, %arg1 : f64
         linalg.yield %next : f64
       } -> tensor<f64>
 
@@ -156,7 +155,7 @@ module  {
       outs(%amax_init : tensor<f64>) {
     ^bb0(%arg0: f64, %arg1: f64):
       %p = arith.cmpf "ogt", %arg0, %arg1 : f64
-      %next = select %p, %arg0, %arg1 : f64
+      %next = arith.select %p, %arg0, %arg1 : f64
       linalg.yield %next : f64
     } -> tensor<f64>
 
@@ -221,16 +220,16 @@ module  {
 
     %final_0 = arith.subf %slse, %nlse_alphas : f64
     %final = arith.addf %final_0, %lwishpri : f64
-    %u = memref.alloc() : memref<f64>
-    memref.store %final, %u[] : memref<f64>
-    %U = memref.cast %u : memref<f64> to memref<*xf64>
-    call @print_memref_f64(%U) : (memref<*xf64>) -> ()
+    // %u = memref.alloc() : memref<f64>
+    // memref.store %final, %u[] : memref<f64>
+    // %U = memref.cast %u : memref<f64> to memref<*xf64>
+    // call @printMemrefF64(%U) : (memref<*xf64>) -> ()
     return %final : f64
   }
 
-  func private @print_memref_f64(memref<*xf64>)
+  func.func private @printMemrefF64(memref<*xf64>)
 
-  func @lagrad_gmm_full(
+  func.func @lagrad_gmm_full(
     %arg0: tensor<{{k}}xf64>,
     %arg1: tensor<{{k}}x{{d}}xf64>,
     %arg2: tensor<{{k}}x{{d}}xf64>,

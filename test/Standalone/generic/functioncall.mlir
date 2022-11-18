@@ -1,5 +1,5 @@
 // Compute the sum along rows of the matrix.
-func @rowsum(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
+func.func @rowsum(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
   %res_init = arith.constant dense<0.0> : tensor<4xf64>
   %res = linalg.generic
     {
@@ -15,7 +15,7 @@ func @rowsum(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
   return %res : tensor<4xf64>
 }
 
-func @outer(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
+func.func @outer(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
   %0 = call @rowsum(%arg0) : (tensor<4x4xf64>) -> tensor<4xf64>
   %1 = math.log %0 : tensor<4xf64>
   %2 = call @rowsum(%arg0) : (tensor<4x4xf64>) -> tensor<4xf64>
@@ -23,9 +23,9 @@ func @outer(%arg0: tensor<4x4xf64>) -> tensor<4xf64> {
   return %3 : tensor<4xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %cst = arith.constant dense<[
     [ 1.,  2.,  3.,  4.],
     [ 5.,  6.,  7.,  8.],
@@ -41,6 +41,6 @@ func @main() {
 
   // %res = call_indirect %f(%cst) : (tensor<4x4xf64>) -> tensor<4xf64>
   // %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

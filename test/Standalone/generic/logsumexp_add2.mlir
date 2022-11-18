@@ -1,6 +1,6 @@
 // This is the version of logsumexp that appears in LSTMs
 
-func @mlogsumexp(%t: tensor<4xf64>) -> f64 {
+func.func @mlogsumexp(%t: tensor<4xf64>) -> f64 {
   %out_init = arith.constant dense<0.0> : tensor<f64>
   %lse = linalg.generic
     {
@@ -21,14 +21,14 @@ func @mlogsumexp(%t: tensor<4xf64>) -> f64 {
   return %lse_l : f64
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes {llvm.emit_c_interface}
+func.func private @printMemrefF64(tensor<*xf64>) attributes {llvm.emit_c_interface}
 
-func @main() {
+func.func @main() {
   %A = arith.constant dense<[1., 2., 3., 4.]> : tensor<4xf64>
   %f = constant @mlogsumexp : (tensor<4xf64>) -> f64
   %df = standalone.grad %f : (tensor<4xf64>) -> f64, (tensor<4xf64>) -> tensor<4xf64>
   %res = call_indirect %df(%A) : (tensor<4xf64>) -> tensor<4xf64>
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

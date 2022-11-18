@@ -1,12 +1,12 @@
-func @bmm(%A: tensor<4x3x5xf64>, %B: tensor<4x5x3xf64>) -> tensor<4x3x3xf64> {
+func.func @bmm(%A: tensor<4x3x5xf64>, %B: tensor<4x5x3xf64>) -> tensor<4x3x3xf64> {
   %init = arith.constant dense<0.0> : tensor<4x3x3xf64>
   %out = linalg.batch_matmul ins(%A, %B : tensor<4x3x5xf64>, tensor<4x5x3xf64>) outs(%init : tensor<4x3x3xf64>) -> tensor<4x3x3xf64>
   return %out : tensor<4x3x3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %A = arith.constant dense<1.2> : tensor<4x3x5xf64>
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -25,7 +25,7 @@ func @main() {
     %5 = arith.index_cast %4 : index to i64
     %6 = arith.sitofp %5 : i64 to f64
     %7 = arith.negf %6 : f64
-    %8 = select %p, %7, %6 : f64
+    %8 = arith.select %p, %7, %6 : f64
     tensor.yield %8 : f64
   } : tensor<4x5x3xf64>
 
@@ -33,6 +33,6 @@ func @main() {
   %df = standalone.grad %f {of = [0]} : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x3xf64>, (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x5xf64>
   %res = call_indirect %df(%A, %B) : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x5xf64>
   %U = tensor.cast %res : tensor<4x3x5xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

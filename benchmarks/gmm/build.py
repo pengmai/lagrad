@@ -17,10 +17,11 @@ data_file = (
     / "Enzyme"
     / "enzyme"
     / "benchmarks"
+    / "ReverseMode"
     / "gmm"
     / "data"
     # / "test.txt"
-    / "1k"
+    / "10k"
     / "gmm_d10_K25.txt"
 )
 
@@ -41,16 +42,25 @@ def get_project(title: str, subdir: str, out: str, template_args: dict):
         c_sources,
         template_args=template_args,
         extra_includes=[include_path],
+        include_openblas=True,
     )
     enzyme_phase = compile_enzyme(
         project, enzyme_sources, extra_includes=[include_path]
     )
-    enzyme_mlir_phase = compile_mlir_enzyme(project, enzyme_mlir_sources, template_args)
-    lagrad_phase = compile_lagrad(project, lagrad_sources, template_args)
+    # enzyme_mlir_phase = compile_mlir_enzyme(project, enzyme_mlir_sources, template_args)
+    lagrad_phase = compile_lagrad(
+        project, lagrad_sources, template_args, use_clang=False
+    )
     clang_link(
         project,
-        [c_phase, enzyme_phase, enzyme_mlir_phase, lagrad_phase],
+        [
+            c_phase,
+            enzyme_phase,
+            # enzyme_mlir_phase,
+            lagrad_phase,
+        ],
         f"{out}.out",
+        link_openblas=True,
     )
     return project
 
@@ -83,6 +93,6 @@ if __name__ == "__main__":
 
         cli(
             get_full_project(template_args),
-            get_tri_project(template_args),
-            get_packed_project(template_args),
+            # get_tri_project(template_args),
+            # get_packed_project(template_args),
         )

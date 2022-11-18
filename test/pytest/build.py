@@ -44,9 +44,10 @@ with new_context() as ctx:
         + ba_sources
         + hand_sources
         + lstm_sources
-        + nn_sources
-        + sparse_sources,
+        + nn_sources,
+        # + sparse_sources,
         use_clang=False,
+        fast_math=False,
     )
     clang_dynamiclib(project, [lagrad_phase], "mlir_bindings.dylib")
     cli(project)

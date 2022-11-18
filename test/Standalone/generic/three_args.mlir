@@ -1,6 +1,6 @@
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @generic_three_args(
+func.func @generic_three_args(
   %Qdiags: tensor<{{k}}x{{d}}xf64>,
   %xcentered: tensor<{{n}}x{{k}}x{{d}}xf64>
 ) -> tensor<{{n}}x{{k}}x{{d}}xf64> {
@@ -49,7 +49,7 @@ func @generic_three_args(
   return %Lxcentered : tensor<{{n}}x{{k}}x{{d}}xf64>
 }
 
-func @main() {
+func.func @main() {
   %Qdiags = arith.constant dense<{{Qdiags}}> : tensor<{{k}}x{{d}}xf64>
   %xcentered = arith.constant dense<{{xcentered}}> : tensor<{{n}}x{{k}}x{{d}}xf64>
 
@@ -62,6 +62,6 @@ func @main() {
   // %res = call @generic_three_args(%Qdiags, %xcentered) : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
   %U = tensor.cast %res : tensor<{{n}}x{{k}}x{{d}}xf64> to tensor<*xf64>
 
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

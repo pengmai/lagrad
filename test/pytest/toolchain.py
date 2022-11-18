@@ -38,12 +38,13 @@ LOWERING = [
 ]
 LOWERING_ENZYME = [
     "-convert-linalg-to-loops",
-    "-convert-scf-to-std",
+    "-convert-scf-to-cf",
     "-convert-memref-to-llvm",
     "-convert-math-to-llvm",
-    "-convert-standalone-to-llvm",
+    "-convert-arith-to-llvm",
     "-convert-linalg-to-llvm",
-    "-convert-std-to-llvm",
+    "-convert-standalone-to-llvm",
+    "-convert-func-to-llvm",
     "-reconcile-unrealized-casts",
     "-convert-static-allocs",
     "-llvm-legalize-for-export",
@@ -89,7 +90,7 @@ def lower_to_llvm_dialect(contents: bytes, take_grads=False) -> bytes:
 
 def lower_to_llvm(llvm_dialect: bytes) -> bytes:
     translate_p = subprocess.run(
-        ["mlir-translate", "-mlir-to-llvmir"],
+        [f"{LLVM_16_BIN}/mlir-translate", "-mlir-to-llvmir"],
         input=llvm_dialect,
         capture_output=True,
         check=True,

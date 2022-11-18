@@ -1,4 +1,4 @@
-func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
+func.func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
   %cst = arith.constant dense<0.0> : tensor<5xf32>
   %0 = linalg.generic
     {
@@ -14,9 +14,9 @@ func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
   return %0 : tensor<5xf32>
 }
 
-func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %cst = arith.constant dense<[
     [0.95033034, 0.04059763, 0.63056314, 0.21032931, 0.9302365 ],
     [0.46717497, 0.72913109, 0.00538126, 0.63545051, 0.46740388],
@@ -28,6 +28,6 @@ func @main() {
   %df = standalone.grad %f {of = [0]}: (tensor<4x5xf32>) -> tensor<5xf32>, (tensor<4x5xf32>) -> tensor<4x5xf32>
   %res = call_indirect %df(%cst) : (tensor<4x5xf32>) -> tensor<4x5xf32>
   %U = tensor.cast %res : tensor<4x5xf32> to tensor<*xf32>
-  call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
+  call @printMemrefF32(%U) : (tensor<*xf32>) -> ()
   return
 }

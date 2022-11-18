@@ -112,8 +112,11 @@ public:
 
 static unsigned int checkBitWidths(linalg::LinalgOp op) {
   assert(op.getNumDpsInits() > 0);
-  unsigned int bitWidth =
-      op->getResultTypes()[0].cast<ShapedType>().getElementTypeBitWidth();
+  unsigned int bitWidth = op.getDpsInputOperand(0)
+                              ->get()
+                              .getType()
+                              .cast<ShapedType>()
+                              .getElementTypeBitWidth();
   for (OpOperand *operand : op.getOpOperandsMatchingBBargs()) {
     Type type = operand->get().getType();
     if (auto memrefType = type.dyn_cast<MemRefType>()) {
