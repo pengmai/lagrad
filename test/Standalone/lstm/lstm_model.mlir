@@ -1,6 +1,6 @@
 #map = affine_map<(d0) -> (d0)>
 
-func private @msigmoid(%x: f64) -> f64 {
+func.func private @msigmoid(%x: f64) -> f64 {
   %one = arith.constant 1.0 : f64
   %nx = arith.negf %x : f64
   %exp = math.exp %nx : f64
@@ -9,7 +9,7 @@ func private @msigmoid(%x: f64) -> f64 {
   return %frac : f64
 }
 
-func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: tensor<14xf64>, %cell: tensor<14xf64>, %input: tensor<14xf64>) -> tensor<14xf64> {
+func.func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: tensor<14xf64>, %cell: tensor<14xf64>, %input: tensor<14xf64>) -> tensor<14xf64> {
   %zero_b = arith.constant dense<0.0> : tensor<14xf64>
   %fweight = tensor.extract_slice %weight[0, 0] [1, 14] [1, 1] : tensor<4x14xf64> to tensor<14xf64>
   %iweight = tensor.extract_slice %weight[1, 0] [1, 14] [1, 1] : tensor<4x14xf64> to tensor<14xf64>
@@ -29,7 +29,7 @@ func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: te
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
     %1 = arith.addf %0, %arg2 : f64
-    %2 = call @msigmoid(%1) : (f64) -> f64
+    %2 = func.call @msigmoid(%1) : (f64) -> f64
     linalg.yield %2 : f64
   } -> tensor<14xf64>
   %ingate = linalg.generic
@@ -42,7 +42,7 @@ func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: te
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
     %1 = arith.addf %0, %arg2 : f64
-    %2 = call @msigmoid(%1) : (f64) -> f64
+    %2 = func.call @msigmoid(%1) : (f64) -> f64
     linalg.yield %2 : f64
   } -> tensor<14xf64>
   %outgate = linalg.generic
@@ -55,7 +55,7 @@ func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: te
   ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
     %0 = arith.mulf %arg0, %arg1 : f64
     %1 = arith.addf %0, %arg2 : f64
-    %2 = call @msigmoid(%1) : (f64) -> f64
+    %2 = func.call @msigmoid(%1) : (f64) -> f64
     linalg.yield %2 : f64
   } -> tensor<14xf64>
   %change = linalg.generic
@@ -107,7 +107,7 @@ func @lstm_model(%weight: tensor<4x14xf64>, %bias: tensor<4x14xf64>, %hidden: te
   return %hidden_next : tensor<14xf64>
 }
 
-func @lagrad_lstm_model(
+func.func @lagrad_lstm_model(
   %weight: tensor<4x14xf64>,
   %bias: tensor<4x14xf64>,
   %hidden: tensor<14xf64>,

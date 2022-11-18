@@ -1,7 +1,7 @@
 // An elementwise gradient of a matrix-vector multiplication.
-func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF32(tensor<*xf32>) attributes { llvm.emit_c_interface }
 
-func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
+func.func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
   %res = arith.constant dense<0.0> : tensor<3xf32>
   %val = linalg.matvec ins(%arg0, %arg1 : tensor<3x4xf32>, tensor<4xf32>) outs(%res : tensor<3xf32>) -> tensor<3xf32>
   %c = arith.constant dense<[1.1, -1.2, 1.0]> : tensor<3xf32>
@@ -26,7 +26,7 @@ func @matvec(%arg0 : tensor<3x4xf32>, %arg1 : tensor<4xf32>) -> tensor<3xf32> {
 //   return %res : tensor<3x4xf32>
 // }
 
-func @main() {
+func.func @main() {
   %M = arith.constant dense<[
     [0.8,  0.9,  1.2, -4.3],
     [2.3, -1.1, -7.5, -3.2],
@@ -40,6 +40,6 @@ func @main() {
   // %val = call @mygrad(%M, %x) : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>
 
   %casted = tensor.cast %val : tensor<3x4xf32> to tensor<*xf32>
-  call @print_memref_f32(%casted) : (tensor<*xf32>) -> ()
+  call @printMemrefF32(%casted) : (tensor<*xf32>) -> ()
   return
 }

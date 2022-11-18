@@ -1,6 +1,6 @@
 #map = affine_map<(d0, d1) -> (d0, d1)>
 #map1 = affine_map<(d0, d1) -> (d1)>
-func @batched_cross_entropy(%activations: tensor<4x2xf32>, %labels: tensor<2xindex>) -> f32 {
+func.func @batched_cross_entropy(%activations: tensor<4x2xf32>, %labels: tensor<2xindex>) -> f32 {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %cd = arith.constant 4 : index
@@ -12,7 +12,7 @@ func @batched_cross_entropy(%activations: tensor<4x2xf32>, %labels: tensor<2xind
       %ai = tensor.extract %activations[%iv, %bv] : tensor<4x2xf32>
       %max_val = tensor.extract %max_it[%bv] : tensor<2xf32>
       %p = arith.cmpf ogt, %ai, %max_val : f32
-      %max_val_next = select %p, %ai, %max_val : f32
+      %max_val_next = arith.select %p, %ai, %max_val : f32
       %max_next = tensor.insert %max_val_next into %max_it[%bv] : tensor<2xf32>
       scf.yield %max_next : tensor<2xf32>
     }
@@ -55,16 +55,16 @@ func @batched_cross_entropy(%activations: tensor<4x2xf32>, %labels: tensor<2xind
   return %primal : f32
 }
 
-func private @print_f32(%x: f32) {
-  %0 = linalg.init_tensor [] : tensor<f32>
+func.func private @print_f32(%x: f32) {
+  %0 = tensor.empty() : tensor<f32>
   %1 = tensor.insert %x into %0[] : tensor<f32>
   %2 = tensor.cast %1 : tensor<f32> to tensor<*xf32>
-  call @print_memref_f32(%2) : (tensor<*xf32>) -> ()
+  call @printMemrefF32(%2) : (tensor<*xf32>) -> ()
   return
 }
 
-func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface }
-func @main() {
+func.func private @printMemrefF32(tensor<*xf32>) attributes { llvm.emit_c_interface }
+func.func @main() {
   %activations = arith.constant dense<[
     [-4.0,  5.0],
     [ 0.6,  4.0],
@@ -77,6 +77,6 @@ func @main() {
   %df = standalone.grad %f : (tensor<4x2xf32>, tensor<2xindex>) -> f32, (tensor<4x2xf32>, tensor<2xindex>) -> tensor<4x2xf32>
   %res = call_indirect %df(%activations, %labels) : (tensor<4x2xf32>, tensor<2xindex>) -> tensor<4x2xf32>
   %U = tensor.cast %res : tensor<4x2xf32> to tensor<*xf32>
-  call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
+  call @printMemrefF32(%U) : (tensor<*xf32>) -> ()
   return
 }

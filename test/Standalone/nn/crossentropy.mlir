@@ -1,6 +1,6 @@
 #map = affine_map<(d0) -> (d0)>
 
-func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
+func.func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %cd = arith.constant 4 : index
@@ -8,7 +8,7 @@ func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
   %max = scf.for %iv = %c1 to %cd step %c1 iter_args(%max_it = %max_init) -> f64 {
     %ai = tensor.extract %activations[%iv] : tensor<4xf64>
     %p = arith.cmpf ogt, %ai, %max_it : f64
-    %max_next = select %p, %ai, %max_it : f64
+    %max_next = arith.select %p, %ai, %max_it : f64
     scf.yield %max_next : f64
   }
   %zerot = arith.constant dense<0.0> : tensor<4xf64>
@@ -51,9 +51,9 @@ func @cross_entropy(%activations: tensor<4xf64>, %label: index) -> f64 {
   return %nlogprob : f64
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %x = arith.constant dense<[-4., 0.6, -1.2, 0.12]> : tensor<4xf64>
   %label = arith.constant 1 : index
   %f = constant @cross_entropy : (tensor<4xf64>, index) -> f64
@@ -64,6 +64,6 @@ func @main() {
   // %s1 = tensor.insert %res into %s[] : tensor<f64>
   // %U = tensor.cast %s1 : tensor<f64> to tensor<*xf64>
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

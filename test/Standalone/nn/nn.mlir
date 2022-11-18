@@ -7,7 +7,7 @@
   iterator_types = ["parallel", "parallel"]
 }
 
-func @batched_cross_entropy(%activations: tensor<10x64xf32>, %labels: tensor<64xi32>) -> f32 {
+func.func @batched_cross_entropy(%activations: tensor<10x64xf32>, %labels: tensor<64xi32>) -> f32 {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %cd = arith.constant 10 : index
@@ -19,7 +19,7 @@ func @batched_cross_entropy(%activations: tensor<10x64xf32>, %labels: tensor<64x
       %ai = tensor.extract %activations[%iv, %bv] : tensor<10x64xf32>
       %max_val = tensor.extract %max_it[%bv] : tensor<64xf32>
       %p = arith.cmpf ogt, %ai, %max_val : f32
-      %max_val_next = select %p, %ai, %max_val : f32
+      %max_val_next = arith.select %p, %ai, %max_val : f32
       %max_next = tensor.insert %max_val_next into %max_it[%bv] : tensor<64xf32>
       scf.yield %max_next : tensor<64xf32>
     }
@@ -72,7 +72,7 @@ func @batched_cross_entropy(%activations: tensor<10x64xf32>, %labels: tensor<64x
   iterator_types = ["parallel", "parallel"]
 }
 
-func @mlir_mlp_batched(
+func.func @mlir_mlp_batched(
   %input_t: tensor<784x64xf32>,
   %labels: tensor<64xi32>,
   %w0: tensor<512x784xf32>,
@@ -95,7 +95,7 @@ func @mlir_mlp_batched(
   %h0 = linalg.generic #relu2d ins(%h0_1 : tensor<512x64xf32>) outs(%zero_0 : tensor<512x64xf32>) {
   ^bb0(%arg0: f32, %arg1: f32):
     %p = arith.cmpf ogt, %arg0, %zero : f32
-    %0 = select %p, %arg0, %zero : f32
+    %0 = arith.select %p, %arg0, %zero : f32
     linalg.yield %0 : f32
   } -> tensor<512x64xf32>
 
@@ -108,7 +108,7 @@ func @mlir_mlp_batched(
   %h1 = linalg.generic #relu2d ins(%h1_1 : tensor<512x64xf32>) outs(%zero_1 : tensor<512x64xf32>) {
   ^bb0(%arg0: f32, %arg1: f32):
     %p = arith.cmpf ogt, %arg0, %zero : f32
-    %0 = select %p, %arg0, %zero : f32
+    %0 = arith.select %p, %arg0, %zero : f32
     linalg.yield %0 : f32
   } -> tensor<512x64xf32>
 
@@ -122,81 +122,81 @@ func @mlir_mlp_batched(
   return %loss : f32
 }
 
-func @lagrad_mlp_batched(
-  %input_t: tensor<784x64xf32>,
-  %labels: tensor<64xi32>,
-  %w0: tensor<512x784xf32>,
-  %b0: tensor<512xf32>,
-  %w1: tensor<512x512xf32>,
-  %b1: tensor<512xf32>,
-  %w2: tensor<10x512xf32>,
-  %b2: tensor<10xf32>
-) -> (
-  tensor<512x784xf32>,
-  tensor<512xf32>,
-  tensor<512x512xf32>,
-  tensor<512xf32>,
-  tensor<10x512xf32>,
-  tensor<10xf32>
-) {
-  %f = constant @mlir_mlp_batched : (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32
-  %df = standalone.grad %f {of = [2, 3, 4, 5, 6, 7]} : (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32, (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> (
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  )
-  %res:6 = call_indirect %df(%input_t, %labels, %w0, %b0, %w1, %b1, %w2, %b2) : (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> (
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  )
-  return %res#0, %res#1, %res#2, %res#3, %res#4, %res#5 :
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-}
+// func.func @lagrad_mlp_batched(
+//   %input_t: tensor<784x64xf32>,
+//   %labels: tensor<64xi32>,
+//   %w0: tensor<512x784xf32>,
+//   %b0: tensor<512xf32>,
+//   %w1: tensor<512x512xf32>,
+//   %b1: tensor<512xf32>,
+//   %w2: tensor<10x512xf32>,
+//   %b2: tensor<10xf32>
+// ) -> (
+//   tensor<512x784xf32>,
+//   tensor<512xf32>,
+//   tensor<512x512xf32>,
+//   tensor<512xf32>,
+//   tensor<10x512xf32>,
+//   tensor<10xf32>
+// ) {
+//   %f = constant @mlir_mlp_batched : (
+//     tensor<784x64xf32>,
+//     tensor<64xi32>,
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   ) -> f32
+//   %df = standalone.grad %f {of = [2, 3, 4, 5, 6, 7]} : (
+//     tensor<784x64xf32>,
+//     tensor<64xi32>,
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   ) -> f32, (
+//     tensor<784x64xf32>,
+//     tensor<64xi32>,
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   ) -> (
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   )
+//   %res:6 = call_indirect %df(%input_t, %labels, %w0, %b0, %w1, %b1, %w2, %b2) : (
+//     tensor<784x64xf32>,
+//     tensor<64xi32>,
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   ) -> (
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+//   )
+//   return %res#0, %res#1, %res#2, %res#3, %res#4, %res#5 :
+//     tensor<512x784xf32>,
+//     tensor<512xf32>,
+//     tensor<512x512xf32>,
+//     tensor<512xf32>,
+//     tensor<10x512xf32>,
+//     tensor<10xf32>
+// }

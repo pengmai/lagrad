@@ -1,5 +1,5 @@
 // Be mindful of moving the entries of results around! This is currently broken.
-func @insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
+func.func @insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
   %c2 = arith.constant 2 : index
   %c3 = arith.constant 3 : index
   %two = arith.constant 2.0 : f64
@@ -8,7 +8,7 @@ func @insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
   return %res_0 : tensor<5x4xf64>
 }
 
-func @disabled_insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
+func.func @disabled_insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
   %c2 = arith.constant 2 : index
   %c3 = arith.constant 3 : index
   %two = arith.constant 2.0 : f64
@@ -37,14 +37,14 @@ func @disabled_insert(%t: tensor<4xf64>) -> tensor<5x4xf64> {
 //   return %dres_0 : tensor<4xf64>
 // }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %arg = arith.constant dense<[1., 2., 3., 4.]> : tensor<4xf64>
   %f = constant @insert : (tensor<4xf64>) -> tensor<5x4xf64>
   %df = standalone.grad %f : (tensor<4xf64>) -> tensor<5x4xf64>, (tensor<4xf64>) -> tensor<4xf64>
   %res = call_indirect %df(%arg) : (tensor<4xf64>) -> tensor<4xf64>
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

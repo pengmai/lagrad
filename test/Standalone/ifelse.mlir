@@ -1,4 +1,4 @@
-func @ifelse(%arg0: f64) -> f64 {
+func.func @ifelse(%arg0: f64) -> f64 {
   %cst = arith.constant 0.0 : f64
   %0 = arith.cmpf "oge", %arg0, %cst : f64
   %1 = scf.if %0 -> f64 {
@@ -12,7 +12,7 @@ func @ifelse(%arg0: f64) -> f64 {
 }
 
 // The unbound variable only occurs in the then block, not the else block.
-func @ifelse_only_then_block(%arg0: f64) -> f64 {
+func.func @ifelse_only_then_block(%arg0: f64) -> f64 {
   %cst = arith.constant 0.0 : f64
   %0 = arith.cmpf "oge", %arg0, %cst : f64
   %1 = scf.if %0 -> f64 {
@@ -25,7 +25,7 @@ func @ifelse_only_then_block(%arg0: f64) -> f64 {
   return %1 : f64
 }
 
-func @ifsecondarg(%arg0: f64, %arg1: f64) -> f64 {
+func.func @ifsecondarg(%arg0: f64, %arg1: f64) -> f64 {
   %cst = arith.constant 3.4 : f64
   %0 = arith.cmpf "oge", %arg0, %arg1 : f64
   %1 = arith.mulf %cst, %arg1 : f64
@@ -41,17 +41,17 @@ func @ifsecondarg(%arg0: f64, %arg1: f64) -> f64 {
   return %5 : f64
 }
 
-func private @print_memref_f64(memref<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(memref<*xf64>) attributes { llvm.emit_c_interface }
 
-func @print(%arg0: f64) {
+func.func @print(%arg0: f64) {
   %m = memref.alloca() : memref<f64>
   memref.store %arg0, %m[] : memref<f64>
   %U = memref.cast %m : memref<f64> to memref<*xf64>
-  call @print_memref_f64(%U) : (memref<*xf64>) -> ()
+  call @printMemrefF64(%U) : (memref<*xf64>) -> ()
   return
 }
 
-func @main() {
+func.func @main() {
   %arg = arith.constant 4.5 : f64
   %arg1 = arith.constant -1.0 : f64
 

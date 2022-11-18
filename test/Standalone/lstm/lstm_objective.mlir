@@ -1,6 +1,6 @@
 #map = affine_map<(d0) -> (d0)>
 
-func private @msigmoid(%x: f64) -> f64 {
+func.func private @msigmoid(%x: f64) -> f64 {
   %one = arith.constant 1.0 : f64
   %nx = arith.negf %x : f64
   %exp = math.exp %nx : f64
@@ -9,7 +9,7 @@ func private @msigmoid(%x: f64) -> f64 {
   return %frac : f64
 }
 
-func @mlogsumexp(%t: tensor<14xf64>) -> f64 {
+func.func @mlogsumexp(%t: tensor<14xf64>) -> f64 {
   %out_init = arith.constant dense<0.0> : tensor<f64>
   %lse = linalg.generic
     {
@@ -30,7 +30,7 @@ func @mlogsumexp(%t: tensor<14xf64>) -> f64 {
   return %lse_l : f64
 }
 
-func @mlstm_objective(
+func.func @mlstm_objective(
   %main_params: tensor<2x2x4x14xf64>,
   %extra_params: tensor<3x14xf64>,
   %state_init: tensor<2x2x14xf64>,
@@ -77,7 +77,7 @@ func @mlstm_objective(
       ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
         %0 = arith.mulf %arg0, %arg1 : f64
         %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
+        %2 = func.call @msigmoid(%1) : (f64) -> f64
         linalg.yield %2 : f64
       } -> tensor<14xf64>
       %ingate = linalg.generic
@@ -90,7 +90,7 @@ func @mlstm_objective(
       ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
         %0 = arith.mulf %arg0, %arg1 : f64
         %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
+        %2 = func.call @msigmoid(%1) : (f64) -> f64
         linalg.yield %2 : f64
       } -> tensor<14xf64>
       %outgate = linalg.generic
@@ -103,7 +103,7 @@ func @mlstm_objective(
       ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
         %0 = arith.mulf %arg0, %arg1 : f64
         %1 = arith.addf %0, %arg2 : f64
-        %2 = call @msigmoid(%1) : (f64) -> f64
+        %2 = func.call @msigmoid(%1) : (f64) -> f64
         linalg.yield %2 : f64
       } -> tensor<14xf64>
       %change = linalg.generic
@@ -185,7 +185,7 @@ func @mlstm_objective(
     } -> tensor<14xf64>
 
     // end inlined lstm predict
-    %lse = call @mlogsumexp(%ypred) : (tensor<14xf64>) -> f64
+    %lse = func.call @mlogsumexp(%ypred) : (tensor<14xf64>) -> f64
     %ynorm = linalg.generic
       {
         indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>],
@@ -215,7 +215,7 @@ func @mlstm_objective(
 
 // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @lagrad_lstm_objective(
+func.func @lagrad_lstm_objective(
   %main_params: tensor<2x2x4x14xf64>,
   %extra_params: tensor<3x14xf64>,
   %state_init: tensor<2x2x14xf64>,

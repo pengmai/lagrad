@@ -1,18 +1,18 @@
 // A very simple example of a program to autodiff.
-func private @print_memref_f32(memref<*xf32>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF32(memref<*xf32>) attributes { llvm.emit_c_interface }
 
-func @print_0d(%arg : memref<f32>) {
+func.func @print_0d(%arg : memref<f32>) {
   %U = memref.cast %arg :  memref<f32> to memref<*xf32>
-  call @print_memref_f32(%U) : (memref<*xf32>) -> ()
+  call @printMemrefF32(%U) : (memref<*xf32>) -> ()
   return
 }
 
-func @square(%arg : f32) -> f32 {
+func.func @square(%arg : f32) -> f32 {
   %res = arith.mulf %arg, %arg : f32
   return %res : f32
 }
 
-func @main() -> i64 {
+func.func @main() -> i64 {
   %cst = arith.constant 3.0 : f32
 
   %fa = constant @square : (f32) -> f32

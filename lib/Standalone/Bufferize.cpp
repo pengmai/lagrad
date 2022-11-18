@@ -52,20 +52,16 @@ void bufferizeLinalgOp(linalg::LinalgOp linalgOp, ValueRange outputBuffers,
   rewriter.replaceOp(linalgOp, results);
 }
 
-class BufferizeInsertExtractPair : public ConversionPattern {
+class BufferizeInsertExtractPair
+    : public OpConversionPattern<tensor::ExtractSliceOp> {
 public:
   BufferizeInsertExtractPair(const InsertExtractAnalysis &ieAnalysis,
                              TypeConverter &typeConverter, MLIRContext *ctx)
-      : ConversionPattern(typeConverter, MatchAnyOpTypeTag(), /*benefit=*/3,
-                          ctx),
+      : OpConversionPattern(typeConverter, ctx, /*benefit=*/3),
         ieAnalysis{ieAnalysis} {}
   LogicalResult
-  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+  matchAndRewrite(tensor::ExtractSliceOp extractSliceOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<tensor::ExtractSliceOp>(op)) {
-      return failure();
-    }
-    auto extractSliceOp = cast<tensor::ExtractSliceOp>(op);
     if (!ieAnalysis.isPairedExtractSlice(extractSliceOp)) {
       return failure();
     }
@@ -74,25 +70,25 @@ public:
     auto sourceType = getTypeConverter()
                           ->convertType(extractSliceOp.getSourceType())
                           .cast<MemRefType>();
+    Location loc = extractSliceOp.getLoc();
 
     // TODO: Need to see if we need to manually make this layout dynamic.
     auto resultType =
         memref::SubViewOp::inferRankReducedResultType(
-            sliceType.getRank(), sourceType, extractSliceOp.getMixedOffsets(),
+            sliceType.getShape(), sourceType, extractSliceOp.getMixedOffsets(),
             extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides())
             .cast<MemRefType>();
     auto identityResultType =
         getTypeConverter()->convertType(sliceType).cast<MemRefType>();
     Value source = rewriter.create<bufferization::ToMemrefOp>(
-        op->getLoc(), sourceType, extractSliceOp.getSource());
+        loc, sourceType, extractSliceOp.getSource());
     Value subview = rewriter.create<memref::SubViewOp>(
-        op->getLoc(), resultType, source, extractSliceOp.getMixedOffsets(),
+        loc, resultType, source, extractSliceOp.getMixedOffsets(),
         extractSliceOp.getMixedSizes(), extractSliceOp.getMixedStrides());
-    auto casted = rewriter.create<memref::CastOp>(op->getLoc(),
-                                                  identityResultType, subview);
-    auto loaded =
-        rewriter.create<bufferization::ToTensorOp>(op->getLoc(), casted);
-    rewriter.replaceOp(op, loaded.getResult());
+    auto casted =
+        rewriter.create<memref::CastOp>(loc, identityResultType, subview);
+    auto loaded = rewriter.create<bufferization::ToTensorOp>(loc, casted);
+    rewriter.replaceOp(extractSliceOp, loaded.getResult());
     rewriter.replaceOp(insertSliceOp, extractSliceOp.getSource());
 
     // Need to ensure linalg ops that write to the extractSliceOp are bufferized
@@ -180,7 +176,6 @@ public:
     }
     auto resultTensorType =
         op.getResult().getType().dyn_cast_or_null<RankedTensorType>();
-    auto resultRank = resultTensorType.getRank();
     // Curently only deal with 2D -> 1D and 3D -> 2D rank reduction cases.
     if (!resultTensorType ||
         op.getOffsetSizeAndStrideStartOperandIndex() != 1) {
@@ -197,10 +192,11 @@ public:
       source = rewriter.create<memref::CastOp>(op.getLoc(), sourceType, source);
     }
 
-    auto resultType = memref::SubViewOp::inferRankReducedResultType(
-                          resultRank, sourceType, op.getMixedOffsets(),
-                          op.getMixedSizes(), op.getMixedStrides())
-                          .cast<MemRefType>();
+    auto resultType =
+        memref::SubViewOp::inferRankReducedResultType(
+            resultTensorType.getShape(), sourceType, op.getMixedOffsets(),
+            op.getMixedSizes(), op.getMixedStrides())
+            .cast<MemRefType>();
     auto identityResultType =
         getTypeConverter()->convertType(resultTensorType).cast<MemRefType>();
 
@@ -235,8 +231,9 @@ public:
     if (!hasWriteAfter && !force_copy) {
       // rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op,
       //                                                   subview.getResult());
-      rewriter.replaceOpWithNewOp<memref::CastOp>(op, identityResultType,
-                                                  subview);
+      // rewriter.replaceOpWithNewOp<memref::CastOp>(op, identityResultType,
+      //                                             subview);
+      rewriter.replaceOp(op, subview);
     } else {
       Value dest =
           rewriter.create<memref::AllocOp>(op.getLoc(), identityResultType);
@@ -278,7 +275,7 @@ public:
 
     auto sliceType =
         memref::SubViewOp::inferRankReducedResultType(
-            op.getSourceType().getRank(),
+            op.getSourceType().getShape(),
             adaptor.getDest().getType().cast<MemRefType>(),
             op.getMixedOffsets(), op.getMixedSizes(), op.getMixedStrides())
             .cast<MemRefType>();
@@ -301,6 +298,103 @@ public:
                                       subview);
       rewriter.replaceOp(op, dest);
     }
+    return success();
+  }
+};
+
+class BufferizeForOp : public OpConversionPattern<scf::ForOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(scf::ForOp forOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (forOp.getNumIterOperands() == 0) {
+      return failure();
+    }
+    Block &block = forOp.getRegion().front();
+    auto yieldOp = cast<scf::YieldOp>(block.getTerminator());
+    SmallVector<bool, 4> keepMask;
+    keepMask.reserve(yieldOp.getNumOperands());
+    SmallVector<Value, 4> newBlockTransferArgs, newIterArgs, newYieldValues,
+        newResultValues;
+    newBlockTransferArgs.reserve(1 + forOp.getNumIterOperands());
+    newBlockTransferArgs.push_back(Value()); // iv placeholder with null value
+    newIterArgs.reserve(forOp.getNumIterOperands());
+    newYieldValues.reserve(yieldOp.getNumOperands());
+    newResultValues.reserve(forOp.getNumResults());
+    BlockAndValueMapping oldToNew;
+    for (auto it : llvm::zip(adaptor.getInitArgs(),     // iter from outside
+                             forOp.getRegionIterArgs(), // iter inside region
+                             forOp.getResults(),        // op results
+                             yieldOp.getOperands()      // iter yield
+                             )) {
+      // auto result = std::get<2>(it);
+      auto regionArg = std::get<1>(it);
+      bool forwarded = regionArg.getType().isa<RankedTensorType>();
+      keepMask.push_back(!forwarded);
+      if (forwarded) {
+        newBlockTransferArgs.push_back(std::get<0>(it));
+        newResultValues.push_back(std::get<0>(it));
+        Value loaded = rewriter.create<bufferization::ToTensorOp>(
+            forOp.getLoc(), std::get<0>(it));
+        regionArg.replaceAllUsesWith(loaded);
+        continue;
+      }
+      newIterArgs.push_back(std::get<0>(it));
+      newYieldValues.push_back(std::get<3>(it));
+      newBlockTransferArgs.push_back(Value()); // placeholder with null value
+      newResultValues.push_back(Value());      // placeholder with null value
+    }
+
+    scf::ForOp newForOp = rewriter.create<scf::ForOp>(
+        forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+        forOp.getStep(), newIterArgs);
+    Block &newBlock = newForOp.getRegion().front();
+
+    // Replace the null placeholders with newly constructed values.
+    newBlockTransferArgs[0] = newBlock.getArgument(0); // iv
+    for (unsigned idx = 0, collapsedIdx = 0, e = newResultValues.size();
+         idx != e; ++idx) {
+      Value &blockTransferArg = newBlockTransferArgs[1 + idx];
+      Value &newResultVal = newResultValues[idx];
+      assert((blockTransferArg && newResultVal) ||
+             (!blockTransferArg && !newResultVal));
+      if (!blockTransferArg) {
+        blockTransferArg = newForOp.getRegionIterArgs()[collapsedIdx];
+        newResultVal = newForOp.getResult(collapsedIdx++);
+      }
+    }
+    Block &oldBlock = forOp.getRegion().front();
+    assert(oldBlock.getNumArguments() == newBlockTransferArgs.size() &&
+           "unexpected argument size mismatch");
+    // No results case: the scf::ForOp builder already created a zero
+    // result terminator. Merge before this terminator and just get rid of the
+    // original terminator that has been merged in.
+    if (newIterArgs.empty()) {
+      auto newYieldOp = cast<scf::YieldOp>(newBlock.getTerminator());
+      rewriter.mergeBlockBefore(&oldBlock, newYieldOp, newBlockTransferArgs);
+      rewriter.eraseOp(newBlock.getTerminator()->getPrevNode());
+      rewriter.replaceOp(forOp, newResultValues);
+      return success();
+    }
+    // No terminator case: merge and rewrite the merged terminator.
+    auto cloneFilteredTerminator = [&](scf::YieldOp mergedTerminator) {
+      OpBuilder::InsertionGuard g(rewriter);
+      rewriter.setInsertionPoint(mergedTerminator);
+      SmallVector<Value, 4> filteredOperands;
+      filteredOperands.reserve(newResultValues.size());
+      for (unsigned idx = 0, e = keepMask.size(); idx < e; ++idx)
+        if (keepMask[idx])
+          filteredOperands.push_back(mergedTerminator.getOperand(idx));
+      rewriter.create<scf::YieldOp>(mergedTerminator.getLoc(),
+                                    filteredOperands);
+    };
+
+    rewriter.mergeBlocks(&oldBlock, &newBlock, newBlockTransferArgs);
+    auto mergedYieldOp = cast<scf::YieldOp>(newBlock.getTerminator());
+    cloneFilteredTerminator(mergedYieldOp);
+    rewriter.eraseOp(mergedYieldOp);
+    rewriter.replaceOp(forOp, newResultValues);
     return success();
   }
 };
@@ -372,7 +466,8 @@ struct StandaloneBufferizePass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StandaloneBufferizePass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<memref::MemRefDialect, linalg::LinalgDialect>();
+    registry.insert<memref::MemRefDialect, linalg::LinalgDialect,
+                    bufferization::BufferizationDialect>();
   }
   StringRef getArgument() const override { return "standalone-bufferize"; }
   StringRef getDescription() const override {
@@ -402,6 +497,8 @@ struct StandaloneBufferizePass
     // target.addLegalOp<linalg::InitTensorOp>();
     target.addIllegalOp<tensor::InsertOp>();
     target.addLegalDialect<scf::SCFDialect>();
+    target.addDynamicallyLegalOp<scf::ForOp>(
+        [&](scf::ForOp op) { return typeConverter.isLegal(op); });
     bufferization::populateBufferizeMaterializationLegality(target);
 
     patterns.add<BufferizeInsertOp>(typeConverter, patterns.getContext());
@@ -411,6 +508,7 @@ struct StandaloneBufferizePass
                                           patterns.getContext());
     patterns.add<BufferizeInsertSliceOp>(ieAnalysis, typeConverter,
                                          patterns.getContext());
+    patterns.add<BufferizeForOp>(typeConverter, patterns.getContext());
     // patterns.add<BufferizeLinalgOp>(typeConverter,
     // patterns.getContext());
 

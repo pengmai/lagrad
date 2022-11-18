@@ -1,4 +1,4 @@
-func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
+func.func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
   %cross_space = arith.constant dense<0.0> : tensor<3xf64>
   %res = linalg.generic
     {
@@ -22,15 +22,15 @@ func @cross(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>) -> tensor<3xf64> {
   return %res : tensor<3xf64>
 }
 
-func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
+func.func private @printMemrefF64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
-func @main() {
+func.func @main() {
   %a = arith.constant dense<[1., 2., 3.]> : tensor<3xf64>
   %b = arith.constant dense<[4., 5., 6.]> : tensor<3xf64>
   %f = constant @cross : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
   %df = standalone.grad %f : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>, (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
   %res = call_indirect %df(%a, %b) : (tensor<3xf64>, tensor<3xf64>) -> tensor<3xf64>
   %U = tensor.cast %res : tensor<3xf64> to tensor<*xf64>
-  call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
+  call @printMemrefF64(%U) : (tensor<*xf64>) -> ()
   return
 }

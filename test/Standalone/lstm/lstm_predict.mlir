@@ -1,6 +1,6 @@
 #map = affine_map<(d0) -> (d0)>
 
-func private @msigmoid(%x: f64) -> f64 {
+func.func private @msigmoid(%x: f64) -> f64 {
   %one = arith.constant 1.0 : f64
   %nx = arith.negf %x : f64
   %exp = math.exp %nx : f64
@@ -9,7 +9,7 @@ func private @msigmoid(%x: f64) -> f64 {
   return %frac : f64
 }
 
-func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x14xf64>, %state_outer: tensor<2x2x14xf64>, %x: tensor<14xf64>) -> tensor<14xf64> {
+func.func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x14xf64>, %state_outer: tensor<2x2x14xf64>, %x: tensor<14xf64>) -> tensor<14xf64> {
   %w2 = tensor.extract_slice %extra_params[0, 0] [1, 14] [1, 1] : tensor<3x14xf64> to tensor<14xf64>
   %x2 = arith.mulf %x, %w2 : tensor<14xf64>
   %c0 = arith.constant 0 : index
@@ -42,7 +42,7 @@ func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x1
     ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
       %0 = arith.mulf %arg0, %arg1 : f64
       %1 = arith.addf %0, %arg2 : f64
-      %2 = call @msigmoid(%1) : (f64) -> f64
+      %2 = func.call @msigmoid(%1) : (f64) -> f64
       linalg.yield %2 : f64
     } -> tensor<14xf64>
     %ingate = linalg.generic
@@ -55,7 +55,7 @@ func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x1
     ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
       %0 = arith.mulf %arg0, %arg1 : f64
       %1 = arith.addf %0, %arg2 : f64
-      %2 = call @msigmoid(%1) : (f64) -> f64
+      %2 = func.call @msigmoid(%1) : (f64) -> f64
       linalg.yield %2 : f64
     } -> tensor<14xf64>
     %outgate = linalg.generic
@@ -68,7 +68,7 @@ func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x1
     ^bb0(%arg0: f64, %arg1: f64, %arg2: f64, %arg3: f64):
       %0 = arith.mulf %arg0, %arg1 : f64
       %1 = arith.addf %0, %arg2 : f64
-      %2 = call @msigmoid(%1) : (f64) -> f64
+      %2 = func.call @msigmoid(%1) : (f64) -> f64
       linalg.yield %2 : f64
     } -> tensor<14xf64>
     %change = linalg.generic
@@ -140,7 +140,7 @@ func @lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x1
   return %ypred : tensor<14xf64>
 }
 
-func @lagrad_lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x14xf64>, %state_init: tensor<2x2x14xf64>, %x: tensor<14xf64>) -> (
+func.func @lagrad_lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: tensor<3x14xf64>, %state_init: tensor<2x2x14xf64>, %x: tensor<14xf64>) -> (
   tensor<2x2x4x14xf64>,
   tensor<3x14xf64>,
   tensor<2x2x14xf64>
