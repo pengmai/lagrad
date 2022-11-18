@@ -17,7 +17,7 @@ InsertExtractAnalysis::InsertExtractAnalysis(Operation *op) {
   DominanceInfo dom;
   op->walk([&](tensor::ExtractSliceOp op) {
     auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
-    if (maybeInsertSliceOp.hasValue()) {
+    if (maybeInsertSliceOp.has_value()) {
       extract_to_insert[op] = maybeInsertSliceOp.value();
       matchingInserts.insert(maybeInsertSliceOp.value());
       for (auto &use : op.getResult().getUses()) {

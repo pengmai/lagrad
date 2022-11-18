@@ -142,12 +142,12 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
             loopNest.outputPerIterWrites.push_back(numWrites);
             auto maybeOutputOperand =
                 traverseTiedLoopOperands(tmpInsert.getDest());
-            if (!maybeOutputOperand.hasValue()) {
+            if (!maybeOutputOperand.has_value()) {
               return WalkResult::interrupt();
             }
             loopNest.outputTensorOperands.push_back(
-                maybeOutputOperand.getValue().first);
-            loopNest.results.push_back(maybeOutputOperand.getValue().second);
+                maybeOutputOperand.value().first);
+            loopNest.results.push_back(maybeOutputOperand.value().second);
           } else {
             SmallVector<AffineExpr, 4> resultExprs;
             for (Value idxVal : extractOp.getIndices()) {
@@ -179,12 +179,12 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
                 traverseTiedLoopOperands(extractOp.getTensor());
             // errs() << "looking at input operand: " << extractOp.tensor()
             //        << "\n";
-            if (!maybeInputOperand.hasValue()) {
+            if (!maybeInputOperand.has_value()) {
               // extractOp.emitWarning() << "interrupt 4";
               return WalkResult::interrupt();
             }
             loopNest.inputTensorOperands.push_back(
-                maybeInputOperand.getValue().first);
+                maybeInputOperand.value().first);
           }
         }
       }
@@ -231,8 +231,8 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
 LoopNestAnalysis::LoopNestAnalysis(Operation *op) {
   op->walk([&](scf::ForOp forOp) {
     auto maybeNest = parseLoopNest(forOp);
-    if (maybeNest.hasValue()) {
-      forOpMapping[forOp] = maybeNest.getValue();
+    if (maybeNest.has_value()) {
+      forOpMapping[forOp] = maybeNest.value();
     }
   });
 }
