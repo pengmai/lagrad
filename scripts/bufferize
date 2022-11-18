@@ -1,9 +1,9 @@
 #!/bin/bash
 
-PASSES="-tensor-constant-bufferize \
--std-bufferize \
--tensor-bufferize \
+PASSES="-empty-tensor-to-alloc-tensor \
+-arith-bufferize \
 -standalone-bufferize \
+-tensor-bufferize \
 -linalg-bufferize \
 -scf-bufferize \
 -func-bufferize \
@@ -14,4 +14,4 @@ PASSES="-tensor-constant-bufferize \
 -promote-buffers-to-stack \
 -buffer-deallocation \
 -canonicalize"
-./build/bin/lagrad-opt "${1:-/dev/stdin}" $PASSES
+$HOME/Research/lagrad/build/bin/lagrad-opt "${1:-/dev/stdin}" $PASSES

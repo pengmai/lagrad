@@ -2,11 +2,12 @@
 
 PASSES="-convert-linalg-to-loops \
 -lower-affine \
--convert-scf-to-std \
+-convert-scf-to-cf \
+-convert-arith-to-llvm \
 -convert-memref-to-llvm \
 -convert-math-to-llvm \
+-convert-func-to-llvm \
 -convert-math-to-libm \
--convert-std-to-llvm \
 -reconcile-unrealized-casts \
 -llvm-legalize-for-export"
 
