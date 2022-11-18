@@ -400,10 +400,10 @@ def compile_lagrad(
             project=project,
             name="LAGrad fast-math flags",
             inputs_from=[llvm_ir],
-            executor=OptExecutor().run_fast_math(),
+            executor=OptExecutor("opt-16").run_fast_math(),
         )
     if use_clang:
-        lagrad_clang = ClangCompileLLVM()
+        lagrad_clang = ClangCompileLLVM("clang-16")
         lagrad_clang.optimize(3)
         lagrad_clang.ignore_override_module()
         return Phase(
@@ -428,7 +428,7 @@ def clang_compile(
     extra_includes: list[str] = [],
     include_openblas=False,
 ):
-    compile_executor = GccCompile("clang-12")
+    compile_executor = GccCompile("clang-16")
     compile_executor.optimize(3)
     compile_executor.add_include_path(LOCAL_INCLUDE)
     if include_openblas:
@@ -459,7 +459,7 @@ def clang_compile(
 def clang_link(
     project: Project, inputs_from: list[Phase], output: str, link_openblas=False
 ):
-    linker = GccLink("clang-12")
+    linker = GccLink("clang-16")
     linker.add_argument("-rpath", pathlib.Path.home() / ".local" / "lib")
     linker.optimize(3)
     inputs = [
