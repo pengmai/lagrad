@@ -163,11 +163,11 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   // The zero is a temporary placeholder to pass the
   // verifier. We expect it to be removed when the packed annotation is
   // converted to the proper packed type.
-  auto trilIndices = ValueRange{zero, Lidx};
+  SmallVector<Value> trilIndices{zero, Lidx};
 
   // 1.a. Emit load from input operands or for scalars access the operand
   // itself.
-  for (auto inputOperand : linalgOp.getDpsInputOperands()) {
+  for (OpOperand *inputOperand : linalgOp.getDpsInputOperands()) {
     if (linalgOp.isScalar(inputOperand)) {
       indexedValues.push_back(inputOperand->get());
       continue;
@@ -288,26 +288,30 @@ struct PackedTensorUsageAnalysis {
 
   PackedTensorUsageAnalysis(Operation *op) {
     op->walk([&](Operation *childOp) {
-      auto packedPredicate = [&](Type type) { return hasPackedEncoding(type); };
-      if (llvm::any_of(childOp->getOperandTypes(), packedPredicate) ||
-          llvm::any_of(childOp->getResultTypes(), packedPredicate)) {
+      if (computePackedTensorUsage(childOp)) {
         cache.insert(childOp);
       }
     });
   }
 
   bool usesPackedTensor(Operation *op) const { return cache.contains(op); }
+  bool computePackedTensorUsage(Operation *op) const {
+    auto packedPredicate = [&](Type type) { return hasPackedEncoding(type); };
+    return llvm::any_of(op->getOperandTypes(), packedPredicate) ||
+           llvm::any_of(op->getResultTypes(), packedPredicate);
+  }
   void removeMark(Operation *op) { cache.erase(op); }
 
 private:
   DenseSet<Operation *> cache;
 };
 
-class ErasePackedFuncOp : public OpRewritePattern<func::FuncOp> {
+class ErasePackedFuncOp : public OpConversionPattern<func::FuncOp> {
 public:
-  using OpRewritePattern::OpRewritePattern;
-  LogicalResult matchAndRewrite(func::FuncOp op,
-                                PatternRewriter &rewriter) const override {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(func::FuncOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     op.setType(stripEncodingFromFunc(op.getFunctionType()));
     rewriter.updateRootInPlace(op, [&]() {
       for (auto arg : op.getArguments()) {
@@ -354,24 +358,39 @@ class ErasePackedCallOp : public OpRewritePattern<func::CallOp> {
   }
 };
 
-class ErasePackedExtractOp : public OpRewritePattern<tensor::ExtractOp> {
+class ErasePackedExtractOp : public OpConversionPattern<tensor::ExtractOp> {
 private:
   const PackedTensorUsageAnalysis &packedTensorUsage;
 
 public:
   ErasePackedExtractOp(const PackedTensorUsageAnalysis &packedTensorUsage,
-                       MLIRContext *context)
-      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
-                                                      packedTensorUsage} {}
+                       MLIRContext *context, TypeConverter &typeConverter)
+      : OpConversionPattern(typeConverter, context, /*benefit=*/1),
+        packedTensorUsage{packedTensorUsage} {}
 
-  LogicalResult matchAndRewrite(tensor::ExtractOp op,
-                                PatternRewriter &rewriter) const override {
+  LogicalResult
+  matchAndRewrite(tensor::ExtractOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
+    if (!hasPackedEncoding(op.getTensor().getType())) {
+      rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
+          op, op.getTensor(), op.getIndices().drop_back(1));
+      return success();
+    }
+
+    Value castedTensor =
+        rewriter
+            .create<UnrealizedConversionCastOp>(
+                op.getLoc(),
+                convertToPackedType(
+                    op.getTensor().getType().cast<RankedTensorType>()),
+                op.getTensor())
+            .getResult(0);
 
     rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
-        op, op.getTensor(), op.getIndices().drop_back(1));
+        op, castedTensor, op.getIndices().drop_back(1));
     return success();
   }
 };
@@ -397,17 +416,18 @@ public:
 };
 
 class ErasePackedExtractSliceOp
-    : public OpRewritePattern<tensor::ExtractSliceOp> {
+    : public OpConversionPattern<tensor::ExtractSliceOp> {
 private:
   const PackedTensorUsageAnalysis &packedTensorUsage;
 
 public:
   ErasePackedExtractSliceOp(const PackedTensorUsageAnalysis &packedTensorUsage,
-                            MLIRContext *context)
-      : OpRewritePattern(context, /*benefit=*/1), packedTensorUsage{
-                                                      packedTensorUsage} {}
-  LogicalResult matchAndRewrite(tensor::ExtractSliceOp op,
-                                PatternRewriter &rewriter) const override {
+                            MLIRContext *context, TypeConverter &typeConverter)
+      : OpConversionPattern(typeConverter, context, /*benefit=*/1),
+        packedTensorUsage{packedTensorUsage} {}
+  LogicalResult
+  matchAndRewrite(tensor::ExtractSliceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
@@ -534,43 +554,42 @@ public:
     }
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
-      assert(false &&
-             "mid-refactoring, erase encoding for constants not yet supported");
-      // if (auto valueAttr =
-      //         constOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
-      //   // SplatElementsAttr::get()
-      //   rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-      //       constOp,
-      //       DenseElementsAttr::get(
-      //           convertToPackedType(constOp.getType().cast<RankedTensorType>()),
-      //           valueAttr.getSplatValue()));
-      // } else {
-      //   auto denseAttr = constOp.getValueAttr().cast<DenseFPElementsAttr>();
-      //   auto tensorType = denseAttr.getType().cast<RankedTensorType>();
-      //   int64_t d = tensorType.getShape().back();
-      //   SmallVector<APFloat> packedValues;
-      //   packedValues.reserve(d * (d - 1) / 2);
-      //   int64_t dimIdx = 1;
-      //   for (int64_t dim : tensorType.getShape().drop_back(2)) {
-      //     int64_t stride = 1;
-      //     for (int64_t stride_dim : tensorType.getShape().drop_front(dimIdx))
-      //     {
-      //       stride *= stride_dim;
-      //     }
-      //     for (int64_t m = 0; m < dim; m++) {
-      //       for (int64_t i = 0; i < d; i++) {
-      //         for (int64_t j = i + 1; j < d; j++) {
-      //           packedValues.push_back(
-      //               denseAttr.getFlatValue<APFloat>(m * stride + j * d + i));
-      //         }
-      //       }
-      //     }
-      //     dimIdx++;
-      //   }
-      //   auto packedAttr = DenseFPElementsAttr::get(
-      //       convertToPackedType(tensorType), packedValues);
-      //   rewriter.replaceOpWithNewOp<arith::ConstantOp>(constOp, packedAttr);
-      // }
+      if (auto valueAttr =
+              constOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
+        // SplatElementsAttr::get()
+        rewriter.replaceOpWithNewOp<arith::ConstantOp>(
+            constOp,
+            DenseElementsAttr::get(
+                convertToPackedType(constOp.getType().cast<RankedTensorType>()),
+                valueAttr.getSplatValue<FloatAttr>()));
+      } else {
+        auto denseAttr = constOp.getValueAttr().cast<DenseFPElementsAttr>();
+        auto tensorType = denseAttr.getType().cast<RankedTensorType>();
+        int64_t d = tensorType.getShape().back();
+        SmallVector<APFloat> packedValues;
+        packedValues.reserve(d * (d - 1) / 2);
+        int64_t dimIdx = 1;
+        for (int64_t dim : tensorType.getShape().drop_back(2)) {
+          int64_t stride = 1;
+          for (int64_t stride_dim : tensorType.getShape().drop_front(dimIdx)) {
+            stride *= stride_dim;
+          }
+          for (int64_t m = 0; m < dim; m++) {
+            for (int64_t i = 0; i < d; i++) {
+              for (int64_t j = i + 1; j < d; j++) {
+                assert(false && "mid-refactor, not yet supported");
+                // denseAttr.getValues<APFloat>();
+                // packedValues.push_back(
+                //     denseAttr.getFlatValue<APFloat>(m * stride + j * d + i));
+              }
+            }
+          }
+          dimIdx++;
+        }
+        auto packedAttr = DenseFPElementsAttr::get(
+            convertToPackedType(tensorType), packedValues);
+        rewriter.replaceOpWithNewOp<arith::ConstantOp>(constOp, packedAttr);
+      }
     } else {
       rewriter.updateRootInPlace(op, [&]() {
         for (auto operand : op->getOperands()) {
@@ -612,12 +631,48 @@ public:
   }
 };
 
+class PackedTypeConverter : public TypeConverter {
+public:
+  using TypeConverter::convertType;
+  PackedTypeConverter(MLIRContext *ctx) {
+    addConversion([](Type type) { return type; });
+    addConversion(
+        [&](RankedTensorType type) { return convertTensorType(type); });
+    addSourceMaterialization([&](OpBuilder &builder, Type resultType,
+                                 ValueRange inputs,
+                                 Location loc) -> Optional<Value> {
+      if (inputs.size() != 1)
+        return llvm::None;
+
+      return builder.create<UnrealizedConversionCastOp>(loc, resultType, inputs)
+          .getResult(0);
+    });
+    addTargetMaterialization([&](OpBuilder &builder, Type resultType,
+                                 ValueRange inputs,
+                                 Location loc) -> Optional<Value> {
+      if (inputs.size() != 1)
+        return llvm::None;
+
+      return builder.create<UnrealizedConversionCastOp>(loc, resultType, inputs)
+          .getResult(0);
+    });
+  }
+  Type convertTensorType(RankedTensorType type) {
+    if (hasPackedEncoding(type)) {
+      return convertToPackedType(type);
+    }
+    return type;
+  }
+};
+
 struct PackTriangularPass
     : public PassWrapper<PackTriangularPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PackTriangularPass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<memref::MemRefDialect, scf::SCFDialect>();
+    registry.insert<memref::MemRefDialect, scf::SCFDialect,
+                    standalone::StandaloneDialect,
+                    bufferization::BufferizationDialect>();
   }
   StringRef getArgument() const override { return "pack-triangular"; }
   StringRef getDescription() const override {
@@ -629,6 +684,7 @@ struct PackTriangularPass
     ConversionTarget target(*context);
     RewritePatternSet patterns(context);
     target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<bufferization::BufferizationDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
@@ -649,6 +705,7 @@ struct PackTriangularPass
     auto &packedTensorUsage = getAnalysis<PackedTensorUsageAnalysis>();
     RewritePatternSet erasurePatterns(context);
     ConversionTarget erasureTarget(*context);
+    PackedTypeConverter typeConverter(context);
 
     auto packedPredicate = [&](Operation *op) {
       return !packedTensorUsage.usesPackedTensor(op);
@@ -656,6 +713,12 @@ struct PackTriangularPass
     erasureTarget.addDynamicallyLegalDialect<tensor::TensorDialect>(
         packedPredicate);
     erasureTarget.addDynamicallyLegalOp<func::CallOp>(packedPredicate);
+    erasureTarget.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp op) {
+      return llvm::none_of(op.getArgumentTypes(),
+                           [](Type type) { return hasPackedEncoding(type); }) &&
+             llvm::none_of(op.getResultTypes(),
+                           [](Type type) { return hasPackedEncoding(type); });
+    });
     erasureTarget.addDynamicallyLegalDialect<arith::ArithDialect>(
         [&](Operation *op) {
           auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
@@ -670,15 +733,15 @@ struct PackTriangularPass
         });
     erasureTarget.addLegalDialect<bufferization::BufferizationDialect>();
     erasureTarget.addLegalOp<linalg::CopyOp>();
-    // erasureTarget.addLegalOp<linalg::FillOp>();
-    // erasureTarget.addLegalOp<linalg::YieldOp>();
 
     erasureTarget.addIllegalDialect<standalone::StandaloneDialect>();
-    erasurePatterns.add<ErasePackedFuncOp>(context);
+    erasurePatterns.add<ErasePackedFuncOp>(typeConverter, context);
     erasurePatterns.add<ErasePackedCallOp>(context);
-    erasurePatterns.add<ErasePackedExtractOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackedExtractOp>(packedTensorUsage, context,
+                                              typeConverter);
     erasurePatterns.add<ErasePackedInsertOp>(packedTensorUsage, context);
-    erasurePatterns.add<ErasePackedExtractSliceOp>(packedTensorUsage, context);
+    erasurePatterns.add<ErasePackedExtractSliceOp>(packedTensorUsage, context,
+                                                   typeConverter);
     erasurePatterns.add<ErasePackedInsertSliceOp>(packedTensorUsage, context);
     erasurePatterns.add<EraseCastOp>(packedTensorUsage, context);
     erasurePatterns.add<ErasePackOp>(context);
