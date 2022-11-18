@@ -56,8 +56,8 @@ class LAGradOptFlags:
     bufferize = [
         "-empty-tensor-to-alloc-tensor",
         "-arith-bufferize",
-        "-tensor-bufferize",
         "-standalone-bufferize",
+        "-tensor-bufferize",
         "-linalg-bufferize",
         "-scf-bufferize",
         "-func-bufferize",
