@@ -261,7 +261,7 @@ def compile_enzyme(
         executor=emit_llvm,
     )
 
-    run_enzyme = OptExecutor("opt-12").run_enzyme()
+    run_enzyme = OptExecutor("opt-12", asm=True).run_enzyme()
     postenzyme = Phase(
         project=project,
         name="Enzyme AD",

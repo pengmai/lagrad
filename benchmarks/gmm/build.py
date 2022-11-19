@@ -17,11 +17,12 @@ data_file = (
     / "Enzyme"
     / "enzyme"
     / "benchmarks"
+    / "ReverseMode"
     / "gmm"
     / "data"
     # / "test.txt"
     / "1k"
-    / "gmm_d10_K25.txt"
+    / "gmm_d128_K5.txt"
 )
 
 
@@ -82,7 +83,7 @@ if __name__ == "__main__":
         }
 
         cli(
-            get_full_project(template_args),
-            get_tri_project(template_args),
+            # get_full_project(template_args),
+            # get_tri_project(template_args),
             get_packed_project(template_args),
         )
