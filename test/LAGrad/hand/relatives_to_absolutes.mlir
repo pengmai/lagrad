@@ -193,9 +193,7 @@ func @mrelatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<2
 
 // func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 func @lagrad_relatives_to_absolutes(%relatives: tensor<22x4x4xf64>, %parents: tensor<22xi32>) -> tensor<22x4x4xf64> {
-  %f = constant @mrelatives_to_absolutes : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
-  %df = standalone.grad %f {of = [0]} : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>, (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
-  %res = call_indirect %df(%relatives, %parents) : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
+  %res = lagrad.grad @mrelatives_to_absolutes(%relatives, %parents) : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
   // %res = call @mygrad_rels_to_abs_v2(%relatives, %parents) : (tensor<22x4x4xf64>, tensor<22xi32>) -> tensor<22x4x4xf64>
   return %res : tensor<22x4x4xf64>
 }

@@ -55,25 +55,15 @@ func @main() {
   %arg = arith.constant 4.5 : f64
   %arg1 = arith.constant -1.0 : f64
 
-  %f = constant @ifelse : (f64) -> f64
-  %df = standalone.grad %f : (f64) -> f64, (f64) -> f64
-  %res = call_indirect %df(%arg) : (f64) -> f64
+  %res = lagrad.grad @ifelse(%arg) : (f64) -> f64
   call @print(%res) : (f64) -> ()
-
-  %res1 = call_indirect %df(%arg1) : (f64) -> f64
+  %res1 = lagrad.grad @ifelse(%arg1) : (f64) -> f64
   call @print(%res1) : (f64) -> ()
-
-  %f0 = constant @ifelse_only_then_block : (f64) -> f64
-  %df0 = standalone.grad %f0 : (f64) -> f64, (f64) -> f64
-  %res2 = call_indirect %df0(%arg1) : (f64) -> f64
+  %res2 = lagrad.grad @ifelse_only_then_block(%arg1) : (f64) -> f64
   call @print(%res2) : (f64) -> ()
-
-  %f1 = constant @ifsecondarg : (f64, f64) -> f64
-  %df1 = standalone.grad %f1 {of = [1]} : (f64, f64) -> f64, (f64, f64) -> f64
-  %res3 = call_indirect %df1(%arg, %arg1) : (f64, f64) -> f64
+  %res3 = lagrad.grad @ifsecondarg(%arg, %arg1) {of = [1]} : (f64, f64) -> f64
   call @print(%res3) : (f64) -> ()
-
-  %res4 = call_indirect %df1(%arg1, %arg) : (f64, f64) -> f64
+  %res4 = lagrad.grad @ifsecondarg(%arg1, %arg) {of = [1]}: (f64, f64) -> f64
   call @print(%res4) : (f64) -> ()
   return
 }

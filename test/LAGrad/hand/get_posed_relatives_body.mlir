@@ -74,9 +74,7 @@ func @main() {
     [ 9., 10., 11., 12.],
     [13., 14., 15., 16.]
   ]> : tensor<4x4xf64>
-  %f = constant @pr_body : (tensor<3xf64>, tensor<4x4xf64>) -> tensor<4x4xf64>
-  %df = standalone.grad %f {of = [0]} : (tensor<3xf64>, tensor<4x4xf64>) -> tensor<4x4xf64>, (tensor<3xf64>, tensor<4x4xf64>) -> tensor<3xf64>
-  %res = call_indirect %df(%pp, %br) : (tensor<3xf64>, tensor<4x4xf64>) -> tensor<3xf64>
+  %res = lagrad.grad @pr_body(%pp, %br) : (tensor<3xf64>, tensor<4x4xf64>) -> tensor<3xf64>
   %U = tensor.cast %res : tensor<3xf64> to tensor<*xf64>
   // %res = call @pr_body(%pp, %br) : (tensor<3xf64>, tensor<4x4xf64>) -> tensor<4x4xf64>
   // %U = tensor.cast %res : tensor<4x4xf64> to tensor<*xf64>

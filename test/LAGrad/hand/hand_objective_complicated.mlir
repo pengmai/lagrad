@@ -427,43 +427,7 @@ func @lagrad_hand_objective_complicated(
   %points : tensor<2x3xf64>,
   %g : tensor<2x3xf64>
 ) -> (tensor<26xf64>, tensor<2x2xf64>) {
-  %f = constant @mlir_hand_objective_complicated : (
-    tensor<26xf64>,
-    tensor<2x2xf64>,
-    tensor<22xi32>,
-    tensor<22x4x4xf64>,
-    tensor<22x4x4xf64>,
-    tensor<544x4xf64>,
-    tensor<544x22xf64>,
-    tensor<1084x3xi32>,
-    tensor<2xi32>,
-    tensor<2x3xf64>
-  ) -> tensor<2x3xf64>
-  %df = standalone.grad %f {of = [0, 1], grad_signal = true} : (
-    tensor<26xf64>,
-    tensor<2x2xf64>,
-    tensor<22xi32>,
-    tensor<22x4x4xf64>,
-    tensor<22x4x4xf64>,
-    tensor<544x4xf64>,
-    tensor<544x22xf64>,
-    tensor<1084x3xi32>,
-    tensor<2xi32>,
-    tensor<2x3xf64>
-  ) -> tensor<2x3xf64>, (
-    tensor<26xf64>,
-    tensor<2x2xf64>,
-    tensor<22xi32>,
-    tensor<22x4x4xf64>,
-    tensor<22x4x4xf64>,
-    tensor<544x4xf64>,
-    tensor<544x22xf64>,
-    tensor<1084x3xi32>,
-    tensor<2xi32>,
-    tensor<2x3xf64>,
-    tensor<2x3xf64>
-  ) -> (tensor<26xf64>, tensor<2x2xf64>)
-  %res:2 = call_indirect %df(
+  %res:2 = lagrad.grad @mlir_hand_objective_complicated(
     %theta,
     %us,
     %parents,
@@ -475,7 +439,7 @@ func @lagrad_hand_objective_complicated(
     %correspondences,
     %points,
     %g
-  ) : (
+  ) {of = [0, 1], grad_signal} : (
     tensor<26xf64>,
     tensor<2x2xf64>,
     tensor<22xi32>,

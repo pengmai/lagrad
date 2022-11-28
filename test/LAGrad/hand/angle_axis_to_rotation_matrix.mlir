@@ -90,9 +90,7 @@ func @main() {
   %U0 = tensor.cast %primal_0 : tensor<3x3xf64> to tensor<*xf64>
   call @print_memref_f64(%U0) : (tensor<*xf64>) -> ()
 
-  %f = constant @axis_angles_to_rotation_matrix : (tensor<3xf64>) -> tensor<3x3xf64>
-  %df = standalone.grad %f {of = [0]}: (tensor<3xf64>) -> tensor<3x3xf64>, (tensor<3xf64>) -> tensor<3xf64>
-  %adjoint_0 = call_indirect %df(%a) : (tensor<3xf64>) -> tensor<3xf64>
+  %adjoint_0 = lagrad.grad @axis_angles_to_rotation_matrix(%a) : (tensor<3xf64>) -> tensor<3xf64>
   %U1 = tensor.cast %adjoint_0 : tensor<3xf64> to tensor<*xf64>
   call @print_memref_f64(%U1) : (tensor<*xf64>) -> ()
   return

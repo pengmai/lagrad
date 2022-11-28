@@ -120,27 +120,7 @@ func @lagrad_lstm_model(
   tensor<14xf64>,
   tensor<14xf64>
 ) {
-  %f = constant @lstm_model : (tensor<4x14xf64>, tensor<4x14xf64>, tensor<14xf64>, tensor<14xf64>, tensor<14xf64>) -> tensor<14xf64>
-  %df = standalone.grad %f {of = [0, 1, 2, 3, 4]} : (
-    tensor<4x14xf64>,
-    tensor<4x14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>
-  ) -> tensor<14xf64>, (
-    tensor<4x14xf64>,
-    tensor<4x14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>
-  ) -> (
-    tensor<4x14xf64>,
-    tensor<4x14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>,
-    tensor<14xf64>
-  )
-  %res:5 = call_indirect %df(%weight, %bias, %hidden, %cell, %input) : (
+  %res:5 = lagrad.grad @lstm_model(%weight, %bias, %hidden, %cell, %input) {of = [0, 1, 2, 3, 4]} : (
     tensor<4x14xf64>,
     tensor<4x14xf64>,
     tensor<14xf64>,

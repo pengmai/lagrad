@@ -66,9 +66,7 @@ func @main() {
   %A = arith.constant dense<1.1> : tensor<4x4xf64>
   %b_space = arith.constant dense<0.0> : tensor<4xf64>
 
-  %f = constant @fortensor : (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4xf64>
-  %df = standalone.grad %f : (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4xf64>, (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4x4xf64>
-  %res = call_indirect %df(%A, %b_space) : (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4x4xf64>
+  %res = lagrad.grad @fortensor(%A, %b_space) : (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4x4xf64>
   %U = tensor.cast %res : tensor<4x4xf64> to tensor<*xf64>
 
   // %res = call @fortensor(%A, %b_space) : (tensor<4x4xf64>, tensor<4xf64>) -> tensor<4xf64>

@@ -73,9 +73,7 @@ func @main() {
   ]> : tensor<4x2xf32>
   %labels = arith.constant dense<[1, 2]> : tensor<2xindex>
   // %res = call @batched_cross_entropy(%activations, %labels) : (tensor<4x2xf32>, tensor<2xindex>) -> f32
-  %f = constant @batched_cross_entropy : (tensor<4x2xf32>, tensor<2xindex>) -> f32
-  %df = standalone.grad %f : (tensor<4x2xf32>, tensor<2xindex>) -> f32, (tensor<4x2xf32>, tensor<2xindex>) -> tensor<4x2xf32>
-  %res = call_indirect %df(%activations, %labels) : (tensor<4x2xf32>, tensor<2xindex>) -> tensor<4x2xf32>
+  %res = lagrad.grad @batched_cross_entropy(%activations, %labels) : (tensor<4x2xf32>, tensor<2xindex>) -> tensor<4x2xf32>
   %U = tensor.cast %res : tensor<4x2xf32> to tensor<*xf32>
   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
   return

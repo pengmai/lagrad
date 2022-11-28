@@ -221,24 +221,7 @@ func @lagrad_lstm_objective(
   %state_init: tensor<2x2x14xf64>,
   %sequence: tensor<4x14xf64>
 ) -> (tensor<2x2x4x14xf64>, tensor<3x14xf64>) {
-  %f = constant @mlstm_objective : (
-    tensor<2x2x4x14xf64>,
-    tensor<3x14xf64>,
-    tensor<2x2x14xf64>,
-    tensor<4x14xf64>
-  ) -> f64
-  %df = standalone.grad %f {of = [0, 1]} : (
-    tensor<2x2x4x14xf64>,
-    tensor<3x14xf64>,
-    tensor<2x2x14xf64>,
-    tensor<4x14xf64>
-  ) -> f64, (
-    tensor<2x2x4x14xf64>,
-    tensor<3x14xf64>,
-    tensor<2x2x14xf64>,
-    tensor<4x14xf64>
-  ) -> (tensor<2x2x4x14xf64>, tensor<3x14xf64>)
-  %res:2 = call_indirect %df(%main_params, %extra_params, %state_init, %sequence) : (
+  %res:2 = lagrad.grad @mlstm_objective(%main_params, %extra_params, %state_init, %sequence) {of = [0, 1]} : (
     tensor<2x2x4x14xf64>,
     tensor<3x14xf64>,
     tensor<2x2x14xf64>,

@@ -20,9 +20,7 @@ func @logsumexp(%x: tensor<3x4xf32>) -> tensor<3xf32> {
 
 func @main() {
   %x = arith.constant dense<{{data}}> : tensor<3x4xf32>
-  %f = constant @logsumexp : (tensor<3x4xf32>) -> tensor<3xf32>
-  %df = standalone.grad %f : (tensor<3x4xf32>) -> tensor<3xf32>, (tensor<3x4xf32>) -> tensor<3x4xf32>
-  %res = call_indirect %df(%x) : (tensor<3x4xf32>) -> tensor<3x4xf32>
+  %res = lagrad.grad @logsumexp(%x) : (tensor<3x4xf32>) -> tensor<3x4xf32>
   %U = tensor.cast %res : tensor<3x4xf32> to tensor<*xf32>
   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
   return

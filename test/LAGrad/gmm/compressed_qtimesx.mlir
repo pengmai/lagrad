@@ -130,10 +130,8 @@ func private @print_memref_i64(memref<*xi64>) attributes { llvm.emit_c_interface
 func @main() {
   %Ltri_slice = arith.constant dense<[1.2, 4.3, -2.1, 0.0, -5.3, 1.1, 10.6, 4.3, -8.7, 9.1]> : tensor<10xf64>
   %xcentered = arith.constant dense<[5.3, 1.9, 4.4, -10.1, 4.3]> : tensor<5xf64>
-  %f = constant @Qtimesx : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
   // %df = standalone.grad %f {of = [0]} : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>, (tensor<10xf64>, tensor<5xf64>) -> tensor<10xf64>
-  %df = standalone.grad %f {of = [1]} : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>, (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
-  %res = call_indirect %df(%Ltri_slice, %xcentered) : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
+  %res = lagrad.grad %df(%Ltri_slice, %xcentered) {of = [1]} : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
   // %res = call @gradQtimesx(%Ltri_slice, %xcentered) : (tensor<10xf64>, tensor<5xf64>) -> tensor<5xf64>
   %U = tensor.cast %res : tensor<5xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()

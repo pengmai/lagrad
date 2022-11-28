@@ -32,7 +32,7 @@ func @main() -> i64 {
   linalg.fill(%0, %dA) : f32, memref<4x4xf32>
 
   %f = constant @matsum : (memref<4x4xf32>) -> f32
-  %df = standalone.diff %f : (memref<4x4xf32>) -> f32, (memref<4x4xf32>, memref<4x4xf32>) -> f32
+  %df = lagrad.diff %f : (memref<4x4xf32>) -> f32, (memref<4x4xf32>, memref<4x4xf32>) -> f32
   call_indirect %df(%A, %dA) : (memref<4x4xf32>, memref<4x4xf32>) -> f32
 
   %U = memref.cast %dA : memref<4x4xf32> to memref<*xf32>

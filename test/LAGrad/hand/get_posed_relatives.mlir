@@ -79,8 +79,6 @@ func @mget_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_params: te
 }
 
 func @lagrad_get_posed_relatives(%base_relatives: tensor<22x4x4xf64>, %pose_params: tensor<25x3xf64>) -> tensor<25x3xf64> {
-  %f = constant @mget_posed_relatives : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<22x4x4xf64>
-  %df = standalone.grad %f {of = [1]} : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<22x4x4xf64>, (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<25x3xf64>
-  %res = call_indirect %df(%base_relatives, %pose_params) : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<25x3xf64>
+  %res = lagrad.grad @mget_posed_relatives(%base_relatives, %pose_params) {of = [1]} : (tensor<22x4x4xf64>, tensor<25x3xf64>) -> tensor<25x3xf64>
   return %res : tensor<25x3xf64>
 }

@@ -54,9 +54,7 @@ func @main() {
   %x = arith.constant 1.3 : f64
   %n = arith.constant 4 : index
 
-  %f = constant @pow : (f64, index) -> f64
-  %df = standalone.grad %f : (f64, index) -> f64, (f64, index) -> f64
-  %res = call_indirect %df(%x, %n) : (f64, index) -> f64
+  %res = lagrad.grad @pow(%x, %n) : (f64, index) -> f64
   // %res = call @__grad_pow(%x, %n) : (f64, index) -> f64
   // %res = call @pow(%x, %n) : (f64, index) -> f64
   %t = linalg.init_tensor [] : tensor<f64>

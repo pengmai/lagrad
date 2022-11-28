@@ -16,7 +16,7 @@ func @main() -> i64 {
   %cst = arith.constant 3.0 : f32
 
   %fa = constant @square : (f32) -> f32
-  %df = standalone.diff %fa : (f32) -> f32, (f32) -> f32
+  %df = lagrad.diff %fa : (f32) -> f32, (f32) -> f32
   %res = call_indirect %df(%cst) : (f32) -> f32
 
   %loc = memref.alloca() : memref<f32>

@@ -28,9 +28,7 @@ func @print(%arg0: f64) {
 
 func @main() {
   %arg = arith.constant 4.2 : f64
-  %f = constant @ifelsefunc : (f64) -> f64
-  %df = standalone.grad %f : (f64) -> f64, (f64) -> f64
-  %res = call_indirect %df(%arg) : (f64) -> f64
+  %res = lagrad.grad @ifelsefunc(%arg) : (f64) -> f64
   call @print(%res) : (f64) -> ()
   return
 }

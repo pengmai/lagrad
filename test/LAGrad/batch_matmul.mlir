@@ -29,9 +29,7 @@ func @main() {
     tensor.yield %8 : f64
   } : tensor<4x5x3xf64>
 
-  %f = constant @bmm : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x3xf64>
-  %df = standalone.grad %f {of = [0]} : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x3xf64>, (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x5xf64>
-  %res = call_indirect %df(%A, %B) : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x5xf64>
+  %res = lagrad.grad @bmm(%A, %B) : (tensor<4x3x5xf64>, tensor<4x5x3xf64>) -> tensor<4x3x5xf64>
   %U = tensor.cast %res : tensor<4x3x5xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

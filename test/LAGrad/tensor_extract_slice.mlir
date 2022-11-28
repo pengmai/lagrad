@@ -33,10 +33,8 @@ func @slice_add_nocollapse(%arg0: tensor<2x2xf64>) -> tensor<f64> {
 func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface }
 
 func @main() {
-  %f = constant @slice_add_nocollapse : (tensor<2x2xf64>) -> tensor<f64>
-  %df = standalone.grad %f : (tensor<2x2xf64>) -> tensor<f64>, (tensor<2x2xf64>) -> tensor<2x2xf64>
   %arg = arith.constant dense<[[3.4, 2.3], [2.1, -3.2]]> : tensor<2x2xf64>
-  %res = call_indirect %df(%arg) : (tensor<2x2xf64>) -> tensor<2x2xf64>
+  %res = lagrad.grad @slice_add_nocollapse(%arg) : (tensor<2x2xf64>) -> tensor<2x2xf64>
   // %res = call @__grad_slice_add_nocollapse(%arg) : (tensor<2x2xf64>) -> tensor<2x2xf64>
   %U = tensor.cast %res : tensor<2x2xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()

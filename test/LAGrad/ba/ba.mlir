@@ -236,16 +236,12 @@ func @lagrad_compute_reproj_error(
   %feat: tensor<2xf64>,
   %g: tensor<2xf64>
 ) -> (tensor<11xf64>, tensor<3xf64>, f64) {
-  %f = constant @mlir_compute_reproj_error : (tensor<11xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>
-  %df = standalone.grad %f {of = [0, 1, 2], grad_signal = true} : (tensor<11xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>, (tensor<11xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<11xf64>, tensor<3xf64>, f64)
-  %res:3 = call_indirect %df(%cam, %X, %w, %feat, %g) : (tensor<11xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<11xf64>, tensor<3xf64>, f64)
+  %res:3 = lagrad.grad @mlir_compute_reproj_error(%cam, %X, %w, %feat, %g) {of = [0, 1, 2], grad_signal} : (tensor<11xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<11xf64>, tensor<3xf64>, f64)
   return %res#0, %res#1, %res#2 : tensor<11xf64>, tensor<3xf64>, f64
 }
 
 func @lagrad_compute_w_error(%w: f64) -> f64 {
-  %f = constant @mlir_compute_zach_weight_error : (f64) -> f64
-  %df = standalone.grad %f {of = [0]} : (f64) -> f64, (f64) -> f64
-  %res = call_indirect %df(%w) : (f64) -> f64
+  %res = lagrad.grad @mlir_compute_zach_weight_error(%w) {of = [0]} : (f64) -> f64
   return %res : f64
 }
 

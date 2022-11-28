@@ -145,19 +145,7 @@ func @lagrad_lstm_predict(%main_params: tensor<2x2x4x14xf64>, %extra_params: ten
   tensor<3x14xf64>,
   tensor<2x2x14xf64>
 ) {
-  %f = constant @lstm_predict : (tensor<2x2x4x14xf64>, tensor<3x14xf64>, tensor<2x2x14xf64>, tensor<14xf64>) -> tensor<14xf64>
-  %df = standalone.grad %f {of = [0, 1, 2]} : (
-    tensor<2x2x4x14xf64>,
-    tensor<3x14xf64>,
-    tensor<2x2x14xf64>,
-    tensor<14xf64>
-  ) -> tensor<14xf64>, (
-    tensor<2x2x4x14xf64>,
-    tensor<3x14xf64>,
-    tensor<2x2x14xf64>,
-    tensor<14xf64>
-  ) -> (tensor<2x2x4x14xf64>, tensor<3x14xf64>, tensor<2x2x14xf64>)
-  %res:3 = call_indirect %df(%main_params, %extra_params, %state_init, %x) : (
+  %res:3 = lagrad.grad @lstm_predict(%main_params, %extra_params, %state_init, %x) {of = [0, 1, 2]} : (
     tensor<2x2x4x14xf64>,
     tensor<3x14xf64>,
     tensor<2x2x14xf64>,

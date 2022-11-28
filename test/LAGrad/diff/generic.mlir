@@ -48,7 +48,7 @@ func @main() -> i64 {
   %C = memref.buffer_cast %source_C : memref<4x4xf64>
 
   %f = constant @generic_matmul : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
-  %df = standalone.diff %f : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64, (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
+  %df = lagrad.diff %f : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64, (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
   call_indirect %df(%A, %dA, %B, %dB, %out, %C) : (memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>, memref<4x4xf64>) -> f64
 
   %U = memref.cast %dA : memref<4x4xf64> to memref<*xf64>

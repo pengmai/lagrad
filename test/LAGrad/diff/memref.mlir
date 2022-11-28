@@ -25,7 +25,7 @@ func @main() -> i64 {
   linalg.fill(%zero, %dA) : f32, memref<f32>
 
   %f = constant @loadstore : (memref<f32>) -> f32
-  %df = standalone.diff %f : (memref<f32>) -> f32, (memref<f32>, memref<f32>) -> f32
+  %df = lagrad.diff %f : (memref<f32>) -> f32, (memref<f32>, memref<f32>) -> f32
   call_indirect %df(%A, %dA) : (memref<f32>, memref<f32>) -> f32
 
   %U = memref.cast %dA : memref<f32> to memref<*xf32>

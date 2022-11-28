@@ -33,9 +33,7 @@ func @print(%arg0: f64) {
 
 func @main() {
   %arg = arith.constant 1.2 : f64
-  %f = constant @ifdifferenttype : (f64) -> tensor<3xf64>
-  %df = standalone.grad %f : (f64) -> tensor<3xf64>, (f64) -> f64
-  %res = call_indirect %df(%arg) : (f64) -> f64
+  %res = lagrad.grad @ifdifferenttype(%arg) : (f64) -> f64
   // %U = tensor.cast %res : tensor<3xf64> to tensor<*xf64>
   // call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   call @print(%res) : (f64) -> ()

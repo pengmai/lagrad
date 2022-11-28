@@ -33,10 +33,7 @@ func @main() {
     [13., 14., 15., 16.]
   ]> : tensor<4x4xf64>
 
-  %f = constant @outer : (tensor<4x4xf64>) -> tensor<4xf64>
-  %df = standalone.grad %f : (tensor<4x4xf64>) -> tensor<4xf64>, (tensor<4x4xf64>) -> tensor<4x4xf64>
-
-  %res = call_indirect %df(%cst) : (tensor<4x4xf64>) -> tensor<4x4xf64>
+  %res = lagrad.grad @outer(%cst) : (tensor<4x4xf64>) -> tensor<4x4xf64>
   %U = tensor.cast %res : tensor<4x4xf64> to tensor<*xf64>
 
   // %res = call_indirect %f(%cst) : (tensor<4x4xf64>) -> tensor<4xf64>

@@ -32,7 +32,7 @@
 //   %dout = arith.constant dense<1.0> : tensor<3xf32>
 
 //   // %f = constant @matvec : (tensor<3x4xf32>, tensor<4xf32>, tensor<3xf32>) -> f32
-//   // %df = standalone.diff %f : (tensor<3x4xf32>, tensor<4xf32>, tensor<3xf32>) -> f32, (tensor<3x4xf32>, tensor<3x4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<3xf32>, tensor<3xf32>) -> f32
+//   // %df = lagrad.diff %f : (tensor<3x4xf32>, tensor<4xf32>, tensor<3xf32>) -> f32, (tensor<3x4xf32>, tensor<3x4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<3xf32>, tensor<3xf32>) -> f32
 //   // call_indirect %df(%M, %dM, %x, %dx, %out, %dout) : (tensor<3x4xf32>, tensor<3x4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<3xf32>, tensor<3xf32>) -> f32
 
 //   %casted = tensor.cast %dM : tensor<3x4xf32> to tensor<*xf32>
@@ -68,7 +68,7 @@ func @main() -> i64 {
   %5 = memref.get_global @__constant_3xf32_0 : memref<3xf32>
 
   %f = constant @matvec : (memref<3x4xf32>, memref<4xf32>, memref<3xf32>) -> f32
-  %df = standalone.diff %f : (memref<3x4xf32>, memref<4xf32>, memref<3xf32>) -> f32, (memref<3x4xf32>, memref<3x4xf32>, memref<4xf32>, memref<4xf32>, memref<3xf32>, memref<3xf32>) -> f32
+  %df = lagrad.diff %f : (memref<3x4xf32>, memref<4xf32>, memref<3xf32>) -> f32, (memref<3x4xf32>, memref<3x4xf32>, memref<4xf32>, memref<4xf32>, memref<3xf32>, memref<3xf32>) -> f32
   call_indirect %df(%0, %1, %2, %3, %4, %5) : (memref<3x4xf32>, memref<3x4xf32>, memref<4xf32>, memref<4xf32>, memref<3xf32>, memref<3xf32>) -> f32
   %6 = memref.cast %1 : memref<3x4xf32> to memref<*xf32>
   call @print_memref_f32(%6) : (memref<*xf32>) -> ()

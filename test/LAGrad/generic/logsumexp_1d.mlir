@@ -42,9 +42,7 @@ func @logsumexp(%A : tensor<4xf64>) -> f64 {
 
 func @main() {
   %A = arith.constant dense<[3.4, -5.5, -1.1, 0.1]> : tensor<4xf64>
-  %f = constant @logsumexp : (tensor<4xf64>) -> f64
-  %df = standalone.grad %f : (tensor<4xf64>) -> f64, (tensor<4xf64>) -> tensor<4xf64>
-  %res = call_indirect %df(%A) : (tensor<4xf64>) -> tensor<4xf64>
+  %res = lagrad.grad @logsumexp(%A) : (tensor<4xf64>) -> tensor<4xf64>
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

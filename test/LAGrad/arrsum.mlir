@@ -38,7 +38,7 @@ func @main() -> i64 {
   linalg.fill(%zero, %darr) : f32, memref<4xf32>
 
   %fp = constant @sum : (memref<4xf32>) -> f32
-  %df = standalone.diff %fp : (memref<4xf32>) -> f32, (memref<4xf32>, memref<4xf32>) -> f32
+  %df = lagrad.diff %fp : (memref<4xf32>) -> f32, (memref<4xf32>, memref<4xf32>) -> f32
   %dres = call_indirect %df(%arr, %darr) : (memref<4xf32>, memref<4xf32>) -> f32
   call @print_1d(%darr) : (memref<4xf32>) -> ()
   %exit = arith.constant 0 : i64

@@ -25,9 +25,7 @@ func @main() {
   %a = arith.constant dense<[1., 2., 3., 4.]> : tensor<4xf32>
   %b = arith.constant dense<[2., 3., 4., 5.]> : tensor<4xf32>
 
-  %f = constant @closure : (f32, tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
-  %df = standalone.grad %f {of = [0]}: (f32, tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>, (f32, tensor<4xf32>, tensor<4xf32>) -> f32
-  %res = call_indirect %df(%cst, %a, %b) : (f32, tensor<4xf32>, tensor<4xf32>) -> f32
+  %res = lagrad.grad @closure(%cst, %a, %b) : (f32, tensor<4xf32>, tensor<4xf32>) -> f32
 
   %space = arith.constant dense<0.0> : tensor<f32>
   %inserted = tensor.insert %res into %space[] : tensor<f32>

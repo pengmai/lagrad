@@ -11,9 +11,9 @@ func @main() {
   %A = arith.constant dense<[0.1, 1.0, 2.0, -3.0]> : tensor<4xf32>
   %B = arith.constant dense<[-5.0, 3.4, -10.2, 3.33]> : tensor<4xf32>
 
-  %f = constant @dot : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>
-  %df = standalone.grad %f : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>, (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
-  %val = call_indirect %df(%A, %B) : (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
+  %val = lagrad.grad @dot(%A, %B) : (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
+  // %df = standalone.grad %f : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>, (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
+  // %val = call_indirect %df(%A, %B) : (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>
 
   %U = tensor.cast %val : tensor<4xf32> to tensor<*xf32>
   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()

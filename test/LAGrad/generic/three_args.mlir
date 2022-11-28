@@ -53,9 +53,7 @@ func @main() {
   %Qdiags = arith.constant dense<{{Qdiags}}> : tensor<{{k}}x{{d}}xf64>
   %xcentered = arith.constant dense<{{xcentered}}> : tensor<{{n}}x{{k}}x{{d}}xf64>
 
-  %f = constant @generic_three_args : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
-  %df = standalone.grad %f {of = [1]}: (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>, (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
-  %res = call_indirect %df(%Qdiags, %xcentered) : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
+  %res = lagrad.grad @generic_three_args(%Qdiags, %xcentered) {of = [1]} : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
   // %res = call @__grad_generic_three_args(%Qdiags, %xcentered) : (tensor<{{k}}x{{d}}xf64>, tensor<{{n}}x{{k}}x{{d}}xf64>) -> tensor<{{n}}x{{k}}x{{d}}xf64>
 
   // Uncomment to test the forward pass

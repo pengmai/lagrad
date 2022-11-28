@@ -13,9 +13,7 @@ func @addandmul(%arg : f32) -> f32 {
 func @main() {
   %cst = arith.constant 0.3 : f32
 
-  %f = constant @addandmul : (f32) -> f32
-  %df = standalone.grad %f : (f32) -> f32, (f32) -> f32
-  %dval = call_indirect %df(%cst) : (f32) -> f32
+  %dval = lagrad.grad @addandmul(%cst) : (f32) -> f32
 
   %loc = memref.alloca() : memref<f32>
   memref.store %dval, %loc[] : memref<f32>

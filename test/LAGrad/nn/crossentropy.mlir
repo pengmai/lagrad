@@ -56,9 +56,7 @@ func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface
 func @main() {
   %x = arith.constant dense<[-4., 0.6, -1.2, 0.12]> : tensor<4xf64>
   %label = arith.constant 1 : index
-  %f = constant @cross_entropy : (tensor<4xf64>, index) -> f64
-  %df = standalone.grad %f : (tensor<4xf64>, index) -> f64, (tensor<4xf64>, index) -> tensor<4xf64>
-  %res = call_indirect %df(%x, %label) : (tensor<4xf64>, index) -> tensor<4xf64>
+  %res = lagrad.grad @cross_entropy(%x, %label) : (tensor<4xf64>, index) -> tensor<4xf64>
   // %res = call @cross_entropy(%x, %label) : (tensor<4xf64>, index) -> f64
   // %s = linalg.init_tensor [] : tensor<f64>
   // %s1 = tensor.insert %res into %s[] : tensor<f64>

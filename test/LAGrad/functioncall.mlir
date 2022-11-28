@@ -24,12 +24,9 @@ func @f(%arg0: f32, %arg1: f32) -> f32 {
 }
 
 func @main() {
-  %f = constant @f : (f32, f32) -> f32
-  %df = standalone.grad %f {of = [0]} : (f32, f32) -> f32, (f32, f32) -> f32
-
   %cst0 = arith.constant 4.4 : f32
   %cst1 = arith.constant 3.5 : f32
-  %res = call_indirect %df(%cst0, %cst1) : (f32, f32) -> f32
+  %res = lagrad.grad @f(%cst0, %cst1) : (f32, f32) -> f32
 
   %m = memref.alloca() : memref<f32>
   memref.store %res, %m[] : memref<f32>

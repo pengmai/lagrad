@@ -50,10 +50,6 @@ func @skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: te
 }
 
 func @lagrad_skinned_vertex_subset(%transforms: tensor<22x4x4xf64>, %base_positions: tensor<544x4xf64>, %weights: tensor<544x22xf64>) -> tensor<22x4x4xf64> {
-  %f = constant @skinned_vertex_subset : (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<544x3xf64>
-  %df = standalone.grad %f {of = [0]} :
-    (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<544x3xf64>,
-    (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<22x4x4xf64>
-  %res = call_indirect %df(%transforms, %base_positions, %weights) : (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<22x4x4xf64>
+  %res = lagrad.grad @skinned_vertex_subset(%transforms, %base_positions, %weights) : (tensor<22x4x4xf64>, tensor<544x4xf64>, tensor<544x22xf64>) -> tensor<22x4x4xf64>
   return %res : tensor<22x4x4xf64>
 }

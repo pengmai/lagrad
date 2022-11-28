@@ -31,7 +31,7 @@ func @enzyme_dot(%a : memref<131072xf32>, %b : memref<131072xf32>) -> (memref<13
   linalg.fill(%da, %cst) : memref<131072xf32>, f32
   linalg.fill(%db, %cst) : memref<131072xf32>, f32
   %f = constant @scfdot : (memref<131072xf32>, memref<131072xf32>) -> f32
-  %df = standalone.diff %f : (memref<131072xf32>, memref<131072xf32>) -> f32, (memref<131072xf32>, memref<131072xf32>, memref<131072xf32>, memref<131072xf32>) -> f32
+  %df = lagrad.diff %f : (memref<131072xf32>, memref<131072xf32>) -> f32, (memref<131072xf32>, memref<131072xf32>, memref<131072xf32>, memref<131072xf32>) -> f32
   call_indirect %df(%a, %da, %b, %db) : (memref<131072xf32>, memref<131072xf32>, memref<131072xf32>, memref<131072xf32>) -> f32
   return %da, %db : memref<131072xf32>, memref<131072xf32>
 }

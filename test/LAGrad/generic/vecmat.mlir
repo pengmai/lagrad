@@ -24,9 +24,7 @@ func private @print_memref_f32(tensor<*xf32>) attributes { llvm.emit_c_interface
 func @main() {
   %arg0 = arith.constant dense<[1., 2., 3.]> : tensor<3xf32>
   %arg1 = arith.constant dense<[[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]]> : tensor<3x4xf32>
-  %f = constant @vecmat : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>
-  %df = standalone.grad %f {of = [0]}: (tensor<3xf32>, tensor<3x4xf32>) -> tensor<4xf32>, (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
-  %res = call_indirect %df(%arg0, %arg1) : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
+  %res = lagrad.grad @vecmat(%arg0, %arg1) {of = [0]} : (tensor<3xf32>, tensor<3x4xf32>) -> tensor<3xf32>
   %U = tensor.cast %res : tensor<3xf32> to tensor<*xf32>
   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
   return

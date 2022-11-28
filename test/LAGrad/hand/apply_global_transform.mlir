@@ -161,10 +161,7 @@ func @main() {
     %4 = arith.sitofp %3 : i64 to f64
     tensor.yield %4 : f64
   } : tensor<544x3xf64>
-  %f = constant @mapply_global_transform : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<544x3xf64>
-
-  %df = standalone.grad %f : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<544x3xf64>, (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<25x3xf64>
-  %res = call_indirect %df(%A, %B) : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<25x3xf64>
+  %res = lagrad.grad @mapply_global_transform(%A, %B) : (tensor<25x3xf64>, tensor<544x3xf64>) -> tensor<25x3xf64>
   %U = tensor.cast %res : tensor<25x3xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

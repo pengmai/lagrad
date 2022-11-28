@@ -24,7 +24,7 @@ func @main() -> i64 {
   memref.store %one, %dC[] : memref<f32>
 
   %f = constant @dot : (memref<4xf32>, memref<4xf32>, memref<f32>) -> f32
-  %df = standalone.diff %f : (memref<4xf32>, memref<4xf32>, memref<f32>) -> f32, (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
+  %df = lagrad.diff %f : (memref<4xf32>, memref<4xf32>, memref<f32>) -> f32, (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
   call_indirect %df(%A, %dA, %B, %dB, %C, %dC) : (memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<4xf32>, memref<f32>, memref<f32>) -> f32
 
   %U = memref.cast %dA : memref<4xf32> to memref<*xf32>

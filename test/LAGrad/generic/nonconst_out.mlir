@@ -16,9 +16,7 @@ func @main() {
   ]> : tensor<4x4xf64>
   %B = arith.constant dense<[4.0, -3.0,  2.0,  1.0]> : tensor<4xf64>
   %C = arith.constant dense<[1.0,  0.2, -2.3, -1.7]> : tensor<4xf64>
-  %f = constant @f : (tensor<4x4xf64>, tensor<4xf64>, tensor<4xf64>) -> tensor<4xf64>
-  %df = standalone.grad %f {of = [1]}: (tensor<4x4xf64>, tensor<4xf64>, tensor<4xf64>) -> tensor<4xf64>, (tensor<4x4xf64>, tensor<4xf64>, tensor<4xf64>) -> tensor<4xf64>
-  %res = call_indirect %df(%A, %B, %C) : (tensor<4x4xf64>, tensor<4xf64>, tensor<4xf64>) -> tensor<4xf64>
+  %res = lagrad.grad @f(%A, %B, %C) {of = [1]} : (tensor<4x4xf64>, tensor<4xf64>, tensor<4xf64>) -> tensor<4xf64>
   %U = tensor.cast %res : tensor<4xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

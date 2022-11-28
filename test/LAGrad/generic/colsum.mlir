@@ -24,9 +24,7 @@ func @main() {
     [0.36535766, 0.55929595, 0.70579915, 0.17196087, 0.39675371]
   ]> : tensor<4x5xf32>
 
-  %f = constant @colsum : (tensor<4x5xf32>) -> tensor<5xf32>
-  %df = standalone.grad %f {of = [0]}: (tensor<4x5xf32>) -> tensor<5xf32>, (tensor<4x5xf32>) -> tensor<4x5xf32>
-  %res = call_indirect %df(%cst) : (tensor<4x5xf32>) -> tensor<4x5xf32>
+  %res = lagrad.grad @colsum(%cst) {of = [0]} : (tensor<4x5xf32>) -> tensor<4x5xf32>
   %U = tensor.cast %res : tensor<4x5xf32> to tensor<*xf32>
   call @print_memref_f32(%U) : (tensor<*xf32>) -> ()
   return

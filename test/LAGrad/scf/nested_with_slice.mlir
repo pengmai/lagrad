@@ -66,9 +66,7 @@ func @main() {
     [ 0.39593011,  1.05719539,  1.10094119,  1.2460805 ],
     [-0.45650058,  0.26570091,  0.44657684,  0.57883876]
   ]> : tensor<6x4xf64>
-  %f = constant @nested_with_slice : (tensor<10x4xf64>, tensor<6x4xf64>) -> f64
-  %df = standalone.grad %f {of = [0]} : (tensor<10x4xf64>, tensor<6x4xf64>) -> f64, (tensor<10x4xf64>, tensor<6x4xf64>) -> tensor<10x4xf64>
-  %res = call_indirect %df(%A, %B) : (tensor<10x4xf64>, tensor<6x4xf64>) -> tensor<10x4xf64>
+  %res = lagrad.grad @nested_with_slice(%A, %B) : (tensor<10x4xf64>, tensor<6x4xf64>) -> tensor<10x4xf64>
   %U = tensor.cast %res : tensor<10x4xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

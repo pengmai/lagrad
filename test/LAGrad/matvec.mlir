@@ -34,10 +34,7 @@ func @main() {
   ]> : tensor<3x4xf32>
   %x = arith.constant dense<[-1.2, -1.3, 1.5, 2.2]> : tensor<4xf32>
 
-  %f = constant @matvec : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3xf32>
-  %df = standalone.grad %f {of=[0]} : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3xf32>, (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>
-  %val = call_indirect %df(%M, %x) : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>
-  // %val = call @mygrad(%M, %x) : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>
+  %val = lagrad.grad @matvec(%M, %x) {of = [0]} : (tensor<3x4xf32>, tensor<4xf32>) -> tensor<3x4xf32>
 
   %casted = tensor.cast %val : tensor<3x4xf32> to tensor<*xf32>
   call @print_memref_f32(%casted) : (tensor<*xf32>) -> ()

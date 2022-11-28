@@ -33,7 +33,7 @@ func @main() -> i64 {
   memref.store %one, %dout[] : memref<f64>
 
   %f = constant @func_with_const_memref : (memref<2xf64>, memref<f64>, memref<f64>) -> f64
-  %df = standalone.diff %f {const = [1]} : (memref<2xf64>, memref<f64>, memref<f64>) -> f64, (memref<2xf64>, memref<2xf64>, memref<f64>, memref<f64>, memref<f64>) -> f64
+  %df = lagrad.diff %f {const = [1]} : (memref<2xf64>, memref<f64>, memref<f64>) -> f64, (memref<2xf64>, memref<2xf64>, memref<f64>, memref<f64>, memref<f64>) -> f64
 
   call_indirect %df(%arg0, %darg0, %arg1, %out, %dout) : (memref<2xf64>, memref<2xf64>, memref<f64>, memref<f64>, memref<f64>) -> f64
   %U = memref.cast %darg0 : memref<2xf64> to memref<*xf64>

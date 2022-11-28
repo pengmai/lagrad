@@ -36,9 +36,7 @@ func @main() {
   %points = arith.constant dense<[[1., 2., 3.], [4., 5., 6.]]> : tensor<2x3xf64>
   %correspondences = arith.constant dense<[10, 16]> : tensor<2xi32>
 
-  %f = constant @compute_err : (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<2x3xf64>
-  %df = standalone.grad %f {of = [0]}: (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<2x3xf64>, (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<544x3xf64>
-  %adjoint = call_indirect %df(%vertex_positions, %points, %correspondences) : (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<544x3xf64>
+  %adjoint = lagrad.grad @compute_err(%vertex_positions, %points, %correspondences) : (tensor<544x3xf64>, tensor<2x3xf64>, tensor<2xi32>) -> tensor<544x3xf64>
   %U = tensor.cast %adjoint : tensor<544x3xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

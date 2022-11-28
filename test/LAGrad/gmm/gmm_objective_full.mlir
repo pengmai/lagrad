@@ -237,31 +237,7 @@ module  {
   ) {
     %zero = arith.constant 0.0 : f64
 
-    %f = constant @gmm_objective_full : (tensor<3xf64>, tensor<3x2xf64>, tensor<3x2xf64>, tensor<3x2x2xf64>, tensor<1x2xf64>, f64, i64) -> f64
-    %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
-      tensor<3xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2x2xf64>,
-      tensor<1x2xf64>,
-      f64,
-      i64
-    ) -> f64, (
-      tensor<3xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2x2xf64>,
-      tensor<1x2xf64>,
-      f64,
-      i64
-    ) -> (
-      tensor<3xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2xf64>,
-      tensor<3x2x2xf64>
-    )
-
-    %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (
+    %res:4 = lagrad.grad @gmm_objective_full(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) {of = [0, 1, 2, 3]} : (
       tensor<3xf64>,
       tensor<3x2xf64>,
       tensor<3x2xf64>,

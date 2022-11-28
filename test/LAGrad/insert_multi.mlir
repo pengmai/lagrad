@@ -14,9 +14,7 @@ func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface
 
 func @main() {
   %arg = arith.constant dense<[1., 2., 3.]> : tensor<3xf64>
-  %f = constant @proj : (tensor<3xf64>) -> tensor<2xf64>
-  %df = standalone.grad %f : (tensor<3xf64>) -> tensor<2xf64>, (tensor<3xf64>) -> tensor<3xf64>
-  %res = call_indirect %df(%arg) : (tensor<3xf64>) -> tensor<3xf64>
+  %res = lagrad.grad @proj(%arg) : (tensor<3xf64>) -> tensor<3xf64>
   %U = tensor.cast %res : tensor<3xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
   return

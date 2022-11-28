@@ -46,8 +46,6 @@ func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
 }
 
 func @lagrad_to_pose_params(%theta: tensor<26xf64>) -> tensor<26xf64> {
-  %f = constant @mto_pose_params : (tensor<26xf64>) -> tensor<25x3xf64>
-  %df = standalone.grad %f {of = [0]}: (tensor<26xf64>) -> tensor<25x3xf64>, (tensor<26xf64>) -> tensor<26xf64>
-  %res = call_indirect %df(%theta) : (tensor<26xf64>) -> tensor<26xf64>
+  %res = lagrad.grad @mto_pose_params(%theta) : (tensor<26xf64>) -> tensor<26xf64>
   return %res : tensor<26xf64>
 }

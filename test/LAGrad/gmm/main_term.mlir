@@ -143,26 +143,7 @@ func @main() {
     [0.3593, 0.1665]
   ]> : tensor<10x2xf64>
 
-  %f = constant @main_term : (tensor<4xf64>, tensor<4x2xf64>, tensor<4x2xf64>, tensor<4x2x2xf64>, tensor<10x2xf64>) -> f64
-  %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
-    tensor<4xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2x2xf64>,
-    tensor<10x2xf64>
-  ) -> f64, (
-    tensor<4xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2x2xf64>,
-    tensor<10x2xf64>    
-  ) -> (
-    tensor<4xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2xf64>,
-    tensor<4x2x2xf64>
-  )
-  %res:4 = call_indirect %df(%alphas, %means, %Qs, %Ls, %x) : (
+  %res:4 = lagrad.grad @main_term(%alphas, %means, %Qs, %Ls, %x) {of = [0, 1, 2, 3]} : (
     tensor<4xf64>,
     tensor<4x2xf64>,
     tensor<4x2xf64>,
