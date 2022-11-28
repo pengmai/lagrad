@@ -63,7 +63,7 @@ void free_matrix_array(Matrix *matrices, size_t num_matrices) {
 
 HandModel read_hand_model(const char *model_path, bool transpose) {
   const char DELIMITER = ':';
-  char filename[100];
+  char filename[120];
   char *currentline = (char *)malloc(100 * sizeof(char));
   FILE *fp;
 
@@ -348,10 +348,53 @@ F64Descriptor1D lagrad_hand_objective(
     /*weights=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*correspondence=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
     /*points=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*g=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
+    int64_t
+    //);
+    ,
+    /*indices=*/int64_t *, int64_t *, int64_t, int64_t, int64_t);
+
+F64Descriptor1D lagrad_hand_simple(HandInput *input, double *derr, int row,
+                                   int col) {
+  int64_t indices[2] = {row, col};
+  return lagrad_hand_objective(
+      /*theta=*/deadbeef, input->theta, 0, input->n_theta, 1,
+      /*parents=*/(int32_t *)deadbeef, input->model.parents, 0,
+      input->model.n_bones, 1,
+      /*base_relatives=*/deadbeef, input->model.base_relatives, 0,
+      input->model.n_bones, 4, 4, 16, 4, 1,
+      /*inverse_base_absolutes=*/deadbeef, input->model.inverse_base_absolutes,
+      0, input->model.n_bones, 4, 4, 16, 4, 1,
+      /*base_positions=*/deadbeef, input->model.base_positions, 0,
+      input->model.n_vertices, 4, 4, 1,
+      /*weights=*/deadbeef, input->model.weights, 0, input->model.n_vertices,
+      input->model.n_bones, input->model.n_bones, 1,
+      /*correspondences=*/(int32_t *)deadbeef, input->correspondences, 0,
+      input->n_pts, 1,
+      /*points=*/deadbeef, input->points, 0, input->n_pts, 3, 3, 1,
+      /*g=*/deadbeef, derr, 0, input->n_pts, 3, 3,
+      1
+      // );
+      ,
+      /*indices=*/(int64_t *)deadbeef, indices, 0, 2, 1);
+}
+
+F64Descriptor1D sparse_grad_mlir_hand_objective(
+    /*theta=*/double *, double *, int64_t, int64_t, int64_t,
+    /*parents=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
+    /*base_relatives=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t,
+    /*inverse_base_absolutes=*/double *, double *, int64_t, int64_t, int64_t,
+    int64_t, int64_t, int64_t, int64_t,
+    /*base_positions=*/double *, double *, int64_t, int64_t, int64_t, int64_t,
+    int64_t,
+    /*weights=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
+    /*correspondence=*/int32_t *, int32_t *, int64_t, int64_t, int64_t,
+    /*points=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*g=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t);
 
-F64Descriptor1D lagrad_hand_simple(HandInput *input, double *derr) {
-  return lagrad_hand_objective(
+F64Descriptor1D sparse_lagrad_hand_simple(HandInput *input, double *derr) {
+  return sparse_grad_mlir_hand_objective(
       /*theta=*/deadbeef, input->theta, 0, input->n_theta, 1,
       /*parents=*/(int32_t *)deadbeef, input->model.parents, 0,
       input->model.n_bones, 1,
@@ -422,7 +465,8 @@ F64Descriptor1D enzyme_hand_objective(
     /*points=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t,
     /*derr=*/double *, double *, int64_t, int64_t, int64_t, int64_t, int64_t);
 
-F64Descriptor1D enzyme_mlir_hand_simple(HandInput *input, double *derr) {
+F64Descriptor1D enzyme_mlir_hand_simple(HandInput *input, double *derr, int row,
+                                        int col) {
   return enzyme_hand_objective(
       /*theta=*/deadbeef, input->theta, 0, input->n_theta, 1,
       /*parents=*/(int32_t *)deadbeef, input->model.parents, 0,
@@ -489,7 +533,8 @@ void dhand_objective(double const *theta, double *dtheta, int bone_count,
                      int corresp_count, const int *correspondences,
                      Matrix *points, double *err, double *derr);
 
-F64Descriptor1D enzyme_c_hand_simple(HandInput *input, double *derr) {
+F64Descriptor1D enzyme_c_hand_simple(HandInput *input, double *derr, int row,
+                                     int col) {
   F64Descriptor1D dtheta = {.allocated = NULL,
                             .aligned = calloc(input->n_theta, sizeof(double)),
                             .offset = 0,

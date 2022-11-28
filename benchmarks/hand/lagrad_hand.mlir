@@ -683,39 +683,10 @@ func @lagrad_hand_objective(
   %weights: tensor<{{nverts}}x{{nbones}}xf64>,
   %correspondences: tensor<?xi32>,
   %points: tensor<?x3xf64>,
-  %g: tensor<?x3xf64>
+  %g: tensor<?x3xf64, "onehot">
+  // %g: tensor<?x3xf64>
 ) -> tensor<{{ntheta}}xf64> {
-  %f = constant @mlir_hand_objective : (
-    tensor<{{ntheta}}xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<?xi32>,
-    tensor<?x3xf64>
-  ) -> tensor<?x3xf64>
-  %df = standalone.grad %f {of = [0], grad_signal = true} : (
-    tensor<{{ntheta}}xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<?xi32>,
-    tensor<?x3xf64>
-  ) -> tensor<?x3xf64>, (
-    tensor<{{ntheta}}xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<?xi32>,
-    tensor<?x3xf64>,
-    tensor<?x3xf64>
-  ) -> tensor<{{ntheta}}xf64>
-  %dtheta = call_indirect %df(
+  %dtheta = lagrad.grad @mlir_hand_objective(
     %theta,
     %parents,
     %base_relatives,
@@ -725,7 +696,7 @@ func @lagrad_hand_objective(
     %correspondences,
     %points,
     %g
-  ) : (
+  ) {of = [0], grad_signal, sparse} : (
     tensor<{{ntheta}}xf64>,
     tensor<{{nbones}}xi32>,
     tensor<{{nbones}}x4x4xf64>,
@@ -734,7 +705,8 @@ func @lagrad_hand_objective(
     tensor<{{nverts}}x{{nbones}}xf64>,
     tensor<?xi32>,
     tensor<?x3xf64>,
-    tensor<?x3xf64>
+    tensor<?x3xf64, "onehot">
+    // tensor<?x3xf64>
   ) -> tensor<{{ntheta}}xf64>
   return %dtheta : tensor<{{ntheta}}xf64>
 }
@@ -752,43 +724,7 @@ func @lagrad_hand_objective_complicated(
   %points: tensor<?x3xf64>,
   %g: tensor<?x3xf64>
 ) -> (tensor<{{ntheta}}xf64>, tensor<?x2xf64>) {
-  %f = constant @mlir_hand_objective_complicated : (
-    tensor<{{ntheta}}xf64>,
-    tensor<?x2xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<{{ntriangles}}x3xi32>,
-    tensor<?xi32>,
-    tensor<?x3xf64>
-  ) -> tensor<?x3xf64>
-  %df = standalone.grad %f {of = [0, 1], grad_signal = true} : (
-    tensor<{{ntheta}}xf64>,
-    tensor<?x2xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<{{ntriangles}}x3xi32>,
-    tensor<?xi32>,
-    tensor<?x3xf64>
-  ) -> tensor<?x3xf64>, (
-    tensor<{{ntheta}}xf64>,
-    tensor<?x2xf64>,
-    tensor<{{nbones}}xi32>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nbones}}x4x4xf64>,
-    tensor<{{nverts}}x4xf64>,
-    tensor<{{nverts}}x{{nbones}}xf64>,
-    tensor<{{ntriangles}}x3xi32>,
-    tensor<?xi32>,
-    tensor<?x3xf64>,
-    tensor<?x3xf64>
-  ) -> (tensor<{{ntheta}}xf64>, tensor<?x2xf64>)
-  %res:2 = call_indirect %df(
+  %res:2 = lagrad.grad @mlir_hand_objective_complicated(
     %theta,
     %us,
     %parents,
@@ -800,7 +736,7 @@ func @lagrad_hand_objective_complicated(
     %correspondences,
     %points,
     %g
-  ) : (
+  ) {of = [0, 1], grad_signal} : (
     tensor<{{ntheta}}xf64>,
     tensor<?x2xf64>,
     tensor<{{nbones}}xi32>,
