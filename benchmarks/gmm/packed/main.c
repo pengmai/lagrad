@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 1
+#define CHECK_MEM 0
 
 double *deadbeef = (double *)0xdeadbeef;
 RunProcDyn rpd;
@@ -120,10 +120,10 @@ unsigned long collect_packed_adjoint(GMMApp app, GMMInput *gmm_input,
     check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
                   ref_means, temp_icf, ref_icf, app.name);
   }
-  free(ans.dalphas.aligned);
-  free(ans.dmeans.aligned);
-  free(ans.dqs.aligned);
-  free(ans.dls.aligned);
+  free(ans.dalphas.allocated);
+  free(ans.dmeans.allocated);
+  free(ans.dqs.allocated);
+  free(ans.dls.allocated);
   free(compressed_Ls);
   return timediff(start, stop);
 }
@@ -142,8 +142,8 @@ int main() {
   GMMApp apps[] = {
       //
       {.name = "LAGrad", .func = lagrad_gmm_packed_adjoint},
-      // {.name = "Enzyme/C", .func = enzyme_c_gmm_packed},
-      // {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_packed_adjoint},
+      {.name = "Enzyme/C", .func = enzyme_c_gmm_packed},
+      {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_packed_adjoint},
   };
 
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);

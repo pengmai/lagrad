@@ -197,30 +197,34 @@ GMMCompressedGrad enzyme_c_gmm_packed(GMMInput *gmm, double *compressed_Ls) {
   int d = gmm->d, k = gmm->k, n = gmm->n;
   int tri_size = d * (d - 1) / 2;
   int icf_size = d * (d + 1) / 2;
+  double *dalphas_buf = calloc(k, sizeof(double));
+  double *dmeans_buf = calloc(k * d, sizeof(double));
+  double *dQs_buf = calloc(k * d, sizeof(double));
+  double *dLs_buf = calloc(k * tri_size, sizeof(double));
 
-  F64Descriptor1D dalphas = {.allocated = NULL,
-                             .aligned = calloc(k, sizeof(double)),
+  F64Descriptor1D dalphas = {.allocated = dalphas_buf,
+                             .aligned = dalphas_buf,
                              .offset = 0,
                              .size = k,
                              .stride = 1};
 
-  F64Descriptor2D dmeans = {.allocated = NULL,
-                            .aligned = calloc(k * d, sizeof(double)),
+  F64Descriptor2D dmeans = {.allocated = dmeans_buf,
+                            .aligned = dmeans_buf,
                             .offset = 0,
                             .size_0 = k,
                             .size_1 = d,
                             .stride_0 = d,
                             .stride_1 = 1};
   double *icfb = calloc(k * (tri_size + d), sizeof(double));
-  F64Descriptor2D dQs = {.allocated = NULL,
-                         .aligned = calloc(k * d, sizeof(double)),
+  F64Descriptor2D dQs = {.allocated = dQs_buf,
+                         .aligned = dQs_buf,
                          .offset = 0,
                          .size_0 = k,
                          .size_1 = d,
                          .stride_0 = d,
                          .stride_1 = 1};
-  F64Descriptor2D dLs = {.allocated = NULL,
-                         .aligned = calloc(k * tri_size, sizeof(double)),
+  F64Descriptor2D dLs = {.allocated = dLs_buf,
+                         .aligned = dLs_buf,
                          .offset = 0,
                          .size_0 = k,
                          .size_1 = tri_size,
