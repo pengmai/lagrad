@@ -4,7 +4,7 @@ set(LIBS
         ${dialect_libs}
         ${conversion_libs}
         MLIROptLib
-        MLIRStandalone
+        MLIRLAGrad
         )
 add_llvm_executable(lagrad-opt lagrad-opt.cpp)
 
