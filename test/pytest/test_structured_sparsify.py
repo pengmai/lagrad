@@ -9,6 +9,7 @@ from mlir_bindings import (
     onehot_matmul_both_transposed,
     rowhot_broadcast_mul,
     rowhot_matmul,
+    colhot_broadcast_mul,
 )
 
 
@@ -81,3 +82,12 @@ def test_rowhot_matmul():
     idx = np.int64(2)
     x[idx] = np.random.randn(4)
     assert rowhot_matmul(y, x, idx) == pytest.approx(np.matmul(y.T, x))
+
+
+def test_colhot_broadcast_mul():
+    np.random.seed(0)
+    y = np.random.randn(3)
+    x = np.zeros((3, 3))
+    idx = np.int64(2)
+    x[:, idx] = np.random.randn(3)
+    assert colhot_broadcast_mul(y, x, idx) == pytest.approx((y * x.T).T)

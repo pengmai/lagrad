@@ -14,98 +14,40 @@
 using namespace mlir;
 
 namespace {
-class GradOpLowering : public ConversionPattern {
+class GradOpLowering : public OpConversionPattern<lagrad::GradOp> {
 public:
-  explicit GradOpLowering(MLIRContext *context)
-      : ConversionPattern(lagrad::GradOp::getOperationName(), /*benefit=*/1,
-                          context) {}
+  using OpConversionPattern::OpConversionPattern;
+
   LogicalResult
-  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+  matchAndRewrite(lagrad::GradOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto funcOp = generateAdjointFunc(op, operands, rewriter);
+    auto funcOp = generateAdjointFunc(op, rewriter);
     if (!funcOp) {
       return failure();
     }
 
-    auto funcVal = rewriter.create<mlir::ConstantOp>(
-        op->getLoc(), funcOp.getType(),
-        SymbolRefAttr::get(funcOp.getContext(), funcOp.getName()));
-    op->replaceAllUsesWith(llvm::makeArrayRef(funcVal.getResult()));
-    rewriter.eraseOp(op);
-    // llvm::outs() << "\n\nFuncOp:\n" << funcOp << "\n";
+    rewriter.replaceOpWithNewOp<CallOp>(op, funcOp, op.getOperands());
     return success();
   }
 
 private:
-  static bool verifyAttributes(Operation *op, unsigned int num_inputs) {
-    ArrayAttr ofAttr = op->getAttr("of").dyn_cast_or_null<ArrayAttr>();
-    if (ofAttr) {
-      for (const auto attr : ofAttr) {
-        auto intAttr = attr.dyn_cast_or_null<IntegerAttr>();
-        if (!intAttr) {
-          return false;
-        }
-
-        auto attrValue = intAttr.getValue().getSExtValue();
-        if (attrValue < 0) {
-          op->emitError("'of' index cannot be negative");
-          return false;
-        } else if (static_cast<size_t>(attrValue) >= num_inputs) {
-          op->emitError(
-              "'of' index cannot be greater than number of function inputs");
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  static FuncOp generateAdjointFunc(Operation *gradOp, ArrayRef<Value> operands,
+  static FuncOp generateAdjointFunc(lagrad::GradOp gradOp,
                                     ConversionPatternRewriter &rewriter) {
-    Value arg0 = operands[0];
-    auto arg0Type = arg0.getType().dyn_cast<FunctionType>();
-    if (!arg0Type) {
-      gradOp->emitError("Argument to `grad` was not a function");
-      return nullptr;
-    }
-
-    if (!verifyAttributes(gradOp, arg0Type.getNumInputs())) {
-      return nullptr;
-    }
-    // auto returnShapedType =
-    //     arg0Type.getResult(0).dyn_cast_or_null<ShapedType>();
-    // if (!(arg0Type.getResult(0).isa<FloatType>() ||
-    //       (returnShapedType && returnShapedType.hasRank() &&
-    //        returnShapedType.getRank() == 0))) {
-    //   gradOp->emitError("Argument to `grad` must return a float "
-    //                     "type or a rank-0 shaped type");
-    //   return nullptr;
-    // }
-
-    // Assume the arg was defined by a constant op.
-    auto definingOp = arg0.getDefiningOp();
-    if (!definingOp) {
-      gradOp->emitError("Argument had no defining op");
-      return nullptr;
-    }
-
-    if (!definingOp->hasAttr("value")) {
-      definingOp->emitError("Expected constant op to have 'value' attribute "
-                            "(trying to look up function name)");
-      return nullptr;
-    }
-
-    auto attr = definingOp->getAttrOfType<FlatSymbolRefAttr>("value");
     auto moduleOp = gradOp->getParentOfType<ModuleOp>();
-    auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(attr);
-    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
-    auto gradSignalAttr =
-        gradOp->getAttr("grad_signal").dyn_cast_or_null<BoolAttr>();
-    auto customGradSignal = gradSignalAttr && gradSignalAttr.getValue();
-    bool oneHotSparse = gradOp->hasAttrOfType<UnitAttr>("sparse");
+    auto originalFuncOp = moduleOp.lookupSymbol<FuncOp>(gradOp.FAttr());
 
-    std::string adjointFuncName("__grad_");
-    adjointFuncName += originalFuncOp.getName();
+    std::string adjointFuncName = ("__grad_" + originalFuncOp.getName()).str();
+
+    if (auto existingAdjoint = moduleOp.lookupSymbol<FuncOp>(adjointFuncName)) {
+      return existingAdjoint;
+    }
+
+    // If we differentiate the same function multiple times w.r.t. different
+    // args this will fail. Handling this properly requires some kind of name
+    // mangling.
+    auto gradientsOf = gradOp->getAttr("of").dyn_cast_or_null<ArrayAttr>();
+    bool customGradSignal = gradOp->hasAttrOfType<UnitAttr>("grad_signal");
+    bool oneHotSparse = gradOp->hasAttrOfType<UnitAttr>("sparse");
 
     // If we received request for a custom gradient signal, this is equivalent
     // to taking in the gradient signal as a parameter.

@@ -3,7 +3,6 @@
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -482,12 +481,13 @@ public:
 
     // The sparse induction vars must correspond to the dimensions of the sparse
     // operand, hence the null value in the col-hot case.
-    ValueRange sparseIvs = spType == HotSparsityType::OneHot
-                               ? ValueRange{convertIndicesToValues(
-                                     loc, sparseIndices.getValue(), rewriter)}
-                           : spType == HotSparsityType::ColHot
-                               ? ValueRange{Value(), sparseIndices.getValue()}
-                               : ValueRange{sparseIndices.getValue()};
+    SmallVector<Value> sparseIvs =
+        spType == HotSparsityType::OneHot
+            ? ValueRange{convertIndicesToValues(loc, sparseIndices.getValue(),
+                                                rewriter)}
+        : spType == HotSparsityType::ColHot
+            ? ValueRange{Value(), sparseIndices.getValue()}
+            : ValueRange{sparseIndices.getValue()};
 
     scf::buildLoopNest(
         rewriter, loc, lbs, ubs, steps,
@@ -815,7 +815,6 @@ struct StructuredSparsifyPass
     : public PassWrapper<StructuredSparsifyPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
-    registry.insert<sparse_tensor::SparseTensorDialect>();
     registry.insert<scf::SCFDialect>();
   }
   StringRef getArgument() const override { return "structured-sparsify"; }

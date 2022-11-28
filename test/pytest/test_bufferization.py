@@ -8,7 +8,7 @@ from toolchain import jit_file
 from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
 import numpy as np
 
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 
 
 def test_collapse_shape():

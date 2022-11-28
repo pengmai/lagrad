@@ -95,7 +95,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
                          return type.isIntOrIndexOrFloat();
                        });
               })) {
-        errs() << "interrupt 1\n";
+        // errs() << "interrupt 1\n";
         return WalkResult::interrupt();
       }
       // All yielded operands should be the result of insert ops
@@ -105,7 +105,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
         auto insertOp =
             dyn_cast_or_null<tensor::InsertOp>(yieldOperand.getDefiningOp());
         if (!insertOp) {
-          errs() << "interrupt 2\n";
+          // errs() << "interrupt 2\n";
           return WalkResult::interrupt();
         }
         // need to find all the reads that affect the scalar within the loop
@@ -143,7 +143,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
             auto maybeOutputOperand =
                 traverseTiedLoopOperands(tmpInsert.dest());
             if (!maybeOutputOperand.hasValue()) {
-              errs() << "interrupt output\n";
+              // errs() << "interrupt output\n";
               return WalkResult::interrupt();
             }
             loopNest.outputTensorOperands.push_back(
@@ -206,7 +206,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
               auto maybeInputOperand =
                   traverseTiedLoopOperands(extractOp.tensor());
               if (!maybeInputOperand.hasValue()) {
-                errs() << "interrupt 4\n";
+                // errs() << "interrupt 4\n";
                 return WalkResult::interrupt();
               }
               loopNest.inputTensorOperands.push_back(
@@ -229,7 +229,7 @@ Optional<LoopNest> parseLoopNest(scf::ForOp op) {
                          return type.isIntOrIndex();
                        });
               })) {
-        errs() << "interrupt 6\n";
+        // errs() << "interrupt 6\n";
         return WalkResult::interrupt();
       }
       // Ensure the yield operands of this loop match the results of the child

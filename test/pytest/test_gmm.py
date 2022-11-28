@@ -9,7 +9,7 @@ from benchmark_io import read_gmm_instance, GMMInput
 from pytorch_ref.pytorch_gmm import gmm_objective
 from mlir_bindings import mlir_gmm_primal_full, lagrad_gmm_full
 
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 GMM_DATA_FILE = (
     pathlib.Path(__file__).parents[2] / "benchmarks" / "data" / "gmm" / "test.txt"
 )

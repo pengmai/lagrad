@@ -384,6 +384,8 @@ mlirlib.onehot_matmul.argtypes = memref_2d + memref_2d + memref_1d_index
 mlirlib.onehot_matmul.restype = F64Descriptor2D
 mlirlib.rowhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
 mlirlib.rowhot_broadcast_mul.restype = F64Descriptor2D
+mlirlib.colhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
+mlirlib.colhot_broadcast_mul.restype = F64Descriptor2D
 mlirlib.rowhot_matmul.argtypes = memref_2d + memref_2d + [ctypes.c_longlong]
 mlirlib.rowhot_matmul.restype = F64Descriptor2D
 
@@ -452,4 +454,5 @@ onehot_sumreduce = wrap(mlirlib.onehot_sumreduce)
 onehot_matmul_both_transposed = wrap(mlirlib.onehot_matmul_both_transposed)
 onehot_matmul = wrap(mlirlib.onehot_matmul)
 rowhot_broadcast_mul = wrap(mlirlib.rowhot_broadcast_mul)
+colhot_broadcast_mul = wrap(mlirlib.colhot_broadcast_mul)
 rowhot_matmul = wrap(mlirlib.rowhot_matmul)

@@ -3,7 +3,7 @@ import os.path as osp
 from toolchain import jit_file
 from stdout_parser import extract_1d, extract_scalar
 
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 
 
 def test_unused_op():

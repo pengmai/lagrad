@@ -10,9 +10,7 @@ func private @print_memref_f64(tensor<*xf64>) attributes { llvm.emit_c_interface
 
 func @main() {
   %t = arith.constant dense<-1.0> : tensor<2x2xf64>
-  %f = constant @insert_overwrite : (tensor<2x2xf64>) -> tensor<2x2xf64>
-  %df = standalone.grad %f : (tensor<2x2xf64>) -> tensor<2x2xf64>, (tensor<2x2xf64>) -> tensor<2x2xf64>
-  %res = call_indirect %df(%t) : (tensor<2x2xf64>) -> tensor<2x2xf64>
+  %res = lagrad.grad @insert_overwrite(%t) : (tensor<2x2xf64>) -> tensor<2x2xf64>
   // %res = call @mygrad_insert_overwrite(%t) : (tensor<2x2xf64>) -> tensor<2x2xf64>
   %U = tensor.cast %res : tensor<2x2xf64> to tensor<*xf64>
   call @print_memref_f64(%U) : (tensor<*xf64>) -> ()
