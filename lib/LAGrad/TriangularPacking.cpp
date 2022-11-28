@@ -1,6 +1,6 @@
+#include "LAGrad/LAGradOps.h"
 #include "LAGrad/Logger.h"
 #include "LAGrad/Passes.h"
-#include "LAGrad/LAGradOps.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
@@ -157,7 +157,7 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   // The zero is a temporary placeholder to pass the
   // verifier. We expect it to be removed when the packed annotation is
   // converted to the proper packed type.
-  auto trilIndices = ValueRange{zero, Lidx};
+  SmallVector<Value> trilIndices{zero, Lidx};
 
   // 1.a. Emit load from input operands or for scalars access the operand
   // itself.
@@ -234,8 +234,7 @@ public:
         Value space = rewriter.create<linalg::InitTensorOp>(
             op.getLoc(), outType.getShape(), outType.getElementType());
         if (hasPackedEncoding(outType)) {
-          space =
-              rewriter.create<lagrad::PackOp>(op.getLoc(), outType, space);
+          space = rewriter.create<lagrad::PackOp>(op.getLoc(), outType, space);
         }
         if (op.payloadUsesValueFromOperand(outTensor)) {
           auto castedSpace = rewriter.create<memref::BufferCastOp>(
