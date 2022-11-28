@@ -60,9 +60,11 @@ float nn_crossentropy(const int b, const int length, const float *activations,
   return sum_output / b;
 }
 
-float ec_mlp_batched(const float *input, const int32_t *labels, const float *w0,
-                     const float *b0, const float *w1, const float *b1,
-                     const float *w2, const float *b2) {
+float ec_mlp_batched(const float *restrict input,
+                     const int32_t *restrict labels, const float *restrict w0,
+                     const float *restrict b0, const float *restrict w1,
+                     const float *restrict b1, const float *restrict w2,
+                     const float *restrict b2) {
   float *hidden0 = malloc(HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
   float *hidden1 = malloc(HIDDEN_SIZE * BATCH_SIZE * sizeof(float));
   float *activations = malloc(OUTPUT_SIZE * BATCH_SIZE * sizeof(float));

@@ -22,7 +22,7 @@ with new_context() as ctx:
     enzyme_sources = glob("enzyme_*.c")
     # mlir_sources = glob("DELETEME_postlibrary.mlir")
     enzyme_mlir_sources = glob("enzyme*.mlir")
-    mlir_sources = glob("nn.mlir")
+    mlir_sources = glob("lagrad_nn.mlir")
     c_sources = [ffile for ffile in glob("*.c") if ffile not in enzyme_sources]
 
     enzyme_phase = compile_enzyme(project, enzyme_sources)

@@ -240,43 +240,7 @@ func @lagrad_mlp(
   tensor<10x512xf32>,
   tensor<10xf32>
 ) {
-  %f = constant @mlir_mlp : (
-    tensor<64x784xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32
-  %df = standalone.grad %f {of = [2, 3, 4, 5, 6, 7]} : (
-    tensor<64x784xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32, (
-    tensor<64x784xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> (
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  )
-  %res:6 = call_indirect %df(%input, %labels, %w0, %b0, %w1, %b1, %w2, %b2) : (
+  %res:6 = lagrad.grad @mlir_mlp(%input, %labels, %w0, %b0, %w1, %b1, %w2, %b2) {of = [2, 3, 4, 5, 6, 7]} : (
     tensor<64x784xf32>,
     tensor<64xi32>,
     tensor<512x784xf32>,
@@ -319,43 +283,7 @@ func @lagrad_mlp_batched(
   tensor<10x512xf32>,
   tensor<10xf32>
 ) {
-  %f = constant @mlir_mlp_batched : (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32
-  %df = standalone.grad %f {of = [2, 3, 4, 5, 6, 7]} : (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> f32, (
-    tensor<784x64xf32>,
-    tensor<64xi32>,
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  ) -> (
-    tensor<512x784xf32>,
-    tensor<512xf32>,
-    tensor<512x512xf32>,
-    tensor<512xf32>,
-    tensor<10x512xf32>,
-    tensor<10xf32>
-  )
-  %res:6 = call_indirect %df(%input_t, %labels, %w0, %b0, %w1, %b1, %w2, %b2) : (
+  %res:6 = lagrad.grad @mlir_mlp_batched(%input_t, %labels, %w0, %b0, %w1, %b1, %w2, %b2) {of = [2, 3, 4, 5, 6, 7]} : (
     tensor<784x64xf32>,
     tensor<64xi32>,
     tensor<512x784xf32>,
