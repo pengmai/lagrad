@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 1
+#define CHECK_MEM 0
 
 double *deadbeef = (double *)0xdeadbeef;
 RunProcDyn rpd;
@@ -15,7 +15,7 @@ void check_mem_usage() {
 }
 
 BAGrad enzyme_c_compute_reproj_err(double *cams, double *X, double *w,
-                                   double *feats, double *g) {
+                                   double *feats, double *g, int row) {
   double *camsb_buf = calloc(BA_NCAMPARAMS, sizeof(double));
   double *Xb_buf = calloc(3, sizeof(double));
   F64Descriptor1D camsb = {.allocated = NULL,
@@ -43,7 +43,7 @@ double enzyme_c_compute_w_err(double w) {
 }
 
 BAGrad lagrad_compute_reproj_error_wrapper(double *cams, double *X, double *w,
-                                           double *feats, double *g) {
+                                           double *feats, double *g, int row) {
   return lagrad_compute_reproj_error(
       /*cams=*/deadbeef, cams, 0, BA_NCAMPARAMS, 1,
       /*X=*/deadbeef, X, 0, 3, 1, /*w=*/*w, deadbeef, feats, 0, 2, 1,
@@ -51,7 +51,7 @@ BAGrad lagrad_compute_reproj_error_wrapper(double *cams, double *X, double *w,
 }
 
 BAGrad enzyme_compute_reproj_error_wrapper(double *cams, double *X, double *w,
-                                           double *feats, double *g) {
+                                           double *feats, double *g, int row) {
   return enzyme_compute_reproj_error(
       /*cams=*/deadbeef, cams, 0, BA_NCAMPARAMS, 1,
       /*X=*/deadbeef, X, 0, 3, 1, /*w=*/*w, deadbeef, feats, 0, 2, 1,
@@ -61,14 +61,15 @@ BAGrad enzyme_compute_reproj_error_wrapper(double *cams, double *X, double *w,
 typedef struct BAApp {
   const char *name;
   BAGrad (*reproj_func)(double *cams, double *X, double *w, double *feats,
-                        double *g);
+                        double *g, int row);
   double (*w_func)(double w);
 } BAApp;
 
 void calculate_reproj_jacobian(BAApp app, BAInput ba_input, BASparseMat *J) {
   double errb[2];
   double reproj_err_d[2 * (BA_NCAMPARAMS + 3 + 1)];
-  for (size_t i = 0; i < ba_input.p; i++) {
+  int i;
+  for (i = 0; i < ba_input.p; i++) {
     int camIdx = ba_input.obs[2 * i + 0];
     int ptIdx = ba_input.obs[2 * i + 1];
 
@@ -77,7 +78,7 @@ void calculate_reproj_jacobian(BAApp app, BAInput ba_input, BASparseMat *J) {
     errb[1] = 0.0;
     BAGrad ans = app.reproj_func(&ba_input.cams[camIdx * BA_NCAMPARAMS],
                                  &ba_input.X[ptIdx * 3], &ba_input.w[i],
-                                 &ba_input.feats[i * 2], errb);
+                                 &ba_input.feats[i * 2], errb, 0);
 
     size_t j = 0;
     for (j = 0; j < BA_NCAMPARAMS; j++) {
@@ -91,12 +92,12 @@ void calculate_reproj_jacobian(BAApp app, BAInput ba_input, BASparseMat *J) {
     free(ans.dcam.aligned);
     free(ans.dX.aligned);
 
-    errb[1] = 0.0;
-    errb[0] = 1.0;
+    errb[1] = 1.0;
+    errb[0] = 0.0;
 
     ans = app.reproj_func(&ba_input.cams[camIdx * BA_NCAMPARAMS],
                           &ba_input.X[ptIdx * 3], &ba_input.w[i],
-                          &ba_input.feats[i * 2], errb);
+                          &ba_input.feats[i * 2], errb, 1);
     j = 0;
     for (j = 0; j < BA_NCAMPARAMS; j++) {
       reproj_err_d[j * 2 + 1] = ans.dcam.aligned[j];
@@ -153,17 +154,15 @@ int main(int argc, char **argv) {
   BASparseMat mat = initBASparseMat(n, m, p);
   BASparseMat ref = initBASparseMat(n, m, p);
 
-  BAApp apps[] = {
-      {.name = "LAGrad",
-       .reproj_func = lagrad_compute_reproj_error_wrapper,
-       .w_func = lagrad_compute_w_error},
-      // {.name = "Enzyme/C",
-      //  .reproj_func = enzyme_c_compute_reproj_err,
-      //  .w_func = enzyme_c_compute_w_err},
-      // {.name = "Enzyme/MLIR",
-      //  .reproj_func = enzyme_compute_reproj_error_wrapper,
-      //  .w_func = enzyme_compute_w_error}
-  };
+  BAApp apps[] = {{.name = "LAGrad",
+                   .reproj_func = lagrad_compute_reproj_error_wrapper,
+                   .w_func = lagrad_compute_w_error},
+                  {.name = "Enzyme/C",
+                   .reproj_func = enzyme_c_compute_reproj_err,
+                   .w_func = enzyme_c_compute_w_err},
+                  {.name = "Enzyme/MLIR",
+                   .reproj_func = enzyme_compute_reproj_error_wrapper,
+                   .w_func = enzyme_compute_w_error}};
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
 
   if (!CHECK_MEM) {

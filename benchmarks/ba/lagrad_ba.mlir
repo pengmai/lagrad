@@ -236,17 +236,21 @@ func @lagrad_compute_reproj_error(
   %X: tensor<3xf64>,
   %w: f64,
   %feat: tensor<2xf64>,
+  // %g: tensor<2xf64, "onehot">
   %g: tensor<2xf64>
 ) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64) {
-  %f = constant @mlir_compute_reproj_error : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>
-  %df = standalone.grad %f {of = [0, 1, 2], grad_signal = true} : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>) -> tensor<2xf64>, (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64)
-  %res:3 = call_indirect %df(%cam, %X, %w, %feat, %g) : (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64, tensor<2xf64>, tensor<2xf64>) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64)
+  %res:3 = lagrad.grad @mlir_compute_reproj_error(%cam, %X, %w, %feat, %g) {of = [0, 1, 2], grad_signal} : (
+    tensor<{{nCamParams}}xf64>,
+    tensor<3xf64>,
+    f64,
+    tensor<2xf64>,
+    // tensor<2xf64, "onehot">
+    tensor<2xf64>
+  ) -> (tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64)
   return %res#0, %res#1, %res#2 : tensor<{{nCamParams}}xf64>, tensor<3xf64>, f64
 }
 
 func @lagrad_compute_w_error(%w: f64) -> f64 {
-  %f = constant @mlir_compute_zach_weight_error : (f64) -> f64
-  %df = standalone.grad %f {of = [0]} : (f64) -> f64, (f64) -> f64
-  %res = call_indirect %df(%w) : (f64) -> f64
+  %res = lagrad.grad @mlir_compute_zach_weight_error(%w) : (f64) -> f64
   return %res : f64
 }

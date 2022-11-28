@@ -2,6 +2,8 @@ from ronin.cli import cli
 from ronin.projects import Project
 from ronin.contexts import new_context
 from ronin.utils.paths import glob
+from ronin.gcc import GccCompile
+from ronin.phases import Phase
 from ronin_phases.build_llvm import (
     compile_enzyme,
     compile_mlir_enzyme,
@@ -21,11 +23,21 @@ def get_project(template_args):
     lagrad_sources = [
         ffile for ffile in glob("*.mlir") if ffile not in enzyme_mlir_sources
     ]
-    c_phase = clang_compile(
-        project,
-        c_sources,
-        extra_includes=[include_path],
-    )
+    omp_compile = GccCompile("clang")
+    omp_compile.add_argument("-Xpreprocessor")
+    omp_compile.add_argument("-fopenmp")
+    omp_compile.optimize(3)
+    omp_compile.add_include_path(
+        "/usr/local/include"
+    )  # Not sure why this isn't searched already
+    omp_compile.add_include_path(include_path)
+    omp_compile.add_include_path(str(pathlib.Path.home() / ".local" / "include"))
+    c_phase = Phase(project, name="Compile C", inputs=c_sources, executor=omp_compile)
+    # c_phase = clang_compile(
+    #     project,
+    #     c_sources,
+    #     extra_includes=[include_path],
+    # )
     enzyme_phase = compile_enzyme(
         project, enzyme_sources, extra_includes=[include_path]
     )
