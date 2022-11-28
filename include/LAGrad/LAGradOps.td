@@ -10,6 +10,7 @@
 #define LAGRAD_OPS
 
 include "LAGradDialect.td"
+include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 def LAGrad_FooOp : LAGrad_Op<"foo", [NoSideEffect,
@@ -55,17 +56,20 @@ def LAGrad_DiffOp : LAGrad_Op<"diff", [NoSideEffect]> {
     }];
 }
 
-def LAGrad_GradOp : LAGrad_Op<"grad", [NoSideEffect]> {
+def LAGrad_GradOp : LAGrad_Op<"grad", [
+        NoSideEffect,
+        DeclareOpInterfaceMethods<SymbolUserOpInterface>
+    ]> {
     let summary = "Reverse-mode autodiff a standard function.";
     let description = [{
-        The `lagrad.grad` operation performs a source transformation to compute the gradient of a std.func.
+        The `lagrad.grad` operation performs a source transformation to compute the gradient of a func op.
     }];
 
-    let arguments = (ins FunctionType:$input);
-    let results = (outs FunctionType:$res);
+    let arguments = (ins FlatSymbolRefAttr:$F, Variadic<AnyType>:$operands);
+    let results = (outs Variadic<AnyType>:$results);
 
     let assemblyFormat = [{
-        $input attr-dict `:` type($input) `,` type($res)
+        $F `(` $operands `)` attr-dict `:` functional-type($operands, $results)
     }];
 }
 
