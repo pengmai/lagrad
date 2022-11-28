@@ -25,11 +25,14 @@ with new_context() as ctx:
     lagrad_sources = [
         ffile for ffile in glob("*.mlir") if ffile not in enzyme_mlir_sources
     ]
-    c_phase = clang_compile(project, c_sources)
+    c_phase = clang_compile(project, c_sources, include_openblas=True)
     enzyme_phase = compile_enzyme(project, enzyme_sources)
     enzyme_mlir_phase = compile_mlir_enzyme(project, enzyme_mlir_sources)
-    lagrad_phase = compile_lagrad(project, lagrad_sources)
+    lagrad_phase = compile_lagrad(project, lagrad_sources, use_blas=False)
     clang_link(
-        project, [c_phase, enzyme_phase, enzyme_mlir_phase, lagrad_phase], "matmul.out"
+        project,
+        [c_phase, enzyme_phase, enzyme_mlir_phase, lagrad_phase],
+        "matmul.out",
+        link_openblas=True,
     )
     cli(project)

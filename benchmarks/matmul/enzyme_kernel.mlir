@@ -20,7 +20,7 @@ func @enzyme_mlir_matmul(%A: memref<?x?xf64>, %B: memref<?x?xf64>) -> memref<?x?
   linalg.fill(%one, %dout) : f64, memref<?x?xf64>
 
   %f = constant @emmatmul : (memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>) -> f64
-  %df = standalone.diff %f {const = [1]} :
+  %df = lagrad.diff %f {const = [1]} :
     (memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>) -> f64,
     (memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>) -> f64
   call_indirect %df(%A, %dA, %B, %out, %dout) : (memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>, memref<?x?xf64>) -> f64
