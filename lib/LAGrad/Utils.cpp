@@ -151,7 +151,7 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
                                OpBuilder &rewriter) {
   PatternRewriter::InsertionGuard insertGuard(rewriter);
   rewriter.setInsertionPointAfter(funcOp);
-  auto newOp = static_cast<FuncOp>(rewriter.clone(*funcOp));
+  auto newOp = cast<FuncOp>(rewriter.clone(*funcOp));
 
   newOp.setName(funcName);
   return newOp;

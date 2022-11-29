@@ -1,6 +1,7 @@
 #include "LAGrad/LAGradDialect.h"
 #include "LAGrad/LAGradOps.h"
 #include "LAGrad/Passes.h"
+#include "LAGrad/Transforms.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
@@ -75,6 +76,7 @@ struct GradTarget : public ConversionTarget {
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
     addLegalDialect<linalg::LinalgDialect>();
+    addIllegalDialect<lagrad::LAGradDialect>();
     addLegalOp<lagrad::PackOp>();
     addLegalOp<FuncOp>();
   }
@@ -101,6 +103,7 @@ void GradConversionPass::runOnOperation() {
 
   OwningRewritePatternList patterns(&getContext());
   patterns.insert<GradOpLowering>(&getContext());
+  lagrad::populateLAGradTransforms(patterns, &getContext());
 
   auto mod = getOperation();
   if (failed(applyFullConversion(mod, target, std::move(patterns)))) {
