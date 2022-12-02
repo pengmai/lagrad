@@ -29,6 +29,14 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
                           BlockAndValueMapping &env,
                           ConversionPatternRewriter &rewriter);
 
+void updateActiveValues(LAGradContext &ctx, ValueRange from, ValueRange to) {
+  for (auto pair : llvm::zip(from, to)) {
+    if (ctx.activeValues.contains(std::get<0>(pair))) {
+      ctx.activeValues.insert(std::get<1>(pair));
+    }
+  }
+}
+
 LogicalResult linalgJVP(linalg::LinalgOp op, LAGradContext &ctx,
                         BlockAndValueMapping &env,
                         ConversionPatternRewriter &rewriter) {
@@ -129,18 +137,105 @@ LogicalResult linalgJVP(linalg::LinalgOp op, LAGradContext &ctx,
     return failure();
   }
 
+  SmallVector<Value> replacedResults{static_cast<size_t>(op.getNumOutputs())};
   for (auto mapping : replacedPrimalMapping) {
     if (mapping.first >= op.getNumInputs()) {
-      op->getResult(mapping.first - op.getNumInputs())
-          .replaceAllUsesWith(
+      replacedResults[mapping.first - op.getNumInputs()] =
+          newOp.getResult(mapping.second - newOp.getNumInputs());
+    }
+  }
+  rewriter.replaceOp(op, replacedResults);
+
+  for (auto mapping : dualMapping) {
+    if (mapping.first >= newOp.getNumInputs()) {
+      env.map(newOp.getResult(mapping.first - newOp.getNumInputs()),
               newOp.getResult(mapping.second - newOp.getNumInputs()));
     }
   }
-  for (auto mapping : dualMapping) {
-    env.map(newOp.getResult(mapping.first - newOp.getNumInputs()),
-            newOp.getResult(mapping.second - newOp.getNumInputs()));
+  return success();
+}
+
+LogicalResult ifJVP(scf::IfOp ifOp, LAGradContext &ctx,
+                    BlockAndValueMapping &env,
+                    ConversionPatternRewriter &rewriter) {
+  Location loc = ifOp.getLoc();
+  SmallVector<Type> resultTypes;
+  SmallVector<std::pair<unsigned, unsigned>> replacedPrimalMapping;
+  DenseMap<unsigned, unsigned> dualMapping;
+  unsigned idx = 0;
+  unsigned origIdx = 0;
+  for (OpResult result : ifOp.getResults()) {
+    resultTypes.push_back(result.getType());
+    replacedPrimalMapping.push_back(std::make_pair(origIdx, idx));
+    // FIXME: need proper activity analysis
+    if (isFloatOrFloatTensor(result.getType())) {
+      // if (ctx.activeValues.contains(result)) {
+      resultTypes.push_back(result.getType());
+      dualMapping[idx] = idx + 1;
+      idx++;
+    }
+    idx++;
+    origIdx++;
   }
-  rewriter.eraseOp(op);
+
+  auto builderFunc = [&](Block &block) {
+    return [&](OpBuilder &builder, Location loc) {
+      PatternRewriter::InsertionGuard guard(rewriter);
+
+      auto startOfBlock = builder.saveInsertionPoint();
+      rewriter.restoreInsertionPoint(startOfBlock);
+      BlockAndValueMapping map;
+
+      // Clone over the original ops.
+      SmallVector<Operation *> bodyOps;
+      for (Operation &origOp : block.without_terminator()) {
+        Operation *clonedOp = builder.clone(origOp, map);
+        bodyOps.push_back(clonedOp);
+        map.map(origOp.getResults(), clonedOp->getResults());
+        for (OpResult r : origOp.getResults()) {
+          if (env.contains(r)) {
+            env.map(clonedOp->getResult(r.getResultNumber()),
+                    env.lookup<Value>(r));
+          }
+        }
+      }
+
+      // Generate JVPs.
+      for (auto *bodyOp : bodyOps) {
+        if (failed(populateJVP(bodyOp, ctx, env, rewriter))) {
+          llvm_unreachable("populate jvp failed inside if op\n");
+          return;
+        }
+      }
+      SmallVector<Value> results;
+      auto yieldOp = cast<scf::YieldOp>(block.getTerminator());
+
+      for (auto mapping : replacedPrimalMapping) {
+        Value newYieldOperand = rewriter.getRemappedValue(
+            map.lookupOrDefault(yieldOp.getOperand(mapping.first)));
+        results.push_back(newYieldOperand);
+        if (dualMapping.count(mapping.second)) {
+          results.push_back(env.lookupOrDefault(newYieldOperand));
+        }
+      }
+      rewriter.create<scf::YieldOp>(loc, results);
+    };
+  };
+
+  auto augmentedIf = rewriter.create<scf::IfOp>(
+      loc, resultTypes, ifOp.condition(), builderFunc(*ifOp.thenBlock()),
+      builderFunc(*ifOp.elseBlock()));
+  SmallVector<Value> replacedResults{replacedPrimalMapping.size()};
+  for (auto mapping : replacedPrimalMapping) {
+    replacedResults[mapping.first] = augmentedIf.getResult(mapping.second);
+    ifOp.getResult(mapping.first)
+        .replaceAllUsesWith(augmentedIf.getResult(mapping.second));
+  }
+  rewriter.replaceOp(ifOp, replacedResults);
+  for (auto mapping : dualMapping) {
+    env.map(augmentedIf.getResult(mapping.first),
+            augmentedIf.getResult(mapping.second));
+  }
   return success();
 }
 
@@ -193,6 +288,7 @@ LogicalResult forLoopJVP(scf::ForOp forOp, LAGradContext &ctx,
           Operation *clonedOp = builder.clone(origOp, map);
           bodyOps.push_back(clonedOp);
           map.map(origOp.getResults(), clonedOp->getResults());
+          updateActiveValues(ctx, origOp.getResults(), clonedOp->getResults());
         }
 
         // Generate JVPs.
@@ -206,7 +302,8 @@ LogicalResult forLoopJVP(scf::ForOp forOp, LAGradContext &ctx,
         SmallVector<Value> results;
         results.reserve(regionArgs.size());
         for (auto mapping : replacedPrimalMapping) {
-          Value newYieldOperand = map.lookup(yieldOp.getOperand(mapping.first));
+          Value newYieldOperand = rewriter.getRemappedValue(
+              map.lookup(yieldOp.getOperand(mapping.first)));
           results.push_back(newYieldOperand);
           if (dualMapping.count(mapping.second))
             results.push_back(env.lookup(newYieldOperand));
@@ -217,15 +314,18 @@ LogicalResult forLoopJVP(scf::ForOp forOp, LAGradContext &ctx,
     return failure();
   }
 
+  SmallVector<Value> replacedResults{replacedPrimalMapping.size()};
   for (auto mapping : replacedPrimalMapping) {
+    replacedResults[mapping.first] = augmentedFor.getResult(mapping.second);
     forOp.getResult(mapping.first)
         .replaceAllUsesWith(augmentedFor.getResult(mapping.second));
   }
+  rewriter.replaceOp(forOp, replacedResults);
   for (auto mapping : dualMapping) {
     env.map(augmentedFor.getResult(mapping.first),
             augmentedFor.getResult(mapping.second));
   }
-  rewriter.eraseOp(forOp);
+  // rewriter.eraseOp(forOp);
   return success();
 }
 
@@ -238,13 +338,32 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
   if (op->getNumResults() == 0) {
     return success();
   }
-  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+  // Need to hit these before the linalg op interface.
+  if (auto initTensorOp = dyn_cast<linalg::InitTensorOp>(op)) {
+    jvp = rewriter.create<linalg::InitTensorOp>(loc, initTensorOp.getType(),
+                                                initTensorOp.getOperands(),
+                                                initTensorOp.static_sizes());
+    env.map(initTensorOp.getResult(), jvp);
+    return success();
+  } else if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
+    auto dualFillOp =
+        rewriter.create<linalg::FillOp>(loc, fillOp.value(), fillOp.output());
+    env.map(fillOp.getResults(), dualFillOp.getResults());
+    return success();
+  }
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+    return ifJVP(ifOp, ctx, env, rewriter);
+  } else if (auto forOp = dyn_cast<scf::ForOp>(op)) {
     return forLoopJVP(forOp, ctx, env, rewriter);
   } else if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
     return linalgJVP(op, ctx, env, rewriter);
   }
 
   assert(op->getNumResults() == 1);
+  if (op->getResult(0).getType().isIntOrIndex()) {
+    return success();
+  }
+
   if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
     if (isFloatOrFloatTensor(constOp.getType())) {
       jvp = getZero(constOp.getLoc(), constOp.getResult(), rewriter);
@@ -256,8 +375,17 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
       return success();
     }
   } else if (auto addfOp = dyn_cast<arith::AddFOp>(op)) {
-    jvp = rewriter.create<arith::AddFOp>(loc, env.lookup(addfOp.lhs()),
-                                         env.lookup(addfOp.rhs()));
+    if (!env.contains(addfOp.lhs())) {
+      jvp = env.lookup(addfOp.rhs());
+    } else if (!env.contains(addfOp.rhs())) {
+      jvp = env.lookup(addfOp.lhs());
+    } else {
+      jvp = rewriter.create<arith::AddFOp>(loc, env.lookup(addfOp.lhs()),
+                                           env.lookup(addfOp.rhs()));
+    }
+  } else if (auto subfOp = dyn_cast<arith::SubFOp>(op)) {
+    jvp = rewriter.create<arith::SubFOp>(loc, env.lookup(subfOp.lhs()),
+                                         env.lookup(subfOp.rhs()));
   } else if (auto mulfOp = dyn_cast<arith::MulFOp>(op)) {
     if (!env.contains(mulfOp.lhs())) {
       jvp = rewriter.create<arith::MulFOp>(loc, mulfOp.lhs(),
@@ -273,10 +401,66 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
           rewriter.create<arith::MulFOp>(loc, mulfOp.lhs(),
                                          env.lookup(mulfOp.rhs())));
     }
+  } else if (auto negfOp = dyn_cast<arith::NegFOp>(op)) {
+    jvp = rewriter.create<arith::NegFOp>(loc, env.lookup(negfOp.operand()));
+  } else if (auto divfOp = dyn_cast<arith::DivFOp>(op)) {
+    Value lhsDual = rewriter.create<arith::DivFOp>(
+        loc, env.lookup(divfOp.lhs()), divfOp.rhs());
+
+    // RHS
+    jvp = rewriter.create<arith::MulFOp>(op->getLoc(), env.lookup(divfOp.rhs()),
+                                         divfOp.lhs());
+    jvp = rewriter.create<arith::NegFOp>(op->getLoc(), jvp);
+    Value denom = rewriter.create<arith::MulFOp>(op->getLoc(), divfOp.rhs(),
+                                                 divfOp.rhs());
+    Value rhsDual = rewriter.create<arith::DivFOp>(op->getLoc(), jvp, denom);
+
+    jvp = rewriter.create<arith::AddFOp>(loc, lhsDual, rhsDual);
+  } else if (auto sqrtOp = dyn_cast<math::SqrtOp>(op)) {
+    auto half = constLike(loc, sqrtOp.getOperand(), 0.5, rewriter);
+    jvp = rewriter.create<arith::DivFOp>(
+        loc,
+        rewriter.create<arith::MulFOp>(loc, env.lookup(sqrtOp.getOperand()),
+                                       half),
+        sqrtOp.getResult());
   } else if (auto sinOp = dyn_cast<math::SinOp>(op)) {
     jvp = rewriter.create<arith::MulFOp>(
         loc, env.lookup(sinOp.getOperand()),
         rewriter.create<math::CosOp>(loc, sinOp.getOperand()));
+  } else if (auto cosOp = dyn_cast<math::CosOp>(op)) {
+    jvp = rewriter.create<arith::MulFOp>(
+        loc, env.lookup(cosOp.getOperand()),
+        rewriter.create<arith::NegFOp>(
+            loc, rewriter.create<math::SinOp>(loc, cosOp.getOperand())));
+  } else if (auto insertOp = dyn_cast<tensor::InsertOp>(op)) {
+    jvp = rewriter.create<tensor::InsertOp>(loc, env.lookup(insertOp.scalar()),
+                                            env.lookup(insertOp.dest()),
+                                            insertOp.indices());
+  } else if (auto extractOp = dyn_cast<tensor::ExtractOp>(op)) {
+    jvp = rewriter.create<tensor::ExtractOp>(
+        loc, env.lookup(rewriter.getRemappedValue(extractOp.tensor())),
+        extractOp.indices());
+  } else if (auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(op)) {
+    // Need to refactor the lookups
+    // into a getDual
+    jvp = rewriter.create<tensor::InsertSliceOp>(
+        loc, env.lookup(rewriter.getRemappedValue(insertSliceOp.source())),
+        env.lookup(insertSliceOp.dest()), insertSliceOp.getMixedOffsets(),
+        insertSliceOp.getMixedSizes(), insertSliceOp.getMixedStrides());
+  } else if (auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op)) {
+    jvp = rewriter.create<tensor::ExtractSliceOp>(
+        loc, extractSliceOp.getType(),
+        env.lookup(rewriter.getRemappedValue(extractSliceOp.source())),
+        extractSliceOp.getMixedOffsets(), extractSliceOp.getMixedSizes(),
+        extractSliceOp.getMixedStrides());
+  } else if (auto callOp = dyn_cast<CallOp>(op)) {
+    // for (auto operand : callOp.getOperands()) {
+    //   errs() << "call op operand: " << operand << "\n";
+    //   errs() << "call op operand is active: "
+    //          << ctx.activeValues.contains(operand) << "\n";
+    // }
+    errs() << "call op jvp in progress\n";
+    return failure();
   } else {
     op->emitOpError() << "unhandled op";
     return failure();
@@ -286,6 +470,7 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
 }
 
 static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
+                                     ArrayAttr activeArgsAttr,
                                      ConversionPatternRewriter &rewriter) {
   PatternRewriter::InsertionGuard guard(rewriter);
   Region *region = tangentFunc.getCallableRegion();
@@ -294,16 +479,28 @@ static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
     return failure();
   }
   assert(region->hasOneBlock());
+  rewriter.setInsertionPointToStart(&region->front());
 
   // env maps primal values to their dual values.
   BlockAndValueMapping env;
   size_t idx = 0;
-  for (BlockArgument arg : tangentFunc.getArguments()) {
-    // good ol' bandaid for activity analysis.
-    if (isFloatOrFloatTensor(arg.getType())) {
+  DenseSet<size_t> activeArgs;
+  if (!activeArgsAttr || activeArgsAttr.empty()) {
+    activeArgs.insert(0);
+  }
+  for (APInt attr : activeArgsAttr.getAsValueRange<IntegerAttr>()) {
+    activeArgs.insert(attr.getSExtValue());
+  }
+  SmallVector<BlockArgument> originalArgs{tangentFunc.getArguments().begin(),
+                                          tangentFunc.getArguments().end()};
+  for (BlockArgument arg : originalArgs) {
+    if (activeArgs.contains(arg.getArgNumber())) {
       ++idx;
       tangentFunc.insertArgument(idx, arg.getType(), {});
       env.map(arg, tangentFunc.getArgument(idx));
+    } else if (isFloatOrFloatTensor(arg.getType())) {
+      // TODO: modify populateJVP to not need these dummy zero values.
+      env.map(arg, getZero(tangentFunc.getLoc(), arg, rewriter));
     }
     ++idx;
   }
@@ -318,7 +515,9 @@ static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
   Operation *terminator = region->front().getTerminator();
   SmallVector<Value> results{terminator->getNumOperands()};
   llvm::transform(terminator->getOperands(), results.begin(),
-                  [&env](Value operand) { return env.lookup(operand); });
+                  [&](Value operand) {
+                    return env.lookup(rewriter.getRemappedValue(operand));
+                  });
   // tangentFunc.getType()
   rewriter.create<ReturnOp>(terminator->getLoc(), results);
   rewriter.eraseOp(terminator);
@@ -351,9 +550,14 @@ private:
 
     FuncOp tangentFunc =
         copyFunctionDeclaration(originalFuncOp, tangentFuncName, rewriter);
+    auto tangentOf = op->getAttrOfType<ArrayAttr>("of");
+    if (!tangentOf) {
+      tangentOf = rewriter.getArrayAttr({});
+    }
     LAGradContext lagradctx{moduleOp};
     DEBUGpopulateFunc(lagradctx.debug_names, tangentFunc);
-    if (failed(generateTangent(tangentFunc, lagradctx, rewriter))) {
+    runActivityAnalysis(lagradctx, tangentFunc, tangentOf);
+    if (failed(generateTangent(tangentFunc, lagradctx, tangentOf, rewriter))) {
       return nullptr;
     }
     return tangentFunc;
