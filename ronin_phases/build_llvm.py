@@ -8,15 +8,16 @@ import pathlib
 import subprocess
 from typing import Literal
 
-ENZYME_DYLIB = (
-    pathlib.Path.home()
-    / "Research"
-    / "Enzyme"
-    / "enzyme"
-    / "build"
-    / "Enzyme"
-    / "LLVMEnzyme-12.dylib"
-)
+# ENZYME_DYLIB = (
+#     pathlib.Path.home()
+#     / "Research"
+#     / "Enzyme"
+#     / "enzyme"
+#     / "build"
+#     / "Enzyme"
+#     / "LLVMEnzyme-12.dylib"
+# )
+ENZYME_DYLIB = pathlib.Path.home() / ".local" / "LLVM12" / "lib" / "LLVMEnzyme-12.dylib"
 
 LAGRAD_BINARY = str(pathlib.Path(__file__).parents[1] / "build" / "bin" / "lagrad-opt")
 
@@ -45,6 +46,7 @@ class LAGradOptFlags:
         "-canonicalize",
         "-inline",
         "-linalg-canonicalize",
+        "-structured-sparsify",
         "-pack-triangular",
         "-standalone-dce",
         # "-structured-sparsify",

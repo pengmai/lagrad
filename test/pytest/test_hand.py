@@ -36,7 +36,7 @@ MODEL_DIR = HAND_DATA_DIR / "simple_small" / "model"
 HAND_DATA_FILE = HAND_DATA_DIR / "test.txt"
 HAND_COMPLICATED_FILE = HAND_DATA_DIR / "hand_complicated.txt"
 # HAND_COMPLICATED_FILE = HAND_DATA_DIR / "complicated_small" / "hand1_t26_c100.txt"
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 
 
 @pytest.fixture(scope="module")

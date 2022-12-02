@@ -1,0 +1,31 @@
+func.func @colsum(%arg0 : tensor<4x5xf32>) -> tensor<5xf32> {
+  %cst = arith.constant dense<0.0> : tensor<5xf32>
+  %0 = linalg.generic
+    {
+      indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d1)>],
+      iterator_types = ["reduction", "parallel"]
+    }
+    ins(%arg0 : tensor<4x5xf32>)
+    outs(%cst : tensor<5xf32>) {
+  ^bb0(%arg1: f32, %arg2: f32):
+    %1 = arith.addf %arg1, %arg2 : f32
+    linalg.yield %1 : f32
+  } -> tensor<5xf32>
+  return %0 : tensor<5xf32>
+}
+
+func.func private @printMemrefF32(tensor<*xf32>) attributes { llvm.emit_c_interface }
+
+func.func @main() {
+  %cst = arith.constant dense<[
+    [0.95033034, 0.04059763, 0.63056314, 0.21032931, 0.9302365 ],
+    [0.46717497, 0.72913109, 0.00538126, 0.63545051, 0.46740388],
+    [0.7444556 , 0.70883291, 0.27864411, 0.54437905, 0.7263821 ],
+    [0.36535766, 0.55929595, 0.70579915, 0.17196087, 0.39675371]
+  ]> : tensor<4x5xf32>
+
+  %res = lagrad.grad @colsum(%cst) {of = [0]} : (tensor<4x5xf32>) -> tensor<4x5xf32>
+  %U = tensor.cast %res : tensor<4x5xf32> to tensor<*xf32>
+  call @printMemrefF32(%U) : (tensor<*xf32>) -> ()
+  return
+}

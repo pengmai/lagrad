@@ -15,6 +15,18 @@ func @lagrad_trmv_full(%M: tensor<{{n}}x{{n}}xf64>, %x: tensor<{{n}}xf64>) -> (t
 
 func @mtrmv_tri(%M: tensor<{{n}}x{{n}}xf64, "ltri">, %x: tensor<{{n}}xf64>) -> tensor<{{n}}xf64> {
   %out = arith.constant dense<0.0> : tensor<{{n}}xf64>
+  // %res = linalg.generic
+  //   {
+  //     indexing_maps = [affine_map<(d0, d1) -> (d1, d0)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d1)>],
+  //     iterator_types = ["reduction", "parallel"]
+  //   }
+  //   ins(%M, %x : tensor<{{n}}x{{n}}xf64, "ltri">, tensor<{{n}}xf64>)
+  //   outs(%out : tensor<{{n}}xf64>) {
+  // ^bb0(%arg0: f64, %arg1: f64, %arg2: f64):
+  //   %0 = arith.mulf %arg0, %arg1 : f64
+  //   %1 = arith.addf %0, %arg2 : f64
+  //   linalg.yield %1 : f64
+  // } -> tensor<{{n}}xf64>
   %res = linalg.matvec ins(%M, %x : tensor<{{n}}x{{n}}xf64, "ltri">, tensor<{{n}}xf64>) outs(%out : tensor<{{n}}xf64>) -> tensor<{{n}}xf64>
   return %res : tensor<{{n}}xf64>
 }

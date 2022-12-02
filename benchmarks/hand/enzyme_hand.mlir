@@ -650,7 +650,7 @@ module  {
       memref<{{npts}}x3xf64>,
       memref<{{npts}}x3xf64>
     ) -> f64
-    %df = standalone.diff %f {const = [1, 2, 3, 4, 5, 6, 7]} : (
+    %df = lagrad.diff %f {const = [1, 2, 3, 4, 5, 6, 7]} : (
       memref<{{ntheta}}xf64>,
       memref<{{nbones}}xi32>,
       memref<{{nbones}}x4x4xf64>,
@@ -711,7 +711,7 @@ module  {
       memref<{{npts}}x3xf64>,
       memref<{{npts}}x3xf64>
     ) -> f64
-    %df = standalone.diff %f {const = [2, 3, 4, 5, 6, 7, 8, 9]} : (
+    %df = lagrad.diff %f {const = [2, 3, 4, 5, 6, 7, 8, 9]} : (
       memref<26xf64>,
       memref<{{npts}}x2xf64>,
       memref<22xi32>,

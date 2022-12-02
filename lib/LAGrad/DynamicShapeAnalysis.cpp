@@ -1,0 +1,61 @@
+#include "LAGrad/Logger.h"
+#include "LAGrad/Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "llvm/Support/raw_ostream.h"
+
+using namespace mlir;
+using llvm::errs;
+namespace mlir {
+void analyzeDynamicShapes(LAGradContext &ctx, func::FuncOp funcOp,
+                          OpBuilder &builder) {
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointToStart(&funcOp.getBody().getBlocks().front());
+  auto intToAttr = [&](int64_t i) {
+    return IntegerAttr::get(IntegerType::get(builder.getContext(), 64), i);
+  };
+  for (BlockArgument arg : funcOp.getArguments()) {
+    if (auto type = arg.getType().dyn_cast<RankedTensorType>()) {
+      if (type.getNumDynamicDims() > 0) {
+        SmallVector<OpFoldResult, 4> shape;
+        shape.reserve(type.getRank());
+        for (int64_t idx = 0; idx < type.getRank(); idx++) {
+          if (type.isDynamicDim(idx)) {
+            shape.push_back(
+                builder.create<tensor::DimOp>(arg.getLoc(), arg, idx)
+                    .getResult());
+          } else {
+            shape.push_back(intToAttr(type.getDimSize(idx)));
+          }
+        }
+        ctx.dynamic_shapes.insert(std::make_pair(arg, shape));
+      }
+    }
+  }
+
+  funcOp.walk([&](tensor::EmptyOp op) {
+    RankedTensorType type = op.getType();
+    if (type.getNumDynamicDims() > 0) {
+      ctx.dynamic_shapes.insert(
+          std::make_pair(op.getResult(), op.getMixedSizes()));
+    }
+  });
+
+  funcOp.walk([&](linalg::LinalgOp op) {
+    for (OpOperand *operand : op.getDpsInitOperands()) {
+      if (auto type = operand->get().getType().cast<RankedTensorType>()) {
+        if (type.getNumDynamicDims() > 0) {
+          assert(ctx.dynamic_shapes.count(operand->get()) &&
+                 "linalg op had dynamic shape but was not in the dynamic "
+                 "shape map");
+          ctx.dynamic_shapes.insert(
+              std::make_pair(op.getTiedOpResult(operand),
+                             ctx.dynamic_shapes.lookup(operand->get())));
+        }
+      }
+    }
+  });
+}
+} // namespace mlir

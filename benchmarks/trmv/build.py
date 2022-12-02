@@ -24,14 +24,14 @@ def get_project(template_args: dict):
         c_sources,
         template_args=template_args,
     )
-    # enzyme_phase = compile_enzyme(project, enzyme_sources)
+    enzyme_phase = compile_enzyme(project, enzyme_sources)
     enzyme_mlir_phase = compile_mlir_enzyme(project, enzyme_mlir_sources, template_args)
     lagrad_phase = compile_lagrad(project, lagrad_sources, template_args)
     clang_link(
         project,
         [
             c_phase,
-            # enzyme_phase,
+            enzyme_phase,
             enzyme_mlir_phase,
             lagrad_phase,
         ],
@@ -42,6 +42,6 @@ def get_project(template_args: dict):
 
 if __name__ == "__main__":
     with new_context() as ctx:
-        n = 1024
+        n = 4096
         template_args = {"n": n, "tri_size": n * (n - 1) // 2}
         cli(get_project(template_args))

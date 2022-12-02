@@ -7,7 +7,7 @@ from ronin.utils.paths import glob
 from ronin_phases.build_llvm import compile_lagrad, clang_dynamiclib
 import pathlib
 
-SRCFILE = pathlib.Path(__file__).parents[1] / "Standalone"
+SRCFILE = pathlib.Path(__file__).parents[1] / "LAGrad"
 
 with new_context() as ctx:
     project = Project("LAGrad tests")

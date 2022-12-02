@@ -17,10 +17,13 @@ data_file = (
     / "Enzyme"
     / "enzyme"
     / "benchmarks"
+    / "ReverseMode"
     / "hand"
     / "data"
-    / "complicated_small"
+    / "simple_small"
     / "hand1_t26_c100.txt"
+    # / "hand12_t26_c100000.txt"
+    # / "test.txt"
 )
 
 

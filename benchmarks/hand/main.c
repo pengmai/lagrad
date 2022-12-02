@@ -1,13 +1,23 @@
 #include "hand.h"
 #include "lagrad_utils.h"
+#include "memusage.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 0
+#define CHECK_MEM false
 
-typedef F64Descriptor1D (*hand_jacobian_row)(HandInput *input, double *derr);
+RunProcDyn rpd;
+void check_mem_usage() {
+  run_get_dynamic_proc_info(getpid(), &rpd);
+  printf("%zu\t%zu\n", rpd.rss, rpd.vsize);
+}
+
+typedef F64Descriptor1D (*hand_jacobian_row)(HandInput *input, double *derr,
+                                             int row, int col);
 typedef HandComplicatedGrad (*HandComplicatedJacobianRow)(HandInput *input,
                                                           double *derr);
 
@@ -19,7 +29,7 @@ void hand_jacobian_simple(hand_jacobian_row compute_row, HandInput *input,
     for (size_t j = 0; j < err_size; j++) {
       derr[j] = (i == j) ? 1.0 : 0.0;
     }
-    F64Descriptor1D dtheta = compute_row(input, derr);
+    F64Descriptor1D dtheta = compute_row(input, derr, i / 3, i % 3);
     for (size_t j = 0; j < input->n_theta; j++) {
       J[i * input->n_theta + j] = dtheta.aligned[j];
     }
@@ -33,11 +43,19 @@ void hand_jacobian_complicated(HandComplicatedJacobianRow compute_row,
   int err_size = 3 * input->n_pts;
   int J_stride = input->n_theta + 2;
   double *derr = malloc(err_size * sizeof(double));
+
+  for (size_t j = 0; j < err_size; j++) {
+    derr[j] = 0.0;
+  }
   for (size_t i = 0; i < err_size; i++) {
     for (size_t j = 0; j < err_size; j++) {
       derr[j] = (i == j) ? 1.0 : 0.0;
     }
+    // derr[err_size - 7] = 1.0;
     HandComplicatedGrad res = compute_row(input, derr);
+    printf("Computed first row, stopping\n");
+    print_d_arr(res.dtheta.aligned, res.dtheta.size);
+    exit(0);
 
     // Write theta part
     for (size_t j = 0; j < res.dtheta.size; j++) {
@@ -70,6 +88,7 @@ unsigned long collect_hand(HandApp app, HandInput *input, double *J,
   }
   gettimeofday(&stop, NULL);
   if (CHECK_MEM) {
+    check_mem_usage();
   } else {
     verify_hand_results(ref_J, J, 3 * input->n_pts, input->n_theta, app.name);
   }
@@ -86,7 +105,7 @@ void populate_ref(HandInput *input, double *ref_J, bool complicated) {
 
 int main(int argc, char **argv) {
   if (argc < 4) {
-    fprintf(stderr, "Usage: %s <model-path> <data-file> <complicated>",
+    fprintf(stderr, "Usage: %s <model-path> <data-file> <complicated>\n",
             argv[0]);
     return 1;
   }
@@ -103,9 +122,9 @@ int main(int argc, char **argv) {
       {.name = "LAGrad",
        .row_func = lagrad_hand_simple,
        .complicated_row_func = lagrad_hand_complicated},
-      // {.name = "Enzyme/MLIR",
-      //  .row_func = enzyme_mlir_hand_simple,
-      //  .complicated_row_func = enzyme_mlir_hand_complicated},
+      {.name = "Enzyme/MLIR",
+       .row_func = enzyme_mlir_hand_simple,
+       .complicated_row_func = enzyme_mlir_hand_complicated},
       // {.name = "Enzyme/C", .row_func = enzyme_c_hand_simple},
   };
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);

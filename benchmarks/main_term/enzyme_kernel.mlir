@@ -191,7 +191,7 @@ func @enzyme_mlir_main_term_compressed(
 
   %f = constant @em_main_term : (memref<{{k}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{tri_size}}xf64>, memref<{{n}}x{{d}}xf64>, f64, i64) -> f64
   // call @em_main_term(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (memref<{{k}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{tri_size}}xf64>, memref<{{n}}x{{d}}xf64>, f64, i64) -> f64
-  %df = standalone.diff %f {const = [4]} : (
+  %df = lagrad.diff %f {const = [4]} : (
     memref<{{k}}xf64>,
     memref<{{k}}x{{d}}xf64>,
     memref<{{k}}x{{d}}xf64>,

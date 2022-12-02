@@ -114,8 +114,8 @@ int main() {
   }
 
   MatmulApp apps[] = {
-      {.name = "LAGrad", .func = collect_lagrad_matmul},
       {.name = "Enzyme/MLIR", .func = collect_enzyme_mlir_matmul},
+      {.name = "LAGrad", .func = collect_lagrad_matmul},
       {.name = "Enzyme/C", .func = collect_enzyme_c_matmul}};
 
   // matmulBodyFunc funcs[] = {collect_lagrad_matmul,

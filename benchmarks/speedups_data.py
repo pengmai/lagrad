@@ -31,7 +31,6 @@ def get_trmv_data():
     results = np.vstack(results) / 1e6
     return results[1] / results
 
-
 def get_gmm_data():
     gmm_data = pd.read_csv(
         "detailed_results/gmm_packed_runtimes.tsv", sep="\t", index_col=[0, 1]
@@ -162,40 +161,61 @@ def get_mlp_data():
 
 
 def trmv_memory():
-    lagrad_mem = [9236480, 34435072, 135180288]
-    enzyme_mlir_mem = [26087424, 69390336, 254693376]
-    enzyme_c_mem = [26099712, 69079040, 215957504]
-    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem)) / 1e6
-    return results / results[1]
+    lagrad_mem = [9236480, 34435072, 135_180_288]
+    enzyme_mlir_mem = [26_087_424, 69390336, 254693376]
+    enzyme_c_mem = [26099712, 69_079_040, 215957504]
+    pytorch_mem = [119_287_808, 156_491_776, 312_582_144]
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
 
 
 def gmm_memory():
-    lagrad_mem = [7016448, 10620928, 78237696]
-    enzyme_mlir_mem = [110305280, 526536704, 4190023680]
-    enzyme_c_mem = [110497792, 527355904, 4203220992]
-    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem)) / 1e6
-    return results / results[1]
+    lagrad_mem = [7_016_448, 10_620_928, 78_237_696]
+    enzyme_mlir_mem = [110_305_280, 526_536_704, 4_190_023_680]
+    enzyme_c_mem = [110_497_792, 527_355_904, 4_203_220_992]
+    pytorch_mem = [368_406_528, 988_254_208, 6_388_604_928]
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
 
 
 def ba_memory():
     lagrad_mem = [16322560, 275181568, 4422504448]
     enzyme_mlir_mem = [15310848, 256827392, 4125827072]
     enzyme_c_mem = [14270464, 238538752, 3829125120]
-    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem)) / 1e6
-    return results / results[1]
+    pytorch_mem = [1682735104] + [np.nan] * 2
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
 
 
 def lstm_memory():
-    lagrad_mem = [4145152, 7163904, 26075136]
-    enzyme_mlir_mem = [15273984, 27508736, 107560960]
-    enzyme_c_mem = [5242880, 9277440, 28172288]
-    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem)) / 1e6
-    return results / results[1]
+    lagrad_mem = [4145152, 7163904, 26_075_136]
+    enzyme_mlir_mem = [15273984, 27508736, 107_560_960]
+    enzyme_c_mem = [5242880, 9277440, 28_172_288]
+    pytorch_mem = [222654464, 278831104, 717_647_872]
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
 
 
 def hand_memory():
     lagrad_mem = [1679360, 3563520, 37515264]
     enzyme_mlir_mem = [4235264, 37326848, 518393856]
-    enzyme_c_mem = [np.nan] * 3
-    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem)) / 1e6
-    return results / results[1]
+    enzyme_c_mem = [11763712, 21835776, np.nan]
+    pytorch_mem = [136_421_376, 167_325_696, np.nan]  # 621_215_744
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
+
+
+def nn_memory():
+    lagrad_mem = [6_774_784, 14_508_032, 31_178_752]
+    enzyme_mlir_mem = [57_729_024, 115_941_376, 239_366_144]
+    enzyme_c_mem = [5_775_360, 11_345_920, 28_102_656]
+    pytorch_mem = [120_221_696, 125_005_824, 138_682_368]
+    results = np.vstack((lagrad_mem, enzyme_mlir_mem, enzyme_c_mem, pytorch_mem)) / 1e6
+    return results[1] / results
+
+if __name__ == "__main__":
+    data = trmv_memory()
+    # Geomean w.r.t. Enzyme/MLIR
+    from scipy import stats
+    print(stats.gmean(data[0]))
+    print(data)

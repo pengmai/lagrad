@@ -234,33 +234,7 @@ module  {
     tensor<{{k}}x{{d}}xf64>,
     tensor<{{k}}x{{d}}x{{d}}xf64, "pltri">
   ) {
-    %zero = arith.constant 0.0 : f64
-
-    %f = constant @mlir_gmm_packed : (tensor<{{k}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}xf64>, tensor<{{k}}x{{d}}x{{d}}xf64, "pltri">, tensor<{{n}}x{{d}}xf64>, f64, i64) -> f64
-    %df = standalone.grad %f {of = [0, 1, 2, 3]} : (
-      tensor<{{k}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64, "pltri">,
-      tensor<{{n}}x{{d}}xf64>,
-      f64,
-      i64
-    ) -> f64, (
-      tensor<{{k}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64, "pltri">,
-      tensor<{{n}}x{{d}}xf64>,
-      f64,
-      i64
-    ) -> (
-      tensor<{{k}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}xf64>,
-      tensor<{{k}}x{{d}}x{{d}}xf64, "pltri">
-    )
-
-    %res:4 = call_indirect %df(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) : (
+    %res:4 = lagrad.grad @mlir_gmm_packed(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5, %arg6) {of = [0, 1, 2, 3]} : (
       tensor<{{k}}xf64>,
       tensor<{{k}}x{{d}}xf64>,
       tensor<{{k}}x{{d}}xf64>,

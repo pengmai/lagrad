@@ -3,7 +3,7 @@ import os.path as osp
 from toolchain import compile_pipeline, jit_file
 from stdout_parser import extract_scalar, extract_1d, extract_2d
 
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 
 
 def test_add3():

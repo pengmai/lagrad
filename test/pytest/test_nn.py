@@ -7,7 +7,7 @@ from mlir_bindings import mlir_mlp_primal, lagrad_mlp
 from pytorch_ref.pytorch_nn import torch_mlp, torch_primal
 from stdout_parser import extract_scalar, extract_1d, extract_2d, extract_3d
 
-MLIR_FILES = osp.join(osp.dirname(__file__), "..", "Standalone")
+MLIR_FILES = osp.join(osp.dirname(__file__), "..", "LAGrad")
 np.random.seed(0)
 
 

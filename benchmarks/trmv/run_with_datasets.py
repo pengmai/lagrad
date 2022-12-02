@@ -35,10 +35,11 @@ def make_dataframe(datasets, out_file):
     copied_datasets = [ds for ds in datasets for _ in range(len(methods))]
     n_cols = len(copied_datasets)
     copied_methods = methods * len(datasets)
-    run_labels = [f"run{i+1}" for i in range(n_runs)]
+    # run_labels = [f"run{i+1}" for i in range(n_runs)]
+    columns = ["rss", "vsize"]
     data = np.zeros(n_cols * n_runs, dtype=np.int32).reshape(n_cols, n_runs)
     idx = pd.MultiIndex.from_tuples(zip(copied_datasets, copied_methods))
-    df = pd.DataFrame(data=data, columns=run_labels, index=idx)
+    df = pd.DataFrame(data=data, columns=columns, index=idx)
     df.to_csv(out_file, sep="\t")
     print(df)
 

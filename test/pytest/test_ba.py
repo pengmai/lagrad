@@ -103,3 +103,5 @@ def test_ba(ba_input: BAInput):
     assert len(pytorch_jacobian.cols) == len(lagrad_jacobian.cols)
     tol = 1e-16
     assert np.array(pytorch_jacobian.vals) == pytest.approx(np.array(lagrad_jacobian.vals), tol)
+    print(np.array(pytorch_jacobian.vals)[:10])
+    print(np.array(lagrad_jacobian.vals)[:10])

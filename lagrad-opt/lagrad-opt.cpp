@@ -19,31 +19,26 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
-#include "Standalone/Passes.h"
-#include "Standalone/StandaloneDialect.h"
+#include "LAGrad/LAGradDialect.h"
+#include "LAGrad/Passes.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllPasses();
-  mlir::registerPass(mlir::Standalone::createLowerToLLVMPass);
-  mlir::registerPass(mlir::Standalone::createGradPass);
-  // mlir::registerPass(mlir::Standalone::createElementwiseToAffinePass);
-  mlir::registerPass(mlir::Standalone::createBufferizePass);
-  mlir::registerPass(mlir::Standalone::createTriangularLoopsPass);
-  mlir::registerPass(mlir::Standalone::createPackTriangularPass);
-  mlir::registerPass(mlir::Standalone::createStaticAllocsPass);
-  mlir::registerPass(mlir::Standalone::createStandaloneDCEPass);
-  mlir::registerPass(mlir::Standalone::createLoopHoistingPass);
-  mlir::registerPass(mlir::Standalone::createLinalgCanonicalizePass);
-  mlir::registerPass(mlir::Standalone::createLinalgToKnownLibraryCallPass);
-  mlir::registerPass(mlir::Standalone::createSparsifyPass);
+  mlir::registerPass(mlir::lagrad::createLowerToLLVMPass);
+  mlir::registerPass(mlir::lagrad::createGradPass);
+  // mlir::registerPass(mlir::lagrad::createElementwiseToAffinePass);
+  mlir::registerPass(mlir::lagrad::createBufferizePass);
+  mlir::registerPass(mlir::lagrad::createTriangularLoopsPass);
+  mlir::registerPass(mlir::lagrad::createPackTriangularPass);
+  mlir::registerPass(mlir::lagrad::createStaticAllocsPass);
+  mlir::registerPass(mlir::lagrad::createStandaloneDCEPass);
+  mlir::registerPass(mlir::lagrad::createLoopHoistingPass);
+  mlir::registerPass(mlir::lagrad::createLinalgCanonicalizePass);
+  mlir::registerPass(mlir::lagrad::createLinalgToKnownLibraryCallPass);
+  mlir::registerPass(mlir::lagrad::createSparsifyPass);
 
   mlir::DialectRegistry registry;
-  registry.insert<mlir::standalone::StandaloneDialect>();
-  // registry.insert<mlir::StandardOpsDialect>();
-  // registry.insert<mlir::linalg::LinalgDialect>();
-  // registry.insert<mlir::LLVM::LLVMDialect>();
-  // registry.insert<mlir::scf::SCFDialect>();
-  // registry.insert<mlir::tensor::TensorDialect>();
+  registry.insert<mlir::lagrad::LAGradDialect>();
   // Add the following to include *all* MLIR Core dialects, or selectively
   // include what you need like above. You only need to register dialects that
   // will be *parsed* by the tool, not the one generated

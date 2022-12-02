@@ -14,4 +14,4 @@ PASSES="-empty-tensor-to-alloc-tensor \
 -promote-buffers-to-stack \
 -buffer-deallocation \
 -canonicalize"
-$HOME/Research/lagrad/build/bin/lagrad-opt "${1:-/dev/stdin}" $PASSES
+lagrad-opt "${1:-/dev/stdin}" $PASSES

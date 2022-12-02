@@ -193,7 +193,7 @@ module  {
       memref<10x512xf32>,
       memref<10xf32>
     ) -> f32
-    %df = standalone.diff %f {const = [0]} : (
+    %df = lagrad.diff %f {const = [0]} : (
       memref<784x64xf32>,
       memref<64xi32>,
       memref<512x784xf32>,

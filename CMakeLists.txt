@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13.4)
-project(standalone-dialect LANGUAGES CXX C)
+project(lagrad-dialect LANGUAGES CXX C)
 
 set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
 
@@ -32,4 +32,3 @@ add_subdirectory(include)
 add_subdirectory(lib)
 # add_subdirectory(test)
 add_subdirectory(lagrad-opt)
-# add_subdirectory(standalone-translate)

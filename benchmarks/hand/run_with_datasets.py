@@ -28,14 +28,14 @@ data_dir = (
     / "benchmarks"
     / "hand"
     / "data"
-    / "complicated_small"
+    / "simple_big"
 )
 
 model_dir = data_dir / "model"
 
 RESULTS_DIR = pathlib.Path.home() / "Research" / "lagrad" / "detailed_results"
 
-runtime_results_file = RESULTS_DIR / "hand_runtimes.tsv"
+runtime_results_file = RESULTS_DIR / "hand_sparse_runtimes.tsv"
 mem_results_file = RESULTS_DIR / "hand_memusage.tsv"
 filepat = re.compile(r"hand(?P<order>\d+)_t\d+_c(?P<npts>\d+).txt")
 datasets = [p for p in data_dir.glob("hand*")]
@@ -51,7 +51,8 @@ datasets.sort(key=sorter)
 
 def make_runtime_dataframe(datasets, out_file):
     n_cols = 6
-    methods = ["LAGrad", "Enzyme/MLIR", "Enzyme/C"]
+    # methods = ["LAGrad", "Enzyme/MLIR", "Enzyme/C"]
+    methods = ["LAGrad"]
     run_labels = [f"run{i+1}" for i in range(n_cols)]
     idx = pd.MultiIndex.from_product(
         ([ds.name for ds in datasets], methods, ["Simple", "Complicated"])
@@ -85,6 +86,9 @@ with tqdm(datasets) as t:
             for line in lines:
                 key, results = line.split(":")
                 runtime_df.loc[
-                    dataset.name, key, "Complicated" if complicated else "Simple"
+                    # dataset.name, key, "Complicated" if complicated else "Simple"
+                    dataset.name,
+                    key,
+                    "Big",
                 ] = json.loads(results)
             runtime_df.to_csv(runtime_results_file, sep="\t")

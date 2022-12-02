@@ -209,7 +209,7 @@ module  {
     memref.store %zero, %dwm[] : memref<f64>
 
     %f = constant @emlir_compute_reproj_error : (memref<11xf64>, memref<3xf64>, memref<f64>, memref<2xf64>, memref<2xf64>) -> f64
-    %df = standalone.diff %f {const = [3]} : (
+    %df = lagrad.diff %f {const = [3]} : (
       memref<11xf64>,
       memref<3xf64>,
       memref<f64>,

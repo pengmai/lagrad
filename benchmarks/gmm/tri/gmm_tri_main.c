@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM 1
+#define CHECK_MEM 0
 
 RunProcDyn rpd;
 void check_mem_usage() {
@@ -135,9 +135,9 @@ int main() {
   int icf_size = d * (d + 1) / 2;
   GMMApp apps[] = {
       //
-      // {.name = "LAGrad", .func = lagrad_gmm_tri_adjoint},
+      {.name = "LAGrad", .func = lagrad_gmm_tri_adjoint},
       // {.name = "Enzyme/C", .func = enzyme_c_gmm_tri},
-      {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_tri_adjoint},
+      // {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_tri_adjoint},
   };
 
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);

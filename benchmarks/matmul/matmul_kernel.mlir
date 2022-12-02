@@ -12,10 +12,6 @@ func @matmul(%A: tensor<?x?xf64>, %B: tensor<?x?xf64>) -> tensor<?x?xf64> {
 }
 
 func @lagrad_matmul(%A: tensor<?x?xf64>, %B: tensor<?x?xf64>) -> tensor<?x?xf64> {
-  %f = constant @matmul : (tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
-  %df = standalone.grad %f {of = [0]} :
-    (tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>,
-    (tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
-  %res = call_indirect %df(%A, %B) : (tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
+  %res = lagrad.grad @matmul(%A, %B) : (tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
   return %res : tensor<?x?xf64>
 }

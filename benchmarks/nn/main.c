@@ -17,27 +17,28 @@ void check_mem_usage() {
   printf("%zu\t%zu\n", rpd.rss, rpd.vsize);
 }
 
-float mlir_mlp_primal(MLPModel *m, DataBatch *b) {
-  return mlir_mlp(deadbeef, b->features, 0, BATCH_SIZE, INPUT_SIZE, INPUT_SIZE,
-                  1, (int32_t *)deadbeef, b->labels, 0, BATCH_SIZE, 1, deadbeef,
-                  m->weights0, 0, HIDDEN_SIZE, INPUT_SIZE, INPUT_SIZE, 1,
-                  deadbeef, m->bias0, 0, HIDDEN_SIZE, 1, deadbeef, m->weights1,
-                  0, HIDDEN_SIZE, HIDDEN_SIZE, HIDDEN_SIZE, 1, deadbeef,
-                  m->bias1, 0, HIDDEN_SIZE, 1, deadbeef, m->weights2, 0,
-                  OUTPUT_SIZE, HIDDEN_SIZE, HIDDEN_SIZE, 1, deadbeef, m->bias2,
-                  0, OUTPUT_SIZE, 1);
-}
+// float mlir_mlp_primal(MLPModel *m, DataBatch *b) {
+//   return mlir_mlp(deadbeef, b->features, 0, BATCH_SIZE, INPUT_SIZE,
+//   INPUT_SIZE,
+//                   1, (int32_t *)deadbeef, b->labels, 0, BATCH_SIZE, 1,
+//                   deadbeef, m->weights0, 0, HIDDEN_SIZE, INPUT_SIZE,
+//                   INPUT_SIZE, 1, deadbeef, m->bias0, 0, HIDDEN_SIZE, 1,
+//                   deadbeef, m->weights1, 0, HIDDEN_SIZE, HIDDEN_SIZE,
+//                   HIDDEN_SIZE, 1, deadbeef, m->bias1, 0, HIDDEN_SIZE, 1,
+//                   deadbeef, m->weights2, 0, OUTPUT_SIZE, HIDDEN_SIZE,
+//                   HIDDEN_SIZE, 1, deadbeef, m->bias2, 0, OUTPUT_SIZE, 1);
+// }
 
-MLPGrad lagrad_mlp_adjoint(MLPModel *m, DataBatch *b) {
-  return lagrad_mlp(
-      deadbeef, b->features, 0, BATCH_SIZE, INPUT_SIZE, INPUT_SIZE, 1,
-      (int32_t *)deadbeef, b->labels, 0, BATCH_SIZE, 1, deadbeef, m->weights0,
-      0, HIDDEN_SIZE, INPUT_SIZE, INPUT_SIZE, 1, deadbeef, m->bias0, 0,
-      HIDDEN_SIZE, 1, deadbeef, m->weights1, 0, HIDDEN_SIZE, HIDDEN_SIZE,
-      HIDDEN_SIZE, 1, deadbeef, m->bias1, 0, HIDDEN_SIZE, 1, deadbeef,
-      m->weights2, 0, OUTPUT_SIZE, HIDDEN_SIZE, HIDDEN_SIZE, 1, deadbeef,
-      m->bias2, 0, OUTPUT_SIZE, 1);
-}
+// MLPGrad lagrad_mlp_adjoint(MLPModel *m, DataBatch *b) {
+//   return lagrad_mlp(
+//       deadbeef, b->features, 0, BATCH_SIZE, INPUT_SIZE, INPUT_SIZE, 1,
+//       (int32_t *)deadbeef, b->labels, 0, BATCH_SIZE, 1, deadbeef,
+//       m->weights0, 0, HIDDEN_SIZE, INPUT_SIZE, INPUT_SIZE, 1, deadbeef,
+//       m->bias0, 0, HIDDEN_SIZE, 1, deadbeef, m->weights1, 0, HIDDEN_SIZE,
+//       HIDDEN_SIZE, HIDDEN_SIZE, 1, deadbeef, m->bias1, 0, HIDDEN_SIZE, 1,
+//       deadbeef, m->weights2, 0, OUTPUT_SIZE, HIDDEN_SIZE, HIDDEN_SIZE, 1,
+//       deadbeef, m->bias2, 0, OUTPUT_SIZE, 1);
+// }
 
 float mlir_mlp_primal_batched(MLPModel *m, DataBatch *b) {
   return mlir_mlp_batched(
@@ -121,8 +122,8 @@ unsigned long collect_mlp(MLPApp *app, MLPModel *model, DataBatch *batch,
   // print_f_arr(grad.b2b.aligned, grad.b2b.size);
   // printf("Gradient of bias 1:\n");
   // print_f_arr(grad.b1b.aligned, 10);
-  // check_mem_usage();
   if (CHECK_MEM) {
+    check_mem_usage();
   } else {
     verify_mlp_grad(&grad, ref_grad, app->name);
   }
@@ -165,10 +166,11 @@ int main(int argc, char **argv) {
       {.name = "LAGrad Batched",
        .batch = &transposed_batch,
        .func = lagrad_mlp_batched_adjoint},
-      {.name = "Enzyme", .batch = &transposed_batch, .func = enzyme_mlp},
+      {.name = "Enzyme/C", .batch = &transposed_batch, .func = enzyme_mlp},
       {.name = "Enzyme/MLIR",
        .batch = &transposed_batch,
-       .func = enzyme_mlir_mlp_batched_adjoint}};
+       .func = enzyme_mlir_mlp_batched_adjoint},
+  };
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
   unsigned long results[NUM_RUNS];
   for (size_t app = 0; app < num_apps; app++) {

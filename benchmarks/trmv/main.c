@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define NUM_RUNS 6
-#define CHECK_MEM false
+#define CHECK_MEM true
 
 void random_init(double *arr, size_t size) {
   for (size_t i = 0; i < size; ++i) {
@@ -113,24 +113,27 @@ int main() {
 
   TRMVApp apps[] = {
       //
-      {.name = "LAGrad Packed",
-       .materialized = false,
-       .pck_func = lagrad_trmv_packed_wrapper},
-      {.name = "LAGrad Tri",
-       .materialized = true,
-       .mat_func = lagrad_trmv_tri_wrapper},
-      {.name = "LAGrad Full",
-       .materialized = true,
-       .mat_func = lagrad_trmv_full_wrapper},
+      // {.name = "LAGrad Packed",
+      //  .materialized = false,
+      //  .pck_func = lagrad_trmv_packed_wrapper},
+      // {.name = "LAGrad Tri",
+      //  .materialized = true,
+      //  .mat_func = lagrad_trmv_tri_wrapper},
+      // {.name = "LAGrad Full",
+      //  .materialized = true,
+      //  .mat_func = lagrad_trmv_full_wrapper},
       // {.name = "Enzyme Packed",
       //  .materialized = false,
       //  .pck_func = enzyme_trmv_packed_wrapper},
-      // {.name = "Enzyme Full",
-      //  .materialized = true,
-      //  .mat_func = enzyme_trmv_full_wrapper},
       // {.name = "Enzyme Tri",
       //  .materialized = true,
       //  .mat_func = enzyme_trmv_tri_wrapper},
+      // {.name = "Enzyme Full",
+      //  .materialized = true,
+      //  .mat_func = enzyme_trmv_full_wrapper},
+      {.name = "Enzyme/C Packed",
+       .materialized = false,
+       .pck_func = enzyme_c_trmv_packed},
   };
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);
   unsigned long results_df[NUM_RUNS];
