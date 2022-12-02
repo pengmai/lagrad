@@ -39,7 +39,9 @@ int run_get_dynamic_proc_info(pid_t pid, RunProcDyn *rpd) {
 
   error = task_for_pid(mach_task_self(), pid, &task);
   if (error != KERN_SUCCESS) {
-    // fprintf(stderr, "++ Probably you have to set suid or become root.\n");
+    fprintf(stderr,
+            "++ Probably you have to set suid or become root. error: %d\n",
+            error);
     rpd->rss = rpd->vsize = 0;
     rpd->utime = rpd->stime = 0;
     return 0;
