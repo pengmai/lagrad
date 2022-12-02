@@ -556,7 +556,7 @@ private:
     }
     LAGradContext lagradctx{moduleOp};
     DEBUGpopulateFunc(lagradctx.debug_names, tangentFunc);
-    runActivityAnalysis(lagradctx, tangentFunc, tangentOf);
+    // runActivityAnalysis(lagradctx, tangentFunc, tangentOf);
     if (failed(generateTangent(tangentFunc, lagradctx, tangentOf, rewriter))) {
       return nullptr;
     }

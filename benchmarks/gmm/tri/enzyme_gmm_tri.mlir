@@ -268,7 +268,7 @@ module  {
     linalg.fill(%zero, %darg3) : f64, memref<{{k}}x{{d}}x{{d}}xf64>
 
     %f = constant @enzyme_gmm_opt_tri : (memref<{{k}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}xf64>, memref<{{k}}x{{d}}x{{d}}xf64>, memref<{{n}}x{{d}}xf64>, f64, i64) -> f64
-    %df = standalone.diff %f {const = [4]} : (
+    %df = lagrad.diff %f {const = [4]} : (
       memref<{{k}}xf64>,
       memref<{{k}}x{{d}}xf64>,
       memref<{{k}}x{{d}}xf64>,

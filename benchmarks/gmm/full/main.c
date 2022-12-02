@@ -10,7 +10,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define NUM_RUNS 1
+#define NUM_RUNS 6
 #define CHECK_MEM 0
 
 RunProcDyn rpd;
@@ -47,6 +47,10 @@ GMMGrad lagrad_gmm_full_adjoint(GMMInput *gmm_input) {
       /*wishart_m=*/gmm_input->wishart_m);
 }
 
+extern void blas_gmm_primal(int d, int k, int n, double *alphas, double *means,
+                            double *Qs, double *Ls, double *x,
+                            double wishart_gamma, int wishart_m, double *err);
+
 extern GMMGrad enzyme_c_gmm_full(GMMInput *gmm);
 
 extern double emgmm_full(
@@ -68,27 +72,27 @@ extern GMMGrad enzyme_mlir_gmm_full(
     /*wishart_gamma=*/double,
     /*wishart_m=*/int64_t);
 
-GMMGrad enzyme_mlir_gmm_full_adjoint(GMMInput *gmm_input) {
-  int n = gmm_input->n, k = gmm_input->k, d = gmm_input->d;
+// GMMGrad enzyme_mlir_gmm_full_adjoint(GMMInput *gmm_input) {
+//   int n = gmm_input->n, k = gmm_input->k, d = gmm_input->d;
 
-  double debug = emgmm_full(
-      /*alphas=*/deadbeef, gmm_input->alphas, 0, k, 1,
-      /*means=*/deadbeef, gmm_input->means, 0, k, d, d, 1,
-      /*Qs=*/deadbeef, gmm_input->Qs, 0, k, d, d, 1,
-      /*Ls=*/deadbeef, gmm_input->Ls, 0, k, d, d, d * d, d, 1,
-      /*x=*/deadbeef, gmm_input->x, 0, n, d, d, 1,
-      /*wishart_gamma=*/gmm_input->wishart_gamma,
-      /*wishart_m=*/gmm_input->wishart_m);
-  printf("Debug: %f\n", debug);
-  return enzyme_mlir_gmm_full(
-      /*alphas=*/deadbeef, gmm_input->alphas, 0, k, 1,
-      /*means=*/deadbeef, gmm_input->means, 0, k, d, d, 1,
-      /*Qs=*/deadbeef, gmm_input->Qs, 0, k, d, d, 1,
-      /*Ls=*/deadbeef, gmm_input->Ls, 0, k, d, d, d * d, d, 1,
-      /*x=*/deadbeef, gmm_input->x, 0, n, d, d, 1,
-      /*wishart_gamma=*/gmm_input->wishart_gamma,
-      /*wishart_m=*/gmm_input->wishart_m);
-}
+//   double debug = emgmm_full(
+//       /*alphas=*/deadbeef, gmm_input->alphas, 0, k, 1,
+//       /*means=*/deadbeef, gmm_input->means, 0, k, d, d, 1,
+//       /*Qs=*/deadbeef, gmm_input->Qs, 0, k, d, d, 1,
+//       /*Ls=*/deadbeef, gmm_input->Ls, 0, k, d, d, d * d, d, 1,
+//       /*x=*/deadbeef, gmm_input->x, 0, n, d, d, 1,
+//       /*wishart_gamma=*/gmm_input->wishart_gamma,
+//       /*wishart_m=*/gmm_input->wishart_m);
+//   printf("Debug: %f\n", debug);
+//   return enzyme_mlir_gmm_full(
+//       /*alphas=*/deadbeef, gmm_input->alphas, 0, k, 1,
+//       /*means=*/deadbeef, gmm_input->means, 0, k, d, d, 1,
+//       /*Qs=*/deadbeef, gmm_input->Qs, 0, k, d, d, 1,
+//       /*Ls=*/deadbeef, gmm_input->Ls, 0, k, d, d, d * d, d, 1,
+//       /*x=*/deadbeef, gmm_input->x, 0, n, d, d, 1,
+//       /*wishart_gamma=*/gmm_input->wishart_gamma,
+//       /*wishart_m=*/gmm_input->wishart_m);
+// }
 
 void free_gmm_input(GMMInput gmm_input) {
   free(gmm_input.alphas);
@@ -124,10 +128,10 @@ unsigned long collect_full_adjoint(GMMApp app, GMMInput *gmm_input,
     check_gmm_err(d, k, n, ans.dalphas.aligned, ref_alphas, ans.dmeans.aligned,
                   ref_means, temp_icf, ref_icf, app.name);
   }
-  free(ans.dalphas.aligned);
-  free(ans.dmeans.aligned);
-  free(ans.dqs.aligned);
-  free(ans.dls.aligned);
+  // free(ans.dalphas.aligned);
+  // free(ans.dmeans.aligned);
+  // free(ans.dqs.aligned);
+  // free(ans.dls.aligned);
   return timediff(start, stop);
 }
 
@@ -146,7 +150,7 @@ int main() {
       //
       {.name = "LAGrad", .func = lagrad_gmm_full_adjoint},
       // {.name = "Enzyme/C", .func = enzyme_c_gmm_full},
-      {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_full_adjoint},
+      // {.name = "Enzyme/MLIR", .func = enzyme_mlir_gmm_full_adjoint},
   };
 
   size_t num_apps = sizeof(apps) / sizeof(apps[0]);

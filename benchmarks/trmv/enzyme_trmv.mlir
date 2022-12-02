@@ -17,7 +17,7 @@ module  {
     linalg.fill(%zero, %darg1) : f64, memref<{{n}}xf64>
     linalg.fill(%one, %dout) : f64, memref<{{n}}xf64>
     %f = constant @etrmv_full : (memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
-    %df = standalone.diff %f :
+    %df = lagrad.diff %f :
       (memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64,
       (memref<{{n}}x{{n}}xf64>, memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
     call_indirect %df(%arg0, %darg0, %arg1, %darg1, %out, %dout) : (memref<{{n}}x{{n}}xf64>, memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
@@ -54,7 +54,7 @@ module  {
     linalg.fill(%zero, %darg1) : f64, memref<{{n}}xf64>
     linalg.fill(%one, %dout) : f64, memref<{{n}}xf64>
     %f = constant @etrmv_tri : (memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
-    %df = standalone.diff %f :
+    %df = lagrad.diff %f :
       (memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64,
       (memref<{{n}}x{{n}}xf64>, memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
     call_indirect %df(%arg0, %darg0, %arg1, %darg1, %out, %dout) : (memref<{{n}}x{{n}}xf64>, memref<{{n}}x{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
@@ -99,7 +99,7 @@ module  {
     linalg.fill(%zero, %darg1) : f64, memref<{{n}}xf64>
     linalg.fill(%one, %dout) : f64, memref<{{n}}xf64>
     %f = constant @etrmv_packed : (memref<{{tri_size}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
-    %df = standalone.diff %f :
+    %df = lagrad.diff %f :
       (memref<{{tri_size}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64,
       (memref<{{tri_size}}xf64>, memref<{{tri_size}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
     call_indirect %df(%arg0, %darg0, %arg1, %darg1, %out, %dout) : (memref<{{tri_size}}xf64>, memref<{{tri_size}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>, memref<{{n}}xf64>) -> f64
