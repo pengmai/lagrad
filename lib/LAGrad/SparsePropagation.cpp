@@ -307,7 +307,8 @@ bool matchSparsifyGenericOp(linalg::GenericOp op,
                             SparsePropagation &spAnalysis) {
   bool hasEncoding =
       llvm::any_of(op.getInputOperands(), [&spAnalysis](OpOperand *operand) {
-        return spAnalysis.getSparsityType(operand->get()).hasValue();
+        auto spType = spAnalysis.getSparsityType(operand->get());
+        return spType.hasValue() && spType.getValue() != HotSparsityType::Empty;
       });
   // TODO: potentially dangerous to not use this. We currently need it to match
   // a matmul in hand tracking because the zero value is propagated through loop
