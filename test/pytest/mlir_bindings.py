@@ -296,10 +296,26 @@ if not DISABLE_HAND:
     mlirlib.mto_pose_params.restype = F64Descriptor2D
     mlirlib.lagrad_to_pose_params.argtypes = memref_1d
     mlirlib.lagrad_to_pose_params.restype = F64Descriptor1D
+    mlirlib.lagrad_tangent_to_pose_params.argtypes = memref_1d + memref_1d
+
+    class ToPoseParamsTangent(ctypes.Structure):
+        _fields_ = [("primal", F64Descriptor2D), ("tangent", F64Descriptor2D)]
+
+    mlirlib.lagrad_tangent_to_pose_params.restype = ToPoseParamsTangent
+
     mlirlib.mget_posed_relatives.argtypes = memref_3d + memref_2d
     mlirlib.mget_posed_relatives.restype = F64Descriptor3D
     mlirlib.lagrad_get_posed_relatives.argtypes = memref_3d + memref_2d
     mlirlib.lagrad_get_posed_relatives.restype = F64Descriptor2D
+    mlirlib.lagrad_tangent_get_posed_relatives.argtypes = (
+        memref_3d + memref_2d + memref_2d
+    )
+
+    class GetPosedRelativesTangent(ctypes.Structure):
+        _fields_ = [("primal", F64Descriptor3D), ("tangent", F64Descriptor3D)]
+
+    mlirlib.lagrad_tangent_get_posed_relatives.restype = GetPosedRelativesTangent
+
     mlirlib.mrelatives_to_absolutes.argtypes = memref_3d + memref_1d_int
     mlirlib.mrelatives_to_absolutes.restype = F64Descriptor3D
     mlirlib.lagrad_relatives_to_absolutes.argtypes = memref_3d + memref_1d_int
@@ -324,6 +340,18 @@ if not DISABLE_HAND:
     mlirlib.mlir_hand_objective.restype = F64Descriptor2D
     mlirlib.lagrad_hand_objective.argtypes = hand_objective_args + memref_2d
     mlirlib.lagrad_hand_objective.restype = F64Descriptor1D
+    mlirlib.lagrad_tangent_hand_objective.argtypes = (
+        memref_1d
+        + memref_1d
+        + memref_1d_int
+        + memref_3d
+        + memref_3d
+        + memref_2d
+        + memref_2d
+        + memref_1d_int
+        + memref_2d
+    )
+    mlirlib.lagrad_tangent_hand_objective.restype = F64Descriptor2D
     hand_complicated_args = (
         memref_1d
         + memref_2d
@@ -370,24 +398,30 @@ mlirlib.mlir_mlp_batched.restype = ctypes.c_float
 mlirlib.lagrad_mlp_batched.argtypes = mlp_args
 mlirlib.lagrad_mlp_batched.restype = NNGrad
 
-mlirlib.onehot_adjoint_err_nest.argtypes = memref_2d + memref_1d_index + memref_1d_int
-mlirlib.onehot_adjoint_err_nest.restype = F64Descriptor2D
-mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
-mlirlib.rowhot_insert.restype = F64Descriptor2D
-mlirlib.onehot_square.argtypes = memref_2d + memref_1d_index
-mlirlib.onehot_square.restype = F64Descriptor2D
-mlirlib.onehot_sumreduce.argtypes = memref_2d + memref_1d_index
-mlirlib.onehot_sumreduce.restype = F64Descriptor1D
-mlirlib.onehot_matmul_both_transposed.argtypes = memref_2d + memref_2d + memref_1d_index
-mlirlib.onehot_matmul_both_transposed.restype = F64Descriptor2D
-mlirlib.onehot_matmul.argtypes = memref_2d + memref_2d + memref_1d_index
-mlirlib.onehot_matmul.restype = F64Descriptor2D
-mlirlib.rowhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
-mlirlib.rowhot_broadcast_mul.restype = F64Descriptor2D
-mlirlib.colhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
-mlirlib.colhot_broadcast_mul.restype = F64Descriptor2D
-mlirlib.rowhot_matmul.argtypes = memref_2d + memref_2d + [ctypes.c_longlong]
-mlirlib.rowhot_matmul.restype = F64Descriptor2D
+DISABLE_SPARSE = True
+if not DISABLE_SPARSE:
+    mlirlib.onehot_adjoint_err_nest.argtypes = (
+        memref_2d + memref_1d_index + memref_1d_int
+    )
+    mlirlib.onehot_adjoint_err_nest.restype = F64Descriptor2D
+    mlirlib.rowhot_insert.argtypes = memref_2d + [ctypes.c_longlong]
+    mlirlib.rowhot_insert.restype = F64Descriptor2D
+    mlirlib.onehot_square.argtypes = memref_2d + memref_1d_index
+    mlirlib.onehot_square.restype = F64Descriptor2D
+    mlirlib.onehot_sumreduce.argtypes = memref_2d + memref_1d_index
+    mlirlib.onehot_sumreduce.restype = F64Descriptor1D
+    mlirlib.onehot_matmul_both_transposed.argtypes = (
+        memref_2d + memref_2d + memref_1d_index
+    )
+    mlirlib.onehot_matmul_both_transposed.restype = F64Descriptor2D
+    mlirlib.onehot_matmul.argtypes = memref_2d + memref_2d + memref_1d_index
+    mlirlib.onehot_matmul.restype = F64Descriptor2D
+    mlirlib.rowhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
+    mlirlib.rowhot_broadcast_mul.restype = F64Descriptor2D
+    mlirlib.colhot_broadcast_mul.argtypes = memref_1d + memref_2d + [ctypes.c_longlong]
+    mlirlib.colhot_broadcast_mul.restype = F64Descriptor2D
+    mlirlib.rowhot_matmul.argtypes = memref_2d + memref_2d + [ctypes.c_longlong]
+    mlirlib.rowhot_matmul.restype = F64Descriptor2D
 
 
 def wrap(mlir_func):
@@ -411,6 +445,7 @@ def notimplemented(*_):
 if DISABLE_HAND:
     hand_to_pose_params = notimplemented
     lagrad_hand_to_pose_params = notimplemented
+    lagrad_tangent_to_pose_params = notimplemented
     hand_get_posed_relatives = notimplemented
     lagrad_get_posed_relatives = notimplemented
     hand_relatives_to_absolutes = notimplemented
@@ -424,8 +459,12 @@ if DISABLE_HAND:
 else:
     hand_to_pose_params = wrap(mlirlib.mto_pose_params)
     lagrad_hand_to_pose_params = wrap(mlirlib.lagrad_to_pose_params)
+    lagrad_tangent_to_pose_params = wrap(mlirlib.lagrad_tangent_to_pose_params)
     hand_get_posed_relatives = wrap(mlirlib.mget_posed_relatives)
     lagrad_get_posed_relatives = wrap(mlirlib.lagrad_get_posed_relatives)
+    lagrad_tangent_get_posed_relatives = wrap(
+        mlirlib.lagrad_tangent_get_posed_relatives
+    )
     hand_relatives_to_absolutes = wrap(mlirlib.mrelatives_to_absolutes)
     lagrad_relatives_to_absolutes = wrap(mlirlib.lagrad_relatives_to_absolutes)
     mlir_HELPER_get_transforms = wrap(mlirlib.HELPER_get_transforms)
@@ -433,6 +472,7 @@ else:
     mlir_hand_objective = wrap(mlirlib.mlir_hand_objective)
     mlir_hand_objective_complicated = wrap(mlirlib.mlir_hand_objective_complicated)
     lagrad_hand_objective = wrap(mlirlib.lagrad_hand_objective)
+    lagrad_tangent_hand_objective = wrap(mlirlib.lagrad_tangent_hand_objective)
     lagrad_hand_objective_complicated = wrap(mlirlib.lagrad_hand_objective_complicated)
 
 if DISABLE_LSTM:
@@ -447,12 +487,23 @@ else:
 mlir_mlp_primal = wrap(mlirlib.mlir_mlp_batched)
 lagrad_mlp = wrap(mlirlib.lagrad_mlp_batched)
 
-onehot_adjoint_err_nest = wrap(mlirlib.onehot_adjoint_err_nest)
-rowhot_insert = wrap(mlirlib.rowhot_insert)
-onehot_square = wrap(mlirlib.onehot_square)
-onehot_sumreduce = wrap(mlirlib.onehot_sumreduce)
-onehot_matmul_both_transposed = wrap(mlirlib.onehot_matmul_both_transposed)
-onehot_matmul = wrap(mlirlib.onehot_matmul)
-rowhot_broadcast_mul = wrap(mlirlib.rowhot_broadcast_mul)
-colhot_broadcast_mul = wrap(mlirlib.colhot_broadcast_mul)
-rowhot_matmul = wrap(mlirlib.rowhot_matmul)
+if DISABLE_SPARSE:
+    onehot_adjoint_err_nest = notimplemented
+    rowhot_insert = notimplemented
+    onehot_square = notimplemented
+    onehot_sumreduce = notimplemented
+    onehot_matmul_both_transposed = notimplemented
+    onehot_matmul = notimplemented
+    rowhot_broadcast_mul = notimplemented
+    colhot_broadcast_mul = notimplemented
+    rowhot_matmul = notimplemented
+else:
+    onehot_adjoint_err_nest = wrap(mlirlib.onehot_adjoint_err_nest)
+    rowhot_insert = wrap(mlirlib.rowhot_insert)
+    onehot_square = wrap(mlirlib.onehot_square)
+    onehot_sumreduce = wrap(mlirlib.onehot_sumreduce)
+    onehot_matmul_both_transposed = wrap(mlirlib.onehot_matmul_both_transposed)
+    onehot_matmul = wrap(mlirlib.onehot_matmul)
+    rowhot_broadcast_mul = wrap(mlirlib.rowhot_broadcast_mul)
+    colhot_broadcast_mul = wrap(mlirlib.colhot_broadcast_mul)
+    rowhot_matmul = wrap(mlirlib.rowhot_matmul)

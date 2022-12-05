@@ -17,8 +17,10 @@ from pytorch_ref.utils import torch_jacobian
 from mlir_bindings import (
     hand_to_pose_params,
     lagrad_hand_to_pose_params,
+    lagrad_tangent_to_pose_params,
     hand_get_posed_relatives,
     lagrad_get_posed_relatives,
+    lagrad_tangent_get_posed_relatives,
     hand_relatives_to_absolutes,
     lagrad_relatives_to_absolutes,
     mlir_HELPER_get_transforms,
@@ -26,6 +28,7 @@ from mlir_bindings import (
     mlir_hand_objective,
     mlir_hand_objective_complicated,
     lagrad_hand_objective,
+    lagrad_tangent_hand_objective,
     lagrad_hand_objective_complicated,
 )
 from toolchain import jit_file
@@ -77,7 +80,7 @@ def transforms(hand_input):
     )
 
 
-def test_to_pose_params(hand_input: HandInput):
+def test_to_pose_params_grad(hand_input: HandInput):
     ttheta = torch.from_numpy(hand_input.theta)
     ttheta.requires_grad = True
     torch_primal = to_pose_params(ttheta, hand_input.data.model.bone_count)
@@ -87,6 +90,22 @@ def test_to_pose_params(hand_input: HandInput):
     mlir_grad = lagrad_hand_to_pose_params(hand_input.theta)
     assert mlir_primal == pytest.approx(torch_primal.detach())
     assert mlir_grad == pytest.approx(ttheta.grad)
+
+
+def test_to_pose_params_tangent(hand_input: HandInput):
+    ttheta = torch.from_numpy(hand_input.theta)
+    ttheta.requires_grad = True
+    torch_primal = to_pose_params(ttheta, hand_input.data.model.bone_count)
+
+    seed = np.zeros_like(hand_input.theta)
+    dtheta = np.zeros_like(hand_input.theta)
+    for idx in range(len(hand_input.theta)):
+        seed[idx - 1] = 0
+        seed[idx] = 1
+        mprimal, mtangent = lagrad_tangent_to_pose_params(hand_input.theta, seed)
+        dtheta[idx] = mtangent.sum()
+    assert mprimal == pytest.approx(torch_primal.detach())
+    assert dtheta == pytest.approx(np.ones_like(hand_input.theta))
 
 
 def test_pose_relatives_body():
@@ -117,6 +136,31 @@ def test_get_posed_relatives(hand_input: HandInput, pose_params):
         torch_posed_relatives.transpose(1, 2).detach()
     )
     assert dpose_params == pytest.approx(tpp.grad, rel=1e-5)
+
+
+def test_get_posed_relatives_tangent(hand_input: HandInput, pose_params):
+    tpp = torch.from_numpy(pose_params)
+    tpp.requires_grad = True
+    torch_posed_relatives = get_posed_relatives(
+        tpp, torch.from_numpy(hand_input.data.model.base_relatives)
+    )
+    torch_posed_relatives.sum().backward()
+    base_relatives = np.ascontiguousarray(
+        hand_input.data.model.base_relatives.transpose(0, 2, 1)
+    )
+
+    mgrad = np.zeros_like(pose_params)
+    for i in range(pose_params.shape[0]):
+        for j in range(pose_params.shape[1]):
+            seed = np.zeros_like(pose_params)
+            seed[i, j] = 1
+            mprimal, mtangent = lagrad_tangent_get_posed_relatives(
+                base_relatives, pose_params, seed
+            )
+            mgrad[i, j] = mtangent.sum()
+
+    assert mprimal == pytest.approx(torch_posed_relatives.transpose(1, 2).detach())
+    assert mgrad == pytest.approx(tpp.grad, rel=1e-5)
 
 
 def test_angle_axis_to_rotation_matrix():
@@ -245,6 +289,52 @@ def test_hand_objective_simple(hand_input: HandInput):
     assert lagrad_J == pytest.approx(torch_J)
 
 
+def test_hand_objective_tangent(hand_input: HandInput):
+    ttheta = torch.from_numpy(hand_input.theta)
+    ttheta.requires_grad = True
+    model = hand_input.data.model
+    tparams = [
+        (torch.from_numpy(arg) if isinstance(arg, np.ndarray) else arg)
+        for arg in [
+            model.bone_count,
+            model.parents,
+            model.base_relatives,
+            model.inverse_base_absolutes,
+            model.base_positions,
+            model.weights,
+            model.is_mirrored,
+            hand_input.data.points,
+            hand_input.data.correspondences,
+        ]
+    ]
+
+    _, torch_J = torch_jacobian(hand_objective, (ttheta,), tparams, False)
+    tangent_jacobian = np.zeros(
+        (np.prod(hand_input.data.points.shape), len(hand_input.theta))
+    )
+    dtheta = np.zeros_like(hand_input.theta)
+
+    mparams = (
+        hand_input.theta,
+        dtheta,
+        model.parents.astype(np.int32),
+        # MLIR is implemented assuming these matrices are column-major.
+        np.ascontiguousarray(model.base_relatives.transpose(0, 2, 1)),
+        np.ascontiguousarray(model.inverse_base_absolutes.transpose(0, 2, 1)),
+        model.base_positions,
+        model.weights,
+        hand_input.data.correspondences.astype(np.int32),
+        hand_input.data.points,
+    )
+
+    for i in range(len(dtheta)):
+        dtheta[i] = 1
+        dtheta[i - 1] = 0
+        tangent_jacobian[:, i] = lagrad_tangent_hand_objective(*mparams).ravel()
+
+    assert tangent_jacobian == pytest.approx(torch_J)
+
+
 def test_hand_objective_complicated(hand_input_complicated: HandInput):
     tinputs = torch.from_numpy(
         np.append(hand_input_complicated.us.flatten(), hand_input_complicated.theta)
@@ -278,7 +368,6 @@ def test_hand_objective_complicated(hand_input_complicated: HandInput):
     # where in us part is a block diagonal matrix with blocks of
     # size [3, 2]
     n_rows, n_cols = J.shape
-    # print(J[-1])
     us_J = torch.empty([n_rows, 2])
     for i in range(n_rows // 3):
         for k in range(3):

@@ -167,8 +167,6 @@ void runTopDownAnalysis(LAGradContext &ctx, FuncOp primalFunc,
 }
 
 void runBottomUpAnalysis(FuncOp primalFunc, ValueSet &bottomUpActive) {
-  assert(primalFunc.getCallableResults().size() == 1 &&
-         "Expected primal to have one result");
   assert(primalFunc.getBody().hasOneBlock() &&
          "Expected body to have one block");
   // get the terminator and traverse bottom-up

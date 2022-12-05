@@ -113,6 +113,59 @@ private:
   const InsertExtractAnalysis &ieAnalysis;
 };
 
+static bool hasUseAfter(Value dest, Value result) {
+  DominanceInfo dom;
+  bool hasUseAfter = false;
+
+  for (auto user : dest.getUsers()) {
+    if (dom.properlyDominates(result, user)) {
+      hasUseAfter = true;
+    }
+  }
+  return hasUseAfter;
+}
+
+class BufferizeFillOp : public OpConversionPattern<linalg::FillOp> {
+public:
+  BufferizeFillOp(TypeConverter &typeConverter, MLIRContext *ctx)
+      : OpConversionPattern(typeConverter, ctx, /*benefit=*/1) {}
+
+  LogicalResult
+  matchAndRewrite(linalg::FillOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (op.getNumResults() != 1) {
+      return failure();
+    }
+
+    bool mustCopy = !hasUseAfter(op.output(), op.getResult(0));
+    if (mustCopy) {
+      auto outputType = op.output().getType().cast<ShapedType>();
+      if (!outputType.hasStaticShape()) {
+        return failure();
+      }
+      // SmallVector<Value> dynamicSizes{
+      //     static_cast<size_t>(outputType.getNumDynamicDims())};
+      // for (auto pair : llvm::enumerate(outputType.getShape())) {
+      //   if (ShapedType::isDynamic(pair.value())) {
+      //     dynamicSizes.push_back(rewriter.create<memref::DimOp>(
+      //         op.getLoc(), operands[0], pair.index()));
+      //   }
+      // }
+
+      Value copy = rewriter.create<memref::AllocOp>(
+          op.getLoc(), getTypeConverter()
+                           ->convertType(op.output().getType())
+                           .cast<MemRefType>());
+      rewriter.create<linalg::FillOp>(op.getLoc(), op.value(), copy);
+      rewriter.replaceOp(op, copy);
+    } else {
+      rewriter.create<linalg::FillOp>(op.getLoc(), operands[0], operands[1]);
+      rewriter.replaceOp(op, operands[1]);
+    }
+    return success();
+  }
+};
+
 class BufferizeInsertOp : public OpConversionPattern<tensor::InsertOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
@@ -392,6 +445,10 @@ struct StandaloneBufferizePass
           return typeConverter.isLegal(op) ||
                  !ieAnalysis.isLinalgMarkedForBufferization(op);
         });
+    target.addDynamicallyLegalOp<linalg::FillOp>([](linalg::FillOp op) {
+      return op.hasBufferSemantics() || op.getNumResults() != 1 ||
+             !op.output().getType().cast<ShapedType>().hasStaticShape();
+    });
     target.addLegalOp<CallOp>();
     target.addLegalOp<ReturnOp>();
     target.addLegalOp<linalg::CopyOp>();
@@ -408,6 +465,7 @@ struct StandaloneBufferizePass
                                           patterns.getContext());
     patterns.add<BufferizeInsertSliceOp>(ieAnalysis, typeConverter,
                                          patterns.getContext());
+    patterns.add<BufferizeFillOp>(typeConverter, patterns.getContext());
     // patterns.add<BufferizeLinalgOp>(typeConverter,
     // patterns.getContext());
 
