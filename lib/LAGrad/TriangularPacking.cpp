@@ -115,11 +115,33 @@ inlineRegionAndEmitStore(OpBuilder &b, Location loc, linalg::LinalgOp op,
   SmallVector<Value> results;
   for (OpOperand &operand : terminator->getOpOperands()) {
     Value toStore = map.lookupOrDefault(operand.get());
-    results.push_back(b.create<tensor::InsertOp>(
+    auto result = b.create<tensor::InsertOp>(
         loc, toStore, outputTensors[operand.getOperandNumber()],
-        indexing[operand.getOperandNumber()]));
+        indexing[operand.getOperandNumber()]);
+    // Need to annotate the insert ops we create because the way to erase their
+    // indices is different.
+    result->setAttr("packed_write", b.getUnitAttr());
+    results.push_back(result);
   }
   return results;
+}
+
+static Value computeLidx(OpBuilder &b, Location loc, Value iv, Value jv,
+                         Value triDim) {
+  // Column-major lower triangular packing.
+  /* j - (i + 1) + i * (2 * d - (i + 1)) / 2; */
+  Value one = b.create<arith::ConstantIndexOp>(loc, 1);
+  Value two = b.create<arith::ConstantIndexOp>(loc, 2);
+  Value ivPlusOne = b.create<arith::AddIOp>(loc, iv, one);
+  Value LidxInit = b.create<arith::DivUIOp>(
+      loc,
+      b.create<arith::MulIOp>(
+          loc, iv,
+          b.create<arith::SubIOp>(
+              loc, b.create<arith::MulIOp>(loc, two, triDim), ivPlusOne)),
+      two);
+  return b.create<arith::AddIOp>(
+      loc, b.create<arith::SubIOp>(loc, jv, ivPlusOne), LidxInit);
 }
 
 static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
@@ -138,21 +160,10 @@ static SmallVector<Value> emitScalarImplementation(OpBuilder &b, Location loc,
   // Emit the required indexing. Assume for now it's packed (strictly) lower
   // triangular. Might be a faster way to compute this.
   /* j - (i + 1) + i * (2 * d - (i + 1)) / 2; */
-  auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
-  auto one = b.create<arith::ConstantIndexOp>(loc, 1);
-  auto two = b.create<arith::ConstantIndexOp>(loc, 2);
   auto iv = allIvsPlusDims.rbegin()[1];
-  auto ivPlusOne = b.create<arith::AddIOp>(loc, iv, one);
   auto jv = allIvsPlusDims.back();
-  auto LidxInit = b.create<arith::DivUIOp>(
-      loc,
-      b.create<arith::MulIOp>(
-          loc, iv,
-          b.create<arith::SubIOp>(
-              loc, b.create<arith::MulIOp>(loc, two, triDim), ivPlusOne)),
-      two);
-  auto Lidx = b.create<arith::AddIOp>(
-      loc, b.create<arith::SubIOp>(loc, jv, ivPlusOne), LidxInit);
+  Value Lidx = computeLidx(b, loc, iv, jv, triDim);
+  auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
 
   // The zero is a temporary placeholder to pass the
   // verifier. We expect it to be removed when the packed annotation is
@@ -379,8 +390,23 @@ public:
     if (!packedTensorUsage.usesPackedTensor(op)) {
       return failure();
     }
+
+    if (op->hasAttrOfType<UnitAttr>("packed_write")) {
+      rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(),
+      op.dest(),
+                                                    op.indices().drop_back(1));
+      return success();
+    }
+    SmallVector<Value> indices{op.indices().drop_back(2)};
+    auto lastIndices = op.indices().take_back(2);
+    int64_t triDim = op.getType().getShape().back();
+    // Indices are flipped because the underlying storage is column-major
+    Value Lidx = computeLidx(
+        rewriter, op.getLoc(), lastIndices[1], lastIndices[0],
+        rewriter.create<arith::ConstantIndexOp>(op.getLoc(), triDim));
+    indices.push_back(Lidx);
     rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(), op.dest(),
-                                                  op.indices().drop_back(1));
+                                                  indices);
     return success();
   }
 };
@@ -610,6 +636,7 @@ struct PackTriangularPass
     ConversionTarget target(*context);
     RewritePatternSet patterns(context);
     target.addLegalDialect<arith::ArithmeticDialect>();
+    target.addLegalDialect<math::MathDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
@@ -638,6 +665,12 @@ struct PackTriangularPass
         packedPredicate);
     erasureTarget.addDynamicallyLegalOp<CallOp>(packedPredicate);
     erasureTarget.addDynamicallyLegalDialect<arith::ArithmeticDialect>(
+        [&](Operation *op) {
+          auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
+          return llvm::none_of(op->getOperandTypes(), isPacked) &&
+                 llvm::none_of(op->getResultTypes(), isPacked);
+        });
+    erasureTarget.addDynamicallyLegalDialect<math::MathDialect>(
         [&](Operation *op) {
           auto isPacked = [&](Type type) { return hasPackedEncoding(type); };
           return llvm::none_of(op->getOperandTypes(), isPacked) &&

@@ -16,6 +16,18 @@
 using namespace mlir;
 using namespace lagrad;
 
+static LogicalResult verify(PackOp op) {
+  ShapedType sourceType = op.source().getType().cast<ShapedType>();
+  ShapedType destType = op.getType();
+  if (sourceType.getShape() != destType.getShape()) {
+    return op.emitOpError("Expected source and dest to have same shape");
+  }
+  if (sourceType.getElementType() != destType.getElementType()) {
+    return op.emitOpError("Expected source and dest to have same element type");
+  }
+  return success();
+}
+
 LogicalResult GradOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   // Check that the callee attribute was specified.
   auto fnAttr = (*this)->getAttrOfType<FlatSymbolRefAttr>("F");
@@ -117,7 +129,8 @@ LogicalResult TangentOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   //       }
   //       gradientsOf.push_back(argIdx);
   //     } else {
-  //       return emitOpError("'of' attr was not an integer attribute: ") << attr;
+  //       return emitOpError("'of' attr was not an integer attribute: ") <<
+  //       attr;
   //     }
   //   }
   // } else {

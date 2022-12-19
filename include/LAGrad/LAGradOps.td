@@ -74,6 +74,8 @@ def LAGrad_PackOp : LAGrad_Op<"pack", [NoSideEffect]> {
     let assemblyFormat = [{
         $source attr-dict `:` type($source) `to` type($dest)
     }];
+
+    let verifier = [{ return ::verify(*this); }];
 }
 
 #endif // LAGRAD_OPS

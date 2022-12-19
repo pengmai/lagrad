@@ -576,8 +576,9 @@ static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
   }
   SmallVector<BlockArgument> originalArgs{tangentFunc.getArguments().begin(),
                                           tangentFunc.getArguments().end()};
-  for (BlockArgument arg : originalArgs) {
-    if (activeArgs.contains(arg.getArgNumber())) {
+  for (auto pair : llvm::enumerate(originalArgs)) {
+    BlockArgument arg = pair.value();
+    if (activeArgs.contains(pair.index())) {
       ++idx;
       tangentFunc.insertArgument(idx, arg.getType(), {});
       env.map(arg, tangentFunc.getArgument(idx));
