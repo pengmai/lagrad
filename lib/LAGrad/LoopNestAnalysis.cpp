@@ -7,14 +7,14 @@ Value getInductionVar(scf::ForOp op, LoopNest &loopNest) {
     if (auto subiOp =
             dyn_cast<arith::SubIOp>(*op.getInductionVar().getUsers().begin())) {
       // case 1: (ub - iv) - 1
-      if (subiOp.lhs() == op.upperBound() &&
-          subiOp.rhs() == op.getInductionVar() &&
+      if (subiOp.getLhs() == op.getUpperBound() &&
+          subiOp.getRhs() == op.getInductionVar() &&
           subiOp.getResult().hasOneUse()) {
         if (auto secondSubiOp = dyn_cast<arith::SubIOp>(
                 *subiOp.getResult().getUsers().begin())) {
           auto rhs = dyn_cast_or_null<arith::ConstantIndexOp>(
-              secondSubiOp.rhs().getDefiningOp());
-          if (secondSubiOp.lhs() == subiOp.getResult() && rhs &&
+              secondSubiOp.getRhs().getDefiningOp());
+          if (secondSubiOp.getLhs() == subiOp.getResult() && rhs &&
               rhs.value() == 1) {
             loopNest.ivComputation.insert(subiOp);
             loopNest.ivComputation.insert(secondSubiOp);
@@ -24,10 +24,10 @@ Value getInductionVar(scf::ForOp op, LoopNest &loopNest) {
       } else {
         // case 2: (const ub - 1) - iv
         auto constLHS = dyn_cast_or_null<arith::ConstantIndexOp>(
-            subiOp.lhs().getDefiningOp());
+            subiOp.getLhs().getDefiningOp());
         auto constUpperBound = dyn_cast_or_null<arith::ConstantIndexOp>(
-            op.upperBound().getDefiningOp());
-        if (subiOp.rhs() == op.getInductionVar() && constLHS &&
+            op.getUpperBound().getDefiningOp());
+        if (subiOp.getRhs() == op.getInductionVar() && constLHS &&
             constUpperBound &&
             constLHS.value() == constUpperBound.value() - 1) {
           loopNest.ivComputation.insert(subiOp);

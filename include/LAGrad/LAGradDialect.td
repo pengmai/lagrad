@@ -30,7 +30,7 @@ def LAGrad_Dialect : Dialect {
 // Base LAGrad operation definition.
 //===----------------------------------------------------------------------===//
 
-class LAGrad_Op<string mnemonic, list<OpTrait> traits = []> :
+class LAGrad_Op<string mnemonic, list<Trait> traits = []> :
         Op<LAGrad_Dialect, mnemonic, traits>;
 
 #endif // LAGRAD_DIALECT

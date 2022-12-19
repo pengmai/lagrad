@@ -26,7 +26,6 @@ int main(int argc, char **argv) {
   mlir::registerAllPasses();
   mlir::registerPass(mlir::lagrad::createLowerToLLVMPass);
   mlir::registerPass(mlir::lagrad::createGradPass);
-  mlir::registerPass(mlir::lagrad::createElementwiseToAffinePass);
   mlir::registerPass(mlir::lagrad::createBufferizePass);
   mlir::registerPass(mlir::lagrad::createTriangularLoopsPass);
   mlir::registerPass(mlir::lagrad::createPackTriangularPass);

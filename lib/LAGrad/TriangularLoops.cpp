@@ -5,7 +5,8 @@
 #include "LAGrad/Passes.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -70,7 +71,7 @@ void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
       auto definingOp = operand.getDefiningOp();
       if (definingOp && dyn_cast_or_null<arith::ConstantOp>(definingOp)) {
         auto constOp = dyn_cast<arith::ConstantOp>(definingOp);
-        auto attr = constOp.valueAttr();
+        auto attr = constOp.getValueAttr();
         if (attr.isa<DenseElementsAttr>()) {
           auto dattr = attr.cast<DenseElementsAttr>();
           assert(dattr.isSplat() && "triangular loops for non-splatted dense "
@@ -78,8 +79,9 @@ void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
           if (dattr.isSplat()) {
             rewriter.setInsertionPoint(constOp);
             rewriter.replaceOpWithNewOp<arith::ConstantOp>(
-                constOp, DenseElementsAttr::get(resultTensorType,
-                                                dattr.getSplatValue()));
+                constOp,
+                DenseElementsAttr::get(resultTensorType,
+                                       dattr.getSplatValue<FloatAttr>()));
           }
         }
         return;
@@ -287,7 +289,7 @@ public:
         rewriter.create<linalg::FillOp>(linalgOp.getLoc(), zero, space);
       }
       auto loaded =
-          rewriter.create<memref::TensorLoadOp>(linalgOp.getLoc(), space);
+          rewriter.create<bufferization::ToTensorOp>(linalgOp.getLoc(), space);
 
       iterArgInitValues.push_back(loaded);
     }

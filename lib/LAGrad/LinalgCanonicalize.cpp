@@ -7,13 +7,13 @@
 #include "LAGrad/Passes.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
-#include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -96,8 +96,9 @@ public:
 bool isZeroTensor(Value value) {
   if (auto constantOp =
           dyn_cast_or_null<arith::ConstantOp>(value.getDefiningOp())) {
-    if (auto splatAttr = constantOp.valueAttr().dyn_cast<SplatElementsAttr>()) {
-      if (auto floatAttr = splatAttr.getSplatValue().dyn_cast<FloatAttr>()) {
+    if (auto splatAttr =
+            constantOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
+      if (auto floatAttr = splatAttr.getSplatValue<FloatAttr>()) {
         return !floatAttr.getValue().isNonZero();
       }
     }
@@ -136,8 +137,8 @@ public:
         BlockArgument regionArg = op.getBody()->getArgument(idx);
         for (Operation *user : regionArg.getUsers()) {
           if (auto mulfOp = dyn_cast<arith::MulFOp>(user)) {
-            Value other =
-                mulfOp.lhs() == regionArg ? mulfOp.rhs() : mulfOp.lhs();
+            Value other = mulfOp.getLhs() == regionArg ? mulfOp.getRhs()
+                                                       : mulfOp.getLhs();
             rewriter.updateRootInPlace(
                 op, [&]() { rewriter.replaceOp(mulfOp, other); });
             return success();
@@ -171,8 +172,8 @@ public:
             yieldOp.getOperand(0).getDefiningOp())) {
       BlockArgument inputArg = op.getBody()->getArgument(0);
       BlockArgument outputArg = op.getBody()->getArgument(1);
-      if ((addfOp.lhs() == inputArg && addfOp.rhs() == outputArg) ||
-          (addfOp.lhs() == outputArg && addfOp.rhs() == inputArg)) {
+      if ((addfOp.getLhs() == inputArg && addfOp.getRhs() == outputArg) ||
+          (addfOp.getLhs() == outputArg && addfOp.getRhs() == inputArg)) {
         errs() << "Replaced addtozero: " << op << "\n";
         rewriter.replaceOp(op, op.getInputOperand(0)->get());
         return success();

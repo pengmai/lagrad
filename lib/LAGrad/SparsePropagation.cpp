@@ -1,10 +1,11 @@
 #include "LAGrad/Analysis.h"
 #include "LAGrad/Passes.h"
 #include "LAGrad/Utils.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Support/raw_ostream.h"
@@ -51,8 +52,8 @@ SparsePropagation::SparsePropagation(Operation *op, AnalysisManager &am) {
     }
   });
   op->walk([&](arith::ConstantOp constOp) {
-    if (auto valueAttr = constOp.valueAttr().dyn_cast<SplatElementsAttr>()) {
-      if (auto splatAttr = valueAttr.getSplatValue().dyn_cast<FloatAttr>()) {
+    if (auto valueAttr = constOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
+      if (auto splatAttr = valueAttr.getSplatValue<FloatAttr>()) {
         if (splatAttr.getValue().isZero()) {
           sparsityTypes[constOp.getResult()] = HotSparsityType::Empty;
         }
@@ -233,7 +234,7 @@ public:
         spAnalysis{spAnalysis} {}
 
   LogicalResult
-  matchAndRewrite(FuncOp op, ArrayRef<Value> operands,
+  matchAndRewrite(FuncOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (llvm::none_of(op.getArguments(), [this](BlockArgument arg) {
           return spAnalysis.getSparsityType(arg).hasValue() &&
@@ -275,7 +276,7 @@ public:
             auto argType = RankedTensorType::get(
                 originalArgType.getShape(), originalArgType.getElementType());
             arg.setType(argType);
-            op.insertArgument(idx + 1, indicesType, {});
+            op.insertArgument(idx + 1, indicesType, {}, arg.getLoc());
             spAnalysis.setIndices(arg, op.getArgument(idx + 1));
           };
           addIndexArgument();
@@ -402,7 +403,7 @@ private:
 
   Value allocateOutputSpace(Value tensor, Location loc, OpBuilder &b) const {
     RankedTensorType resultType = tensor.getType().cast<RankedTensorType>();
-    BufferizeTypeConverter typeConverter;
+    bufferization::BufferizeTypeConverter typeConverter;
     SmallVector<Value> dynamicSizes;
     dynamicSizes.reserve(resultType.getNumDynamicDims());
     for (unsigned idx = 0; idx < resultType.getRank(); idx++) {
@@ -419,7 +420,7 @@ public:
   SparsifyLinalgGenericOp(SparsePropagation &spAnalysis, MLIRContext *ctx)
       : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis} {}
   LogicalResult
-  matchAndRewrite(linalg::GenericOp op, ArrayRef<Value> operands,
+  matchAndRewrite(linalg::GenericOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (!matchSparsifyGenericOp(op, spAnalysis)) {
       return failure();
@@ -454,13 +455,13 @@ public:
     }
     SmallVector<Value, 4> lbs, ubs, steps;
     Location loc = op.getLoc();
-    BufferizeTypeConverter typeConverter;
+    bufferization::BufferizeTypeConverter typeConverter;
     Value zero = rewriter.create<arith::ConstantOp>(
         loc,
         FloatAttr::get(op.getOutputTensorTypes()[0].getElementType(), 0.0));
     Value idxZero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value idxOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-    // Value space = rewriter.create<memref::BufferCastOp>(
+    // Value space = rewriter.create<bufferization::ToMemrefOp>(
     //     loc, typeConverter.convertType(op.getOutputTensorTypes()[0]),
     //     op.getOutputOperand(0)->get());
     Value space =
@@ -527,7 +528,7 @@ public:
                   builder, loc, op.getTiedIndexingMap(op.getOutputOperand(0)),
                   allIvs));
         });
-    rewriter.replaceOpWithNewOp<memref::TensorLoadOp>(op, space);
+    rewriter.replaceOpWithNewOp<bufferization::ToTensorOp>(op, space);
 
     // propagate sparse indices
     for (OpOperand *outOperand : op.getOutputOperands()) {
@@ -601,7 +602,7 @@ public:
         lnAnalysis{lnAnalysis} {}
 
   LogicalResult
-  matchAndRewrite(scf::ForOp op, ArrayRef<Value> operands,
+  matchAndRewrite(scf::ForOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (!matchSparsifyForOp(op, spAnalysis, lnAnalysis)) {
       return failure();
@@ -725,7 +726,7 @@ public:
       : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis} {}
 
   LogicalResult
-  matchAndRewrite(tensor::InsertSliceOp op, ArrayRef<Value> operands,
+  matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (!matchSparsifyInsertSlice(op, spAnalysis)) {
       return failure();
@@ -829,7 +830,6 @@ struct StructuredSparsifyPass
     auto &sparsePropagation = getAnalysis<SparsePropagation>();
     RewritePatternSet patterns(context);
 
-    // BufferizeTypeConverter typeConverter;
     TypeConverter typeConverter;
     ConversionTarget target(*context);
     target.addLegalDialect<arith::ArithmeticDialect>();

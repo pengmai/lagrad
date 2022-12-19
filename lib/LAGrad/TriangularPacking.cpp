@@ -3,7 +3,9 @@
 #include "LAGrad/Passes.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -239,7 +241,7 @@ public:
 
         auto memrefType =
             hasPackedEncoding(outType)
-                ? BufferizeTypeConverter().convertType(
+                ? bufferization::BufferizeTypeConverter().convertType(
                       convertToPackedType(outType))
                 : MemRefType::get(outType.getShape(), outType.getElementType());
         Value space = rewriter.create<linalg::InitTensorOp>(
@@ -248,11 +250,11 @@ public:
           space = rewriter.create<lagrad::PackOp>(op.getLoc(), outType, space);
         }
         if (op.payloadUsesValueFromOperand(outTensor)) {
-          auto castedSpace = rewriter.create<memref::BufferCastOp>(
+          auto castedSpace = rewriter.create<bufferization::ToMemrefOp>(
               op.getLoc(), memrefType, space);
-          auto memrefOutput = rewriter.create<memref::BufferCastOp>(
+          auto memrefOutput = rewriter.create<bufferization::ToMemrefOp>(
               op.getLoc(), memrefType, outTensor->get());
-          rewriter.create<linalg::CopyOp>(op.getLoc(), memrefOutput,
+          rewriter.create<memref::CopyOp>(op.getLoc(), memrefOutput,
                                           castedSpace);
         }
 
@@ -348,7 +350,7 @@ class ErasePackedCallOp : public OpRewritePattern<CallOp> {
   LogicalResult matchAndRewrite(CallOp op,
                                 PatternRewriter &rewriter) const override {
     auto moduleOp = op->getParentOfType<ModuleOp>();
-    auto funcOp = cast<FuncOp>(moduleOp.lookupSymbol(op.calleeAttr()));
+    auto funcOp = cast<FuncOp>(moduleOp.lookupSymbol(op.getCalleeAttr()));
     rewriter.replaceOpWithNewOp<CallOp>(op, funcOp, op.operands());
     return success();
   }
@@ -392,8 +394,7 @@ public:
     }
 
     if (op->hasAttrOfType<UnitAttr>("packed_write")) {
-      rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(),
-      op.dest(),
+      rewriter.replaceOpWithNewOp<tensor::InsertOp>(op, op.scalar(), op.dest(),
                                                     op.indices().drop_back(1));
       return success();
     }
@@ -443,9 +444,14 @@ public:
     sizes.back() =
         IntegerAttr::get(IndexType::get(rewriter.getContext()), triSize);
 
-    rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
-        op, convertToPackedType(op.getType()), op.source(), offsets, sizes,
-        strides);
+    // rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
+    //     op, convertToPackedType(op.getType()), op.source(), offsets, sizes,
+    //     strides);
+    auto newExtractSlice = rewriter.create<tensor::ExtractSliceOp>(
+        op.getLoc(), convertToPackedType(op.getType()), op.source(), offsets,
+        sizes, strides);
+    op.replaceAllUsesWith(newExtractSlice.getResult());
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -548,17 +554,20 @@ public:
     }
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
-      if (auto valueAttr = constOp.valueAttr().dyn_cast<SplatElementsAttr>()) {
+      if (auto valueAttr =
+              constOp.getValueAttr().dyn_cast<SplatElementsAttr>()) {
         rewriter.replaceOpWithNewOp<arith::ConstantOp>(
             constOp,
             DenseElementsAttr::get(
                 convertToPackedType(constOp.getType().cast<RankedTensorType>()),
-                valueAttr.getSplatValue()));
+                valueAttr.getSplatValue<FloatAttr>()));
       } else {
-        auto denseAttr = constOp.valueAttr().cast<DenseFPElementsAttr>();
+        auto denseAttr = constOp.getValueAttr().cast<DenseFPElementsAttr>();
+        auto m = *denseAttr.begin();
         auto tensorType = denseAttr.getType().cast<RankedTensorType>();
         int64_t d = tensorType.getShape().back();
-        SmallVector<APFloat> packedValues;
+        SmallVector<APFloat> packedValues,
+            denseElements{denseAttr.begin(), denseAttr.end()};
         packedValues.reserve(d * (d - 1) / 2);
         int64_t dimIdx = 1;
         for (int64_t dim : tensorType.getShape().drop_back(2)) {
@@ -569,8 +578,7 @@ public:
           for (int64_t m = 0; m < dim; m++) {
             for (int64_t i = 0; i < d; i++) {
               for (int64_t j = i + 1; j < d; j++) {
-                packedValues.push_back(
-                    denseAttr.getFlatValue<APFloat>(m * stride + j * d + i));
+                packedValues.push_back(denseElements[m * stride + j * d + i]);
               }
             }
           }
@@ -624,7 +632,8 @@ public:
 struct PackTriangularPass
     : public PassWrapper<PackTriangularPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<memref::MemRefDialect, scf::SCFDialect>();
+    registry.insert<memref::MemRefDialect, bufferization::BufferizationDialect,
+                    scf::SCFDialect>();
   }
   StringRef getArgument() const override { return "pack-triangular"; }
   StringRef getDescription() const override {
@@ -638,11 +647,12 @@ struct PackTriangularPass
     target.addLegalDialect<arith::ArithmeticDialect>();
     target.addLegalDialect<math::MathDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
+    target.addLegalDialect<bufferization::BufferizationDialect>();
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
     target.addLegalOp<linalg::InitTensorOp>();
     target.addLegalOp<linalg::FillOp>();
-    target.addLegalOp<linalg::CopyOp>();
+    target.addLegalOp<memref::CopyOp>();
     target.addLegalOp<linalg::YieldOp>();
     target.addLegalOp<lagrad::PackOp>();
 
@@ -683,7 +693,8 @@ struct PackTriangularPass
                  llvm::none_of(op->getResultTypes(), isPacked);
         });
     erasureTarget.addLegalOp<linalg::InitTensorOp>();
-    erasureTarget.addLegalOp<linalg::CopyOp>();
+    erasureTarget.addLegalOp<memref::CopyOp>();
+    erasureTarget.addLegalDialect<bufferization::BufferizationDialect>();
     // erasureTarget.addLegalOp<linalg::FillOp>();
     // erasureTarget.addLegalOp<linalg::YieldOp>();
 

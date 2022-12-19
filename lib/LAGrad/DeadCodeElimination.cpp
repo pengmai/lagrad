@@ -5,13 +5,14 @@
 #include "LAGrad/Passes.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
-#include "mlir/Transforms/Bufferize.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -46,7 +47,7 @@ void BFS(ValueRange start, llvm::SmallDenseSet<Value> &liveValues) {
 void populateLiveBodyArgs(scf::ForOp forOp,
                           llvm::SmallDenseSet<Value> &liveValues) {
   auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  for (auto it : llvm::zip(yieldOp.results(), forOp.getResults(),
+  for (auto it : llvm::zip(yieldOp.getResults(), forOp.getResults(),
                            forOp.getRegionIterArgs())) {
     auto yieldResult = std::get<0>(it);
     auto result = std::get<1>(it);
@@ -58,7 +59,8 @@ void populateLiveBodyArgs(scf::ForOp forOp,
       ValueSet derivedFromIterArg;
       runTopDownDFS(frontier, derivedFromIterArg);
       for (auto derived : derivedFromIterArg) {
-        if (dyn_cast_or_null<memref::BufferCastOp>(derived.getDefiningOp())) {
+        if (dyn_cast_or_null<bufferization::ToMemrefOp>(
+                derived.getDefiningOp())) {
           liveValues.insert(iterArg);
           break;
         }
@@ -85,7 +87,7 @@ public:
     }
 
     bool canonicalize = false;
-    Block &block = forOp.region().front();
+    Block &block = forOp.getRegion().front();
     auto yieldOp = cast<scf::YieldOp>(block.getTerminator());
 
     llvm::SmallDenseSet<Value> liveSet;
@@ -131,9 +133,9 @@ public:
       return failure();
 
     scf::ForOp newForOp = rewriter.create<scf::ForOp>(
-        forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
-        newIterArgs);
-    Block &newBlock = newForOp.region().front();
+        forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+        forOp.getStep(), newIterArgs);
+    Block &newBlock = newForOp.getRegion().front();
 
     // Replace the null placeholders with newly constructed values.
     newBlockTransferArgs[0] = newBlock.getArgument(0); // iv
@@ -149,7 +151,7 @@ public:
       }
     }
 
-    Block &oldBlock = forOp.region().front();
+    Block &oldBlock = forOp.getRegion().front();
     assert(oldBlock.getNumArguments() == newBlockTransferArgs.size() &&
            "unexpected argument size mismatch");
 

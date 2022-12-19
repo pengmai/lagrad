@@ -1,9 +1,9 @@
 #include "LAGrad/Utils.h"
 #include "LAGrad/LAGradOps.h"
-#include "mlir/Analysis/AffineAnalysis.h"
-#include "mlir/Analysis/LoopAnalysis.h"
+#include "mlir/Analysis/SliceAnalysis.h"
+#include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -20,7 +20,7 @@ bool isFloatOrFloatTensor(Type typ) {
 
 // Specialization of getSupportedReduction for scf.for ops.
 static Value SCFGetSupportedReduction(scf::ForOp forOp, unsigned pos,
-                                      AtomicRMWKind &kind) {
+                                      arith::AtomicRMWKind &kind) {
   SmallVector<Operation *> combinerOps;
   Value reducedVal =
       matchReduction(forOp.getRegionIterArgs(), pos, combinerOps);
@@ -32,13 +32,13 @@ static Value SCFGetSupportedReduction(scf::ForOp forOp, unsigned pos,
     return nullptr;
 
   Operation *combinerOp = combinerOps.back();
-  Optional<AtomicRMWKind> maybeKind =
-      TypeSwitch<Operation *, Optional<AtomicRMWKind>>(combinerOp)
-          .Case([](arith::AddFOp) { return AtomicRMWKind::addf; })
-          // .Case([](arith::MulFOp) { return AtomicRMWKind::mulf; })
-          .Case([](arith::AddIOp) { return AtomicRMWKind::addi; })
-          // .Case([](arith::MulIOp) { return AtomicRMWKind::muli; })
-          .Default([](Operation *) -> Optional<AtomicRMWKind> {
+  Optional<arith::AtomicRMWKind> maybeKind =
+      TypeSwitch<Operation *, Optional<arith::AtomicRMWKind>>(combinerOp)
+          .Case([](arith::AddFOp) { return arith::AtomicRMWKind::addf; })
+          // .Case([](arith::MulFOp) { return arith::AtomicRMWKind::mulf; })
+          .Case([](arith::AddIOp) { return arith::AtomicRMWKind::addi; })
+          // .Case([](arith::MulIOp) { return arith::AtomicRMWKind::muli; })
+          .Default([](Operation *) -> Optional<arith::AtomicRMWKind> {
             // TODO: AtomicRMW supports other kinds of reductions this is
             // currently not detecting, add those when the need arises.
             return llvm::None;
@@ -57,7 +57,7 @@ void SCFGetSupportedReductions(
     return;
   supportedReductions.reserve(numIterArgs);
   for (unsigned i = 0; i < numIterArgs; ++i) {
-    AtomicRMWKind kind;
+    arith::AtomicRMWKind kind;
     if (Value value = SCFGetSupportedReduction(forOp, i, kind))
       supportedReductions.emplace_back(LoopReduction{kind, i, value});
   }
@@ -178,7 +178,8 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
           tensorType.getShape(), tensorType.getElementType(),
           StringAttr::get(rewriter.getContext(), "onehot"));
     }
-    funcOp.insertArgument(funcOp.getNumArguments(), gradSignalType, {});
+    funcOp.insertArgument(funcOp.getNumArguments(), gradSignalType, {},
+                          funcOp.getLoc());
   }
 
   std::vector<Operation *> ops;
@@ -391,10 +392,10 @@ void collectFreeVars(Block *parentBlock, Region &region, ValueSet &out) {
 // autodiff method.
 void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter) {
   moduleOp.walk([&](CallOp callOp) {
-    if (callOp.calleeAttr().getValue().startswith("__grad") &&
+    if (callOp.getCalleeAttr().getValue().startswith("__grad") &&
         callOp.use_empty()) {
       // rewriter.eraseOp(callOp);
-      // llvm::outs() << "saw callOp " << callOp.calleeAttr().getValue()
+      // llvm::outs() << "saw callOp " << callOp.getCalleeAttr().getValue()
       //              << " with " << callOp.use_empty() << " uses\n";
     }
   });
@@ -494,8 +495,8 @@ void populateVJP(Operation *op, LAGradContext &ctx,
 
     // Collect the free variables in the then block of the if op
     llvm::SmallDenseSet<Value> freeOperands;
-    collectFreeVars(ifOp.thenBlock(), ifOp.thenRegion(), freeOperands);
-    collectFreeVars(ifOp.elseBlock(), ifOp.elseRegion(), freeOperands);
+    collectFreeVars(ifOp.thenBlock(), ifOp.getThenRegion(), freeOperands);
+    collectFreeVars(ifOp.elseBlock(), ifOp.getElseRegion(), freeOperands);
 
     for (auto freeOperand : freeOperands) {
       auto result =
@@ -592,12 +593,12 @@ void populateVJP(Operation *op, LAGradContext &ctx,
         // true branch
         auto zero = getZero(op->getLoc(), operand, rewriter);
         vjp_value = rewriter.create<SelectOp>(
-            op->getLoc(), selectOp.condition(), vjp_value, zero);
+            op->getLoc(), selectOp.getCondition(), vjp_value, zero);
       } else if (op_index == 2) {
         // false branch
         auto zero = getZero(op->getLoc(), operand, rewriter);
         vjp_value = rewriter.create<SelectOp>(
-            op->getLoc(), selectOp.condition(), zero, vjp_value);
+            op->getLoc(), selectOp.getCondition(), zero, vjp_value);
       }
     } else if (opName == "math.exp") {
       auto expOp = dyn_cast<math::ExpOp>(op);
@@ -642,10 +643,10 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       auto loc = op->getLoc();
       auto one = onesLike(ctx, loc, operand, rewriter);
       vjp_value = rewriter.create<arith::MulFOp>(
-          loc, powFOp.rhs(),
+          loc, powFOp.getRhs(),
           rewriter.create<math::PowFOp>(
-              loc, powFOp.lhs(),
-              rewriter.create<arith::SubFOp>(loc, powFOp.rhs(), one)));
+              loc, powFOp.getLhs(),
+              rewriter.create<arith::SubFOp>(loc, powFOp.getRhs(), one)));
     } else if (opName == "std.call") {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
@@ -996,14 +997,14 @@ Value reverseCallOp(CallOp op, LAGradContext &ctx, Value vjp_value,
                     size_t op_index, ConversionPatternRewriter &rewriter) {
   auto *context = op.getContext();
   std::stringstream gradFuncStream;
-  gradFuncStream << "__grad_" << op.callee().str() << "_arg" << op_index;
+  gradFuncStream << "__grad_" << op.getCallee().str() << "_arg" << op_index;
   auto gradFuncName = gradFuncStream.str();
   assert(ctx.moduleOp && "moduleOp was null");
   auto dFuncOp =
       dyn_cast_or_null<FuncOp>(ctx.moduleOp.lookupSymbol(gradFuncName));
   if (!dFuncOp) {
     auto primalFunc =
-        dyn_cast<FuncOp>(ctx.moduleOp.lookupSymbol(op.calleeAttr()));
+        dyn_cast<FuncOp>(ctx.moduleOp.lookupSymbol(op.getCalleeAttr()));
     dFuncOp = copyFunctionDeclaration(primalFunc, gradFuncName, rewriter);
 
     auto innerGradsOf = ArrayAttr::get(

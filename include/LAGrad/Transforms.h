@@ -4,7 +4,7 @@
 namespace mlir {
 namespace lagrad {
 
-void populateLAGradTransforms(OwningRewritePatternList &patterns,
+void populateLAGradTransforms(RewritePatternSet &patterns,
                               MLIRContext *ctx);
 
 } // end namespace lagrad

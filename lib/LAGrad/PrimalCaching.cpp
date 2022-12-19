@@ -1,4 +1,5 @@
 #include "LAGrad/Utils.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/raw_ostream.h"
@@ -39,8 +40,8 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
     while (parent && !canAvoidCaching(parent)) {
       induction_vars.push_back(parent.getInductionVar());
       // Assume the step sizes are 1.
-      upper_bounds.push_back(parent.upperBound());
-      lower_bounds.push_back(parent.lowerBound());
+      upper_bounds.push_back(parent.getUpperBound());
+      lower_bounds.push_back(parent.getLowerBound());
       rewriter.setInsertionPoint(parent);
       parent = parent->getParentOfType<scf::ForOp>();
     }
@@ -96,12 +97,12 @@ void populatePrimalCaches(LAGradContext &ctx, FuncOp primalFunc,
       markAsCache(view);
       ctx.debug_names[view] =
           "<write view for caching " + ctx.debug_names[tbrVal] + ">";
-      auto memref = rewriter.create<memref::BufferCastOp>(
+      auto memref = rewriter.create<bufferization::ToMemrefOp>(
           loc, MemRefType::get(rtt.getShape(), rtt.getElementType()), tbrVal);
       markAsCache(memref);
       ctx.debug_names[memref] =
           "<casted memref for writing " + ctx.debug_names[tbrVal] + ">";
-      markAsCache(rewriter.create<linalg::CopyOp>(loc, memref, view));
+      markAsCache(rewriter.create<memref::CopyOp>(loc, memref, view));
       ctx.tbrCachedVals[tbrVal] = cache;
     } else {
       auto cache = rewriter.create<memref::AllocOp>(

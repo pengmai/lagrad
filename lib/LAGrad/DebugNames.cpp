@@ -124,8 +124,8 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
 
       DEBUGpopulateRegion(&forOp.getRegion(), sourceFile, debug_names);
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
-      DEBUGpopulateRegion(&ifOp.thenRegion(), sourceFile, debug_names);
-      DEBUGpopulateRegion(&ifOp.elseRegion(), sourceFile, debug_names);
+      DEBUGpopulateRegion(&ifOp.getThenRegion(), sourceFile, debug_names);
+      DEBUGpopulateRegion(&ifOp.getElseRegion(), sourceFile, debug_names);
     } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
       if (callOp.getNumResults() > 1) {
         assert(src.find('=') != std::string::npos &&
@@ -137,7 +137,7 @@ void DEBUGpopulateRegion(Region *region, std::fstream &sourceFile,
       }
       auto moduleOp = op.getParentOfType<ModuleOp>();
       assert(moduleOp && "module op was null");
-      auto calledFunc = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+      auto calledFunc = moduleOp.lookupSymbol<FuncOp>(callOp.getCalleeAttr());
       assert(calledFunc && "failed to find called function");
       DEBUGpopulateFunc(debug_names, calledFunc);
     }

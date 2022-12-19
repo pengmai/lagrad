@@ -30,10 +30,11 @@ LAGRAD_LLVM_DYLIB = (
     / "libProfilerPass.dylib"
 )
 
-LOCAL_LIB = pathlib.Path.home() / ".local" / "lib"
+LOCAL_LIB = pathlib.Path.home() / ".local" / "LLVM14" / "lib"
 LOCAL_INCLUDE = pathlib.Path.home() / ".local" / "include"
 LAGRAD_UTILS = LOCAL_LIB / "lagrad_utils.dylib"
 MLIR_RUNNER_UTILS = LOCAL_LIB / "libmlir_runner_utils.dylib"
+MLIR_C_UTILS = LOCAL_LIB / "libmlir_c_runner_utils.dylib"
 OPENBLAS_INCLUDE = pathlib.Path.home() / ".local" / "OpenBLAS" / "include"
 OPENBLAS_OBJ = pathlib.Path.home() / ".local" / "OpenBLAS" / "lib" / "libopenblas.a"
 
@@ -53,9 +54,9 @@ class LAGradOptFlags:
         "-canonicalize",
     ]
     bufferize = [
-        "-tensor-constant-bufferize",
-        "-tensor-bufferize",
+        "-arith-bufferize",
         "-standalone-bufferize",
+        "-tensor-bufferize",
         "-linalg-bufferize",
         "-scf-bufferize",
         "-func-bufferize",
@@ -456,7 +457,7 @@ def clang_link(
     linker = GccLink("clang-12")
     linker.add_argument("-rpath", pathlib.Path.home() / ".local" / "lib")
     linker.optimize(3)
-    inputs = [str(MLIR_RUNNER_UTILS), str(LAGRAD_UTILS)]
+    inputs = [str(MLIR_RUNNER_UTILS), str(MLIR_C_UTILS), str(LAGRAD_UTILS)]
     if link_openblas:
         inputs.append(str(OPENBLAS_OBJ))
     Phase(

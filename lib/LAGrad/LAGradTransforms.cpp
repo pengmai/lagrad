@@ -308,7 +308,7 @@ LogicalResult ifJVP(scf::IfOp ifOp, LAGradContext &ctx,
   };
 
   auto augmentedIf = rewriter.create<scf::IfOp>(
-      loc, resultTypes, ifOp.condition(), builderFunc(*ifOp.thenBlock()),
+      loc, resultTypes, ifOp.getCondition(), builderFunc(*ifOp.thenBlock()),
       builderFunc(*ifOp.elseBlock()));
   SmallVector<Value> replacedResults{replacedPrimalMapping.size()};
   for (auto mapping : replacedPrimalMapping) {
@@ -352,8 +352,8 @@ LogicalResult forLoopJVP(scf::ForOp forOp, LAGradContext &ctx,
   BlockAndValueMapping map;
   bool augmentFailed = false;
   auto augmentedFor = rewriter.create<scf::ForOp>(
-      forOp.getLoc(), forOp.lowerBound(), forOp.upperBound(), forOp.step(),
-      iterArgInits,
+      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+      forOp.getStep(), iterArgInits,
       [&](OpBuilder &builder, Location loc, Value iv, ValueRange regionArgs) {
         PatternRewriter::InsertionGuard guard(rewriter);
         auto startOfBlock = builder.saveInsertionPoint();
@@ -459,7 +459,7 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
   if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
     if (isFloatOrFloatTensor(constOp.getType())) {
       jvp = getZero(constOp.getLoc(), constOp.getResult(), rewriter);
-    } else if (auto attr = constOp.value().dyn_cast<FloatAttr>()) {
+    } else if (auto attr = constOp.getValue().dyn_cast<FloatAttr>()) {
       // constOp.getType().getIntOrFloatBitWidth()
       jvp = rewriter.create<arith::ConstantOp>(loc,
                                                rewriter.getF64FloatAttr(0.0));
@@ -467,44 +467,44 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
       return success();
     }
   } else if (auto addfOp = dyn_cast<arith::AddFOp>(op)) {
-    if (!containsE(addfOp.lhs())) {
-      jvp = lookupE(addfOp.rhs());
-    } else if (!containsE(addfOp.rhs())) {
-      jvp = lookupE(addfOp.lhs());
+    if (!containsE(addfOp.getLhs())) {
+      jvp = lookupE(addfOp.getRhs());
+    } else if (!containsE(addfOp.getRhs())) {
+      jvp = lookupE(addfOp.getLhs());
     } else {
-      jvp = rewriter.create<arith::AddFOp>(loc, lookupE(addfOp.lhs()),
-                                           lookupE(addfOp.rhs()));
+      jvp = rewriter.create<arith::AddFOp>(loc, lookupE(addfOp.getLhs()),
+                                           lookupE(addfOp.getRhs()));
     }
   } else if (auto subfOp = dyn_cast<arith::SubFOp>(op)) {
-    jvp = rewriter.create<arith::SubFOp>(loc, lookupE(subfOp.lhs()),
-                                         lookupE(subfOp.rhs()));
+    jvp = rewriter.create<arith::SubFOp>(loc, lookupE(subfOp.getLhs()),
+                                         lookupE(subfOp.getRhs()));
   } else if (auto mulfOp = dyn_cast<arith::MulFOp>(op)) {
-    if (!containsE(mulfOp.lhs())) {
-      jvp = rewriter.create<arith::MulFOp>(loc, mulfOp.lhs(),
-                                           lookupE(mulfOp.rhs()));
-    } else if (!containsE(mulfOp.rhs())) {
-      jvp = rewriter.create<arith::MulFOp>(loc, mulfOp.rhs(),
-                                           lookupE(mulfOp.lhs()));
+    if (!containsE(mulfOp.getLhs())) {
+      jvp = rewriter.create<arith::MulFOp>(loc, mulfOp.getLhs(),
+                                           lookupE(mulfOp.getRhs()));
+    } else if (!containsE(mulfOp.getRhs())) {
+      jvp = rewriter.create<arith::MulFOp>(loc, mulfOp.getRhs(),
+                                           lookupE(mulfOp.getLhs()));
     } else {
       jvp = rewriter.create<arith::AddFOp>(
           loc,
-          rewriter.create<arith::MulFOp>(loc, mulfOp.rhs(),
-                                         lookupE(mulfOp.lhs())),
-          rewriter.create<arith::MulFOp>(loc, mulfOp.lhs(),
-                                         lookupE(mulfOp.rhs())));
+          rewriter.create<arith::MulFOp>(loc, mulfOp.getRhs(),
+                                         lookupE(mulfOp.getLhs())),
+          rewriter.create<arith::MulFOp>(loc, mulfOp.getLhs(),
+                                         lookupE(mulfOp.getRhs())));
     }
   } else if (auto negfOp = dyn_cast<arith::NegFOp>(op)) {
-    jvp = rewriter.create<arith::NegFOp>(loc, lookupE(negfOp.operand()));
+    jvp = rewriter.create<arith::NegFOp>(loc, lookupE(negfOp.getOperand()));
   } else if (auto divfOp = dyn_cast<arith::DivFOp>(op)) {
-    Value lhsDual = rewriter.create<arith::DivFOp>(loc, lookupE(divfOp.lhs()),
-                                                   divfOp.rhs());
+    Value lhsDual = rewriter.create<arith::DivFOp>(
+        loc, lookupE(divfOp.getLhs()), divfOp.getRhs());
 
     // RHS
-    jvp = rewriter.create<arith::MulFOp>(op->getLoc(), lookupE(divfOp.rhs()),
-                                         divfOp.lhs());
+    jvp = rewriter.create<arith::MulFOp>(op->getLoc(), lookupE(divfOp.getRhs()),
+                                         divfOp.getLhs());
     jvp = rewriter.create<arith::NegFOp>(op->getLoc(), jvp);
-    Value denom = rewriter.create<arith::MulFOp>(op->getLoc(), divfOp.rhs(),
-                                                 divfOp.rhs());
+    Value denom = rewriter.create<arith::MulFOp>(op->getLoc(), divfOp.getRhs(),
+                                                 divfOp.getRhs());
     Value rhsDual = rewriter.create<arith::DivFOp>(op->getLoc(), jvp, denom);
 
     jvp = rewriter.create<arith::AddFOp>(loc, lhsDual, rhsDual);
@@ -580,7 +580,7 @@ static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
     BlockArgument arg = pair.value();
     if (activeArgs.contains(pair.index())) {
       ++idx;
-      tangentFunc.insertArgument(idx, arg.getType(), {});
+      tangentFunc.insertArgument(idx, arg.getType(), {}, arg.getLoc());
       env.map(arg, tangentFunc.getArgument(idx));
     } else if (isFloatOrFloatTensor(arg.getType())) {
       // TODO: modify populateJVP to not need these dummy zero values.
@@ -663,7 +663,7 @@ private:
 };
 } // namespace
 
-void mlir::lagrad::populateLAGradTransforms(OwningRewritePatternList &patterns,
+void mlir::lagrad::populateLAGradTransforms(RewritePatternSet &patterns,
                                             MLIRContext *ctx) {
   patterns.add<ForwardModeAD>(ctx);
 }

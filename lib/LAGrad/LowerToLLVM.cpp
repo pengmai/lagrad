@@ -236,7 +236,7 @@ void StandaloneToLLVMLoweringPass::runOnOperation() {
 
   LLVMTypeConverter typeConverter(&getContext());
 
-  OwningRewritePatternList patterns(&getContext());
+  RewritePatternSet patterns(&getContext());
   populateLoopToStdConversionPatterns(patterns);
   populateMemRefToLLVMConversionPatterns(typeConverter, patterns);
   arith::populateArithmeticToLLVMConversionPatterns(typeConverter, patterns);

@@ -67,7 +67,7 @@ void runTopDownDFS(SmallVector<Value> &frontier, ValueSet &out) {
         } else if (auto callOp = dyn_cast_or_null<CallOp>(user)) {
           auto moduleOp = user->getParentOfType<ModuleOp>();
           assert(moduleOp && "moduleOp was null");
-          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.getCalleeAttr());
           assert(callee && "callee was null");
           // This will overestimate activity in the case that a function
           // argument isn't active in the callee
@@ -100,7 +100,7 @@ void runBottomUpDFS(SmallVector<Value> &frontier, ValueSet &out) {
         if (auto callOp = dyn_cast_or_null<CallOp>(definingOp)) {
           auto moduleOp = definingOp->getParentOfType<ModuleOp>();
           assert(moduleOp && "moduleOp was null");
-          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr());
+          auto callee = moduleOp.lookupSymbol<FuncOp>(callOp.getCalleeAttr());
           assert(callee && "callee was null");
           assert(callee.getBody().hasOneBlock() &&
                  "expected callee to have one block");
@@ -231,38 +231,38 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
   for (auto &op : region.getOps()) {
     if (auto addOp = dyn_cast_or_null<arith::AddFOp>(&op)) {
       ValueSet addAdjU;
-      setUnion(addAdjU, adjU[addOp.lhs()]);
-      setUnion(addAdjU, adjU[addOp.rhs()]);
+      setUnion(addAdjU, adjU[addOp.getLhs()]);
+      setUnion(addAdjU, adjU[addOp.getRhs()]);
       adjU[addOp.getResult()] = addAdjU;
     } else if (auto subOp = dyn_cast_or_null<arith::SubFOp>(&op)) {
       ValueSet subAdjU;
-      setUnion(subAdjU, adjU[subOp.lhs()]);
-      setUnion(subAdjU, adjU[subOp.rhs()]);
+      setUnion(subAdjU, adjU[subOp.getLhs()]);
+      setUnion(subAdjU, adjU[subOp.getRhs()]);
       adjU[subOp.getResult()] = subAdjU;
     } else if (auto negOp = dyn_cast_or_null<arith::NegFOp>(&op)) {
       ValueSet negAdjU;
-      setUnion(negAdjU, adjU[negOp.operand()]);
+      setUnion(negAdjU, adjU[negOp.getOperand()]);
       adjU[negOp.getResult()] = negAdjU;
     } else if (auto mulOp = dyn_cast_or_null<arith::MulFOp>(&op)) {
       ValueSet mulAdjU;
-      if (ctx.activeValues.contains(mulOp.lhs())) {
-        mulAdjU.insert(mulOp.rhs());
-        setUnion(mulAdjU, adjU[mulOp.lhs()]);
+      if (ctx.activeValues.contains(mulOp.getLhs())) {
+        mulAdjU.insert(mulOp.getRhs());
+        setUnion(mulAdjU, adjU[mulOp.getLhs()]);
       }
-      if (ctx.activeValues.contains(mulOp.rhs())) {
-        mulAdjU.insert(mulOp.lhs());
-        setUnion(mulAdjU, adjU[mulOp.rhs()]);
+      if (ctx.activeValues.contains(mulOp.getRhs())) {
+        mulAdjU.insert(mulOp.getLhs());
+        setUnion(mulAdjU, adjU[mulOp.getRhs()]);
       }
       adjU[mulOp.getResult()] = mulAdjU;
     } else if (auto divOp = dyn_cast_or_null<arith::DivFOp>(&op)) {
       ValueSet divAdjU;
-      if (ctx.activeValues.contains(divOp.lhs())) {
-        divAdjU.insert(divOp.rhs());
-        setUnion(divAdjU, adjU[divOp.lhs()]);
+      if (ctx.activeValues.contains(divOp.getLhs())) {
+        divAdjU.insert(divOp.getRhs());
+        setUnion(divAdjU, adjU[divOp.getLhs()]);
       }
-      if (ctx.activeValues.contains(divOp.rhs())) {
-        divAdjU.insert(divOp.lhs());
-        setUnion(divAdjU, adjU[divOp.rhs()]);
+      if (ctx.activeValues.contains(divOp.getRhs())) {
+        divAdjU.insert(divOp.getLhs());
+        setUnion(divAdjU, adjU[divOp.getRhs()]);
       }
       adjU[divOp.getResult()] = divAdjU;
     } else if (auto logOp = dyn_cast_or_null<math::LogOp>(&op)) {
@@ -284,7 +284,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
       adjU[tanhOp.getResult()] = tanhAdjU;
     } else if (auto selectOp = dyn_cast<SelectOp>(&op)) {
       ValueSet selectAdjU;
-      selectAdjU.insert(selectOp.condition());
+      selectAdjU.insert(selectOp.getCondition());
       adjU[selectOp.getResult()] = selectAdjU;
     } else if (auto genericOp = dyn_cast_or_null<linalg::GenericOp>(&op)) {
       ValueSet genericAdjU;
@@ -376,8 +376,8 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto ifOp = dyn_cast_or_null<scf::IfOp>(&op)) {
       if (ifOp.getNumResults() > 0) {
         ValueSet ifAdjU;
-        populateAdjointUseSets(ctx, ifOp.thenRegion(), adjU);
-        populateAdjointUseSets(ctx, ifOp.elseRegion(), adjU);
+        populateAdjointUseSets(ctx, ifOp.getThenRegion(), adjU);
+        populateAdjointUseSets(ctx, ifOp.getElseRegion(), adjU);
         for (auto operand : ifOp.thenBlock()->getTerminator()->getOperands()) {
           setUnion(ifAdjU, adjU[operand]);
         }
@@ -402,7 +402,7 @@ void populateAdjointUseSets(LAGradContext &ctx, Region &region,
     } else if (auto callOp = dyn_cast_or_null<CallOp>(&op)) {
       ValueSet callAdjU;
       auto &callRegion =
-          ctx.moduleOp.lookupSymbol<FuncOp>(callOp.calleeAttr()).getBody();
+          ctx.moduleOp.lookupSymbol<FuncOp>(callOp.getCalleeAttr()).getBody();
       populateAdjointUseSets(ctx, callRegion, adjU);
       if (callRegion.hasOneBlock()) {
         for (auto returnOperand :

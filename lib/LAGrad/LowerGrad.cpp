@@ -4,7 +4,8 @@
 #include "LAGrad/Transforms.h"
 #include "LAGrad/Utils.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
@@ -73,6 +74,7 @@ struct GradTarget : public ConversionTarget {
     addLegalDialect<mlir::arith::ArithmeticDialect>();
     addLegalDialect<mlir::math::MathDialect>();
     addLegalDialect<mlir::memref::MemRefDialect>();
+    addLegalDialect<bufferization::BufferizationDialect>();
     addLegalDialect<tensor::TensorDialect>();
     addLegalDialect<mlir::scf::SCFDialect>();
     addLegalDialect<linalg::LinalgDialect>();
@@ -87,7 +89,8 @@ namespace {
 struct GradConversionPass
     : public PassWrapper<GradConversionPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<linalg::LinalgDialect, memref::MemRefDialect>();
+    registry.insert<linalg::LinalgDialect, memref::MemRefDialect,
+                    bufferization::BufferizationDialect>();
   }
   StringRef getArgument() const override { return "take-grads"; }
   StringRef getDescription() const override {
@@ -101,7 +104,7 @@ void GradConversionPass::runOnOperation() {
   GradTarget target(getContext());
   target.addLegalOp<ModuleOp>();
 
-  OwningRewritePatternList patterns(&getContext());
+  RewritePatternSet patterns(&getContext());
   patterns.insert<GradOpLowering>(&getContext());
   lagrad::populateLAGradTransforms(patterns, &getContext());
 

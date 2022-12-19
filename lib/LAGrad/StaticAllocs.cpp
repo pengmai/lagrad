@@ -36,18 +36,18 @@ public:
       return failure();
     }
 
-    auto elementType = ptrToIntOp.arg()
+    auto elementType = ptrToIntOp.getArg()
                            .getType()
                            .dyn_cast<LLVM::LLVMPointerType>()
                            .getElementType();
 
     size_t allocSize = elementType.getIntOrFloatBitWidth() / 8;
-    for (auto indexVal : gepOp.indices()) {
+    for (auto indexVal : gepOp.getIndices()) {
       auto indexConstOp =
           dyn_cast_or_null<LLVM::ConstantOp>(indexVal.getDefiningOp());
       assert(indexConstOp &&
              "Expected index value to be defined by a constant op");
-      allocSize *= indexConstOp.value()
+      allocSize *= indexConstOp.getValue()
                        .dyn_cast<IntegerAttr>()
                        .getValue()
                        .getSExtValue();
@@ -68,7 +68,7 @@ public:
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
     auto callOp = dyn_cast_or_null<LLVM::CallOp>(op);
-    if (!callOp || callOp.calleeAttr().getValue() != "malloc") {
+    if (!callOp || callOp.getCalleeAttr().getValue() != "malloc") {
       return failure();
     }
 
@@ -87,25 +87,25 @@ public:
       return failure();
     }
 
-    auto elementType = ptrToIntOp.arg()
+    auto elementType = ptrToIntOp.getArg()
                            .getType()
                            .dyn_cast<LLVM::LLVMPointerType>()
                            .getElementType();
 
     size_t allocSize = elementType.getIntOrFloatBitWidth() / 8;
-    if (!llvm::all_of(gepOp.indices(), [](Value indexVal) {
+    if (!llvm::all_of(gepOp.getIndices(), [](Value indexVal) {
           return isa<LLVM::ConstantOp>(indexVal.getDefiningOp());
         })) {
       // Enzyme appears to handle dynamic shapes okay.
       return failure();
     }
 
-    for (auto indexVal : gepOp.indices()) {
+    for (auto indexVal : gepOp.getIndices()) {
       auto indexConstOp =
           dyn_cast_or_null<LLVM::ConstantOp>(indexVal.getDefiningOp());
       assert(indexConstOp &&
              "Expected index value to be defined by a constant op");
-      allocSize *= indexConstOp.value()
+      allocSize *= indexConstOp.getValue()
                        .dyn_cast<IntegerAttr>()
                        .getValue()
                        .getSExtValue();
