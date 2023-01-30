@@ -36,7 +36,7 @@ SmallVector<Operation *> savePrimalOps(Region *region) {
 static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
                                      ArrayAttr activeArgsAttr,
                                      ConversionPatternRewriter &rewriter,
-                                     bool includePrimal);
+                                     bool includePrimal, bool sparseSeed);
 
 // TODO: Organize forward mode functions better.
 LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
@@ -51,20 +51,50 @@ void updateActiveValues(LAGradContext &ctx, ValueRange from, ValueRange to) {
   }
 }
 
+void updateActiveValues(LAGradContext &ctx, Operation *from, Operation *to,
+                        BlockAndValueMapping &map) {
+  updateActiveValues(ctx, from->getResults(), to->getResults());
+
+  from->walk([&](Operation *origBodyOp) {
+    for (Value result : origBodyOp->getResults()) {
+      if (map.contains(result) && ctx.activeValues.contains(result)) {
+        ctx.activeValues.insert(map.lookup(result));
+      }
+    }
+  });
+}
+
 LogicalResult callJVP(CallOp op, LAGradContext &ctx, BlockAndValueMapping &env,
                       ConversionPatternRewriter &rewriter) {
-  auto getTangentFunc = [&]() {
+  auto getTangentFunc = [&]() -> FailureOr<FuncOp> {
     std::string tangentFuncName = ("__tangent_" + op.getCallee()).str();
     if (auto existingFunc = ctx.moduleOp.lookupSymbol<FuncOp>(tangentFuncName))
       return existingFunc;
 
     auto originalFuncOp = ctx.moduleOp.lookupSymbol<FuncOp>(op.getCallee());
-    return copyFunctionDeclaration(originalFuncOp, tangentFuncName, rewriter);
+    SmallVector<int64_t> tangentsOf;
+    for (auto operand : llvm::enumerate(op.getArgOperands())) {
+      if (ctx.activeValues.contains(operand.value()))
+        tangentsOf.push_back(operand.index());
+    }
+    FuncOp tangentFunc =
+        copyFunctionDeclaration(originalFuncOp, tangentFuncName, rewriter);
+
+    runActivityAnalysis(ctx, tangentFunc, rewriter.getI64ArrayAttr(tangentsOf));
+    if (failed(generateTangent(tangentFunc, ctx,
+                               rewriter.getI64ArrayAttr(tangentsOf), rewriter,
+                               /*includePrimal=*/true, /*sparseSeed=*/false))) {
+      return failure();
+    }
+    return tangentFunc;
   };
 
-  FuncOp tangentFunc = getTangentFunc();
+  auto tangentFuncResult = getTangentFunc();
+  if (failed(tangentFuncResult)) {
+    return failure();
+  }
+  FuncOp tangentFunc = tangentFuncResult.getValue();
   SmallVector<Value> newOperands;
-  SmallVector<int64_t> tangentsOf;
   DenseMap<unsigned, unsigned> dualMapping;
   SmallVector<std::pair<unsigned, unsigned>> remappedValues;
 
@@ -73,19 +103,11 @@ LogicalResult callJVP(CallOp op, LAGradContext &ctx, BlockAndValueMapping &env,
   for (auto operand : llvm::enumerate(op.getArgOperands())) {
     newOperands.push_back(operand.value());
     if (ctx.activeValues.contains(operand.value())) {
-      tangentsOf.push_back(operand.index());
       newOperands.push_back(lookupE(operand.value()));
       idx++;
     }
     idx++;
     origIdx++;
-  }
-
-  runActivityAnalysis(ctx, tangentFunc, rewriter.getI64ArrayAttr(tangentsOf));
-  if (failed(generateTangent(tangentFunc, ctx,
-                             rewriter.getI64ArrayAttr(tangentsOf), rewriter,
-                             /*includePrimal=*/true))) {
-    return failure();
   }
 
   auto dualCall =
@@ -375,7 +397,7 @@ LogicalResult forLoopJVP(scf::ForOp forOp, LAGradContext &ctx,
           Operation *clonedOp = builder.clone(origOp, map);
           bodyOps.push_back(clonedOp);
           map.map(origOp.getResults(), clonedOp->getResults());
-          updateActiveValues(ctx, origOp.getResults(), clonedOp->getResults());
+          updateActiveValues(ctx, &origOp, clonedOp, map);
         }
 
         // Generate JVPs.
@@ -437,6 +459,9 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
         rewriter.create<linalg::FillOp>(loc, fillOp.value(), fillOp.output());
     env.map(fillOp.getResults(), dualFillOp.getResults());
     return success();
+  } else if (auto sitofpOp = dyn_cast<arith::SIToFPOp>(op)) {
+    env.map(sitofpOp.getResult(), getZero(loc, sitofpOp.getResult(), rewriter));
+    return success();
   }
   if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
     return ifJVP(ifOp, ctx, env, rewriter);
@@ -466,6 +491,15 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
     } else {
       return success();
     }
+  } else if (auto selectOp = dyn_cast<SelectOp>(op)) {
+    Value trueDual = containsE(selectOp.getTrueValue())
+                         ? lookupE(selectOp.getTrueValue())
+                         : getZero(loc, selectOp.getTrueValue(), rewriter);
+    Value falseDual = containsE(selectOp.getFalseValue())
+                          ? lookupE(selectOp.getFalseValue())
+                          : getZero(loc, selectOp.getFalseValue(), rewriter);
+    jvp = rewriter.create<SelectOp>(loc, selectOp.getCondition(), trueDual,
+                                    falseDual);
   } else if (auto addfOp = dyn_cast<arith::AddFOp>(op)) {
     if (!containsE(addfOp.lhs())) {
       jvp = lookupE(addfOp.rhs());
@@ -523,6 +557,23 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
         loc, lookupE(cosOp.getOperand()),
         rewriter.create<arith::NegFOp>(
             loc, rewriter.create<math::SinOp>(loc, cosOp.getOperand())));
+  } else if (auto expOp = dyn_cast<math::ExpOp>(op)) {
+    jvp = rewriter.create<arith::MulFOp>(
+        loc, lookupE(expOp.getOperand()),
+        rewriter.create<math::ExpOp>(loc, expOp.getOperand()));
+  } else if (auto logOp = dyn_cast<math::LogOp>(op)) {
+    jvp = rewriter.create<arith::DivFOp>(loc, lookupE(logOp.getOperand()),
+                                         logOp.getOperand());
+  } else if (auto tanhOp = dyn_cast<math::TanhOp>(op)) {
+    auto exp = rewriter.create<math::ExpOp>(loc, tanhOp.getOperand());
+    auto negexp = rewriter.create<math::ExpOp>(
+        loc, rewriter.create<arith::NegFOp>(loc, tanhOp.getOperand()));
+    auto numerator = rewriter.create<arith::AddFOp>(loc, exp, negexp);
+    auto half = constLike(loc, tanhOp.getOperand(), 0.5, rewriter);
+    auto cosh = rewriter.create<arith::MulFOp>(loc, numerator, half);
+    auto coshsquared = rewriter.create<arith::MulFOp>(loc, cosh, cosh);
+    jvp = rewriter.create<arith::DivFOp>(loc, lookupE(tanhOp.getOperand()),
+                                         coshsquared);
   } else if (auto insertOp = dyn_cast<tensor::InsertOp>(op)) {
     jvp = rewriter.create<tensor::InsertOp>(loc, lookupE(insertOp.scalar()),
                                             lookupE(insertOp.dest()),
@@ -553,7 +604,7 @@ LogicalResult populateJVP(Operation *op, LAGradContext &ctx,
 static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
                                      ArrayAttr activeArgsAttr,
                                      ConversionPatternRewriter &rewriter,
-                                     bool includePrimal) {
+                                     bool includePrimal, bool sparseSeed) {
   PatternRewriter::InsertionGuard guard(rewriter);
   Region *region = tangentFunc.getCallableRegion();
   if (!region) {
@@ -580,7 +631,17 @@ static LogicalResult generateTangent(FuncOp tangentFunc, LAGradContext &ctx,
     BlockArgument arg = pair.value();
     if (activeArgs.contains(pair.index())) {
       ++idx;
-      tangentFunc.insertArgument(idx, arg.getType(), {});
+      Type argType = arg.getType();
+      if (sparseSeed) {
+        assert(activeArgs.size() == 1 &&
+               "Expected one active argument when 'sparse' attribute is set");
+        auto tensorType = argType.cast<RankedTensorType>();
+        argType = RankedTensorType::get(tensorType.getShape(),
+                                        tensorType.getElementType(),
+                                        rewriter.getStringAttr("onehot"));
+        ctx.sparseValues.insert(arg);
+      }
+      tangentFunc.insertArgument(idx, argType, {});
       env.map(arg, tangentFunc.getArgument(idx));
     } else if (isFloatOrFloatTensor(arg.getType())) {
       // TODO: modify populateJVP to not need these dummy zero values.
@@ -648,6 +709,7 @@ private:
         copyFunctionDeclaration(originalFuncOp, tangentFuncName, rewriter);
     auto tangentOf = op->getAttrOfType<ArrayAttr>("of");
     bool includePrimal = op->hasAttrOfType<UnitAttr>("include_primal");
+    bool sparseSeed = op->hasAttrOfType<UnitAttr>("sparse");
     if (!tangentOf) {
       tangentOf = rewriter.getArrayAttr({});
     }
@@ -655,7 +717,7 @@ private:
     DEBUGpopulateFunc(lagradctx.debug_names, tangentFunc);
     runActivityAnalysis(lagradctx, tangentFunc, tangentOf);
     if (failed(generateTangent(tangentFunc, lagradctx, tangentOf, rewriter,
-                               includePrimal))) {
+                               includePrimal, sparseSeed))) {
       return nullptr;
     }
     return tangentFunc;
