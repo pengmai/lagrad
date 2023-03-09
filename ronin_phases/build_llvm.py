@@ -9,16 +9,9 @@ import subprocess
 from typing import Literal
 
 ENZYME_DYLIB = pathlib.Path.home() / ".local" / "LLVM12" / "lib" / "LLVMEnzyme-12.dylib"
-LAGRAD_BINARY = str(pathlib.Path(__file__).parents[1] / "build" / "bin" / "lagrad-opt")
-
-LAGRAD_LLVM_DYLIB = (
-    pathlib.Path.home()
-    / "Research"
-    / "profile-pass"
-    / "build"
-    / "profiler"
-    / "libProfilerPass.dylib"
-)
+LAGRAD_BUILD = pathlib.Path(__file__).parents[1] / "build"
+LAGRAD_BINARY = str(LAGRAD_BUILD / "bin" / "lagrad-opt")
+LAGRAD_LLVM_DYLIB = LAGRAD_BUILD / "lib" / "LLFastMath.dylib"
 
 LOCAL_LIB = pathlib.Path.home() / ".local" / "lib"
 LOCAL_INCLUDE = pathlib.Path.home() / ".local" / "include"
