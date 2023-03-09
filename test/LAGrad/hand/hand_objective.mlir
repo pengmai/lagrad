@@ -407,6 +407,41 @@ func @mlir_hand_objective(
   return %err : tensor<?x3xf64>
 }
 
+func @lagrad_tangent_hand_objective(
+  %theta : tensor<26xf64>,
+  %dtheta : tensor<26xf64>,
+  %parents: tensor<22xi32>,
+  %base_relatives: tensor<22x4x4xf64>,
+  %inverse_base_absolutes: tensor<22x4x4xf64>,
+  %base_positions: tensor<544x4xf64>,
+  %weights: tensor<544x22xf64>,
+  %correspondences: tensor<?xi32>,
+  %points : tensor<?x3xf64>
+) -> tensor<?x3xf64> {
+  %derr = lagrad.tangent @mlir_hand_objective(
+    %theta,
+    %dtheta,
+    %parents,
+    %base_relatives,
+    %inverse_base_absolutes,
+    %base_positions,
+    %weights,
+    %correspondences,
+    %points
+  ) {of = [0]} : (
+    tensor<26xf64>,
+    tensor<26xf64>,
+    tensor<22xi32>,
+    tensor<22x4x4xf64>,
+    tensor<22x4x4xf64>,
+    tensor<544x4xf64>,
+    tensor<544x22xf64>,
+    tensor<?xi32>,
+    tensor<?x3xf64>
+  ) -> tensor<?x3xf64>
+  return %derr : tensor<?x3xf64>
+}
+
 func @lagrad_hand_objective(
   %theta : tensor<26xf64>,
   %parents: tensor<22xi32>,

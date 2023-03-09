@@ -45,6 +45,11 @@ func @mto_pose_params(%theta: tensor<26xf64>) -> tensor<25x3xf64> {
   return %pp_2#0 : tensor<25x3xf64>
 }
 
+func @lagrad_tangent_to_pose_params(%theta: tensor<26xf64>, %dtheta: tensor<26xf64>) -> (tensor<25x3xf64>, tensor<25x3xf64>) {
+  %res:2 = lagrad.tangent @mto_pose_params(%theta, %dtheta) {include_primal} : (tensor<26xf64>, tensor<26xf64>) -> (tensor<25x3xf64>, tensor<25x3xf64>)
+  return %res#0, %res#1 : tensor<25x3xf64>, tensor<25x3xf64>
+}
+
 func @lagrad_to_pose_params(%theta: tensor<26xf64>) -> tensor<26xf64> {
   %res = lagrad.grad @mto_pose_params(%theta) : (tensor<26xf64>) -> tensor<26xf64>
   return %res : tensor<26xf64>
