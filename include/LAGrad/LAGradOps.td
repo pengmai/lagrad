@@ -61,7 +61,6 @@ def LAGrad_TangentOp : LAGrad_Op<"tangent", [
     }];
 }
 
-// TODO: Look into interfaces to automate the verification
 def LAGrad_PackOp : LAGrad_Op<"pack", [NoSideEffect]> {
     let summary = "convert fully materialized triangular tensor to packed";
     let description = [{

@@ -19,6 +19,10 @@ public:
   ValueSet effectivelyUsed;
   ValueSet toBeRecorded;
   DenseMap<Value, Value> tbrCachedVals;
+
+  // A hack for forward mode to track sparse values at the type level when
+  // differentiating across function boundaries.
+  ValueSet sparseValues;
 };
 
 bool isFloatOrFloatTensor(Type typ);
@@ -67,8 +71,8 @@ FuncOp copyFunctionDeclaration(FuncOp funcOp, llvm::StringRef funcName,
 
 FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
                              ArrayAttr gradientsOf,
-                             ConversionPatternRewriter &rewriter,
-                             bool topLevel, bool onehotSparse);
+                             ConversionPatternRewriter &rewriter, bool topLevel,
+                             bool onehotSparse);
 
 Value reverseGenericOp(linalg::GenericOp op, LAGradContext &ctx, Value operand,
                        Value vjp_value, int op_index, Value output,

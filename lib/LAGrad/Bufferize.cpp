@@ -418,8 +418,13 @@ public:
   }
 };
 
-struct StandaloneBufferizePass
-    : public PassWrapper<StandaloneBufferizePass, OperationPass<ModuleOp>> {
+struct StandaloneBufferizePass : public OperationPass<ModuleOp> {
+  StandaloneBufferizePass()
+      : ::mlir::OperationPass<ModuleOp>(
+            ::mlir::TypeID::get<StandaloneBufferizePass>()) {}
+  StandaloneBufferizePass(const StandaloneBufferizePass &other)
+      : ::mlir::OperationPass<ModuleOp>(other) {}
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<memref::MemRefDialect, linalg::LinalgDialect>();
   }
@@ -428,12 +433,26 @@ struct StandaloneBufferizePass
     return "Bufferize tensor ops required by the standalone dialect that "
            "aren't bufferized elsewhere.";
   }
+
+  /// Returns the derived pass name.
+  StringRef getName() const override {
+    return llvm::getTypeName<StandaloneBufferizePass>();
+  }
+
+  /// A clone method to create a copy of this pass.
+  std::unique_ptr<Pass> clonePass() const override {
+    return std::make_unique<StandaloneBufferizePass>(
+        *static_cast<const StandaloneBufferizePass *>(this));
+  }
+
   void runOnOperation() final {
     auto *context = &getContext();
     BufferizeTypeConverter typeConverter;
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
     auto &ieAnalysis = getAnalysis<InsertExtractAnalysis>();
+    if (disableIEAnalysis)
+      ieAnalysis.disableAnalysis();
 
     target.addLegalDialect<memref::MemRefDialect>();
     target.addDynamicallyLegalDialect<arith::ArithmeticDialect,
@@ -475,6 +494,11 @@ struct StandaloneBufferizePass
       signalPassFailure();
     }
   };
+
+protected:
+  Pass::Option<bool> disableIEAnalysis{
+      *this, "disable-ie", llvm::cl::desc("Disables Insert-Extract Analysis"),
+      llvm::cl::init(false)};
 };
 } // namespace
 

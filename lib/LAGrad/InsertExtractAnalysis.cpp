@@ -6,13 +6,7 @@
 #include "mlir/IR/Dominance.h"
 
 namespace mlir {
-
-constexpr bool disable_ie_analysis = false;
 InsertExtractAnalysis::InsertExtractAnalysis(Operation *op) {
-  if (disable_ie_analysis) {
-    return;
-  }
-
   DominanceInfo dom;
   op->walk([&](tensor::ExtractSliceOp op) {
     auto maybeInsertSliceOp = getMatchingInsertSlice(op, dom);
@@ -32,13 +26,18 @@ InsertExtractAnalysis::InsertExtractAnalysis(Operation *op) {
   });
 }
 
+void InsertExtractAnalysis::disableAnalysis() { disabled = true; }
 bool InsertExtractAnalysis::isPairedExtractSlice(
     tensor::ExtractSliceOp op) const {
+  if (disabled)
+    return false;
   return extract_to_insert.count(op) > 0;
 }
 
 bool InsertExtractAnalysis::isPairedInsertSlice(
     tensor::InsertSliceOp op) const {
+  if (disabled)
+    return false;
   return matchingInserts.contains(op);
 }
 
@@ -49,12 +48,16 @@ InsertExtractAnalysis::getPairedInsertSlice(tensor::ExtractSliceOp op) const {
 
 bool InsertExtractAnalysis::isLinalgMarkedForBufferization(
     Operation *op) const {
+  if (disabled)
+    return false;
   return linalgInPlaceOps.count(op) > 0;
 }
 
 Optional<tensor::InsertSliceOp>
 InsertExtractAnalysis::getMatchingInsertSlice(tensor::ExtractSliceOp op,
                                               const DominanceInfo &dom) const {
+  if (disabled)
+    return llvm::None;
   // The source of the extract slice should have exactly one use besides the
   // insert slice op.
   size_t domUseCount = 0;

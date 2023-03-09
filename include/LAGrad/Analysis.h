@@ -9,6 +9,8 @@ namespace mlir {
 struct InsertExtractAnalysis {
   InsertExtractAnalysis(Operation *op);
 
+  void disableAnalysis();
+
   bool isPairedExtractSlice(tensor::ExtractSliceOp op) const;
 
   bool isPairedInsertSlice(tensor::InsertSliceOp op) const;
@@ -18,6 +20,7 @@ struct InsertExtractAnalysis {
   bool isLinalgMarkedForBufferization(Operation *op) const;
 
 private:
+  bool disabled;
   DenseMap<Operation *, Operation *> extract_to_insert;
   DenseSet<Operation *> matchingInserts;
   DenseSet<Operation *> linalgInPlaceOps;

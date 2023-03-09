@@ -93,12 +93,10 @@ void eraseTriangularEncoding(Value operand, PatternRewriter &rewriter) {
       if (parent && dyn_cast_or_null<FuncOp>(parent)) {
         auto funcOp = dyn_cast<FuncOp>(parent);
         SmallVector<Type> argumentTypes;
-        int arg_index = -1;
         int index = 0;
         for (auto arg : funcOp.getArguments()) {
           if (arg == operand) {
             argumentTypes.push_back(operand.getType());
-            arg_index = index;
           } else {
             argumentTypes.push_back(arg.getType());
           }

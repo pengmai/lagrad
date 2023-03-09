@@ -29,7 +29,7 @@ inline raw_ostream &operator<<(raw_ostream &os, HotSparsityType type) {
   return os;
 }
 
-SparsePropagation::SparsePropagation(Operation *op, AnalysisManager &am) {
+SparsePropagation::SparsePropagation(Operation *op, AnalysisManager &manager) {
   // op->walk([&](FuncOp funcOp) { DEBUGpopulateFunc(debug_names, funcOp); });
   op->walk([&](FuncOp funcOp) {
     for (BlockArgument arg : funcOp.getArguments()) {
@@ -59,10 +59,10 @@ SparsePropagation::SparsePropagation(Operation *op, AnalysisManager &am) {
       }
     }
   });
-  auto &lmAnalysis = am.getAnalysis<LoopNestAnalysis>();
+  auto &lnAnalysis = manager.getAnalysis<LoopNestAnalysis>();
   op->walk<WalkOrder::PreOrder>([&](scf::ForOp forOp) {
     propagateSCFFor(forOp);
-    auto maybeLoopNest = lmAnalysis.getLoopNest(forOp);
+    auto maybeLoopNest = lnAnalysis.getLoopNest(forOp);
     if (maybeLoopNest.hasValue()) {
       propagateLoopNest(maybeLoopNest.getValue());
     }
@@ -399,6 +399,7 @@ static Value getSizeOfLoop(OpBuilder &b, linalg::LinalgOp op,
 class SparsifyLinalgGenericOp : public OpConversionPattern<linalg::GenericOp> {
 private:
   SparsePropagation &spAnalysis;
+  bool disabled = false;
 
   Value allocateOutputSpace(Value tensor, Location loc, OpBuilder &b) const {
     RankedTensorType resultType = tensor.getType().cast<RankedTensorType>();
@@ -416,12 +417,14 @@ private:
   }
 
 public:
-  SparsifyLinalgGenericOp(SparsePropagation &spAnalysis, MLIRContext *ctx)
-      : OpConversionPattern(ctx, /*benefit=*/1), spAnalysis{spAnalysis} {}
+  SparsifyLinalgGenericOp(SparsePropagation &spAnalysis, MLIRContext *ctx,
+                          bool disabled)
+      : OpConversionPattern(ctx, /*benefit=*/1),
+        spAnalysis{spAnalysis}, disabled{disabled} {}
   LogicalResult
   matchAndRewrite(linalg::GenericOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!matchSparsifyGenericOp(op, spAnalysis)) {
+    if (disabled || !matchSparsifyGenericOp(op, spAnalysis)) {
       return failure();
     }
     auto isSparse = [this](OpOperand *operand) {
@@ -608,19 +611,6 @@ public:
     }
     LoopNest loopNest = lnAnalysis.getLoopNest(op).getValue();
 
-    errs() << "sparsifying loop nest with "
-           << loopNest.inputTensorOperands.size() << " inputs\n";
-    for (auto pair : llvm::enumerate(loopNest.inputTensorOperands)) {
-      Value inputOperand = pair.value();
-      errs() << "input: " << inputOperand << "\n";
-      if (auto spType = spAnalysis.getSparsityType(inputOperand)) {
-        errs() << "sparsity type: " << spType.getValue() << "\n";
-        errs() << "inputMap: " << loopNest.inputMaps[pair.index()] << "\n";
-      } else {
-        errs() << "debug\n";
-        errs() << *inputOperand.getParentBlock()->getParentOp() << "\n";
-      }
-    }
     if (loopNest.inputTensorOperands.size() == 1 &&
         loopNest.inputMaps.front().isIdentity()) {
       auto spType =
@@ -812,8 +802,13 @@ public:
   }
 };
 
-struct StructuredSparsifyPass
-    : public PassWrapper<StructuredSparsifyPass, OperationPass<ModuleOp>> {
+struct StructuredSparsifyPass : public OperationPass<ModuleOp> {
+  StructuredSparsifyPass()
+      : ::mlir::OperationPass<ModuleOp>(
+            ::mlir::TypeID::get<StructuredSparsifyPass>()) {}
+  StructuredSparsifyPass(const StructuredSparsifyPass &other)
+      : ::mlir::OperationPass<ModuleOp>(other) {}
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
     registry.insert<scf::SCFDialect>();
@@ -823,13 +818,24 @@ struct StructuredSparsifyPass
     return "Sparsify generated code with structured sparsity patterns (one "
            "hot, row hot, col hot)";
   }
+
+  /// Returns the derived pass name.
+  StringRef getName() const override {
+    return llvm::getTypeName<StructuredSparsifyPass>();
+  }
+
+  /// A clone method to create a copy of this pass.
+  std::unique_ptr<Pass> clonePass() const override {
+    return std::make_unique<StructuredSparsifyPass>(
+        *static_cast<const StructuredSparsifyPass *>(this));
+  }
+
   void runOnOperation() final {
     auto *context = &getContext();
     auto &loopNestAnalysis = getAnalysis<LoopNestAnalysis>();
     auto &sparsePropagation = getAnalysis<SparsePropagation>();
     RewritePatternSet patterns(context);
 
-    // BufferizeTypeConverter typeConverter;
     TypeConverter typeConverter;
     ConversionTarget target(*context);
     target.addLegalDialect<arith::ArithmeticDialect>();
@@ -853,14 +859,15 @@ struct StructuredSparsifyPass
         });
     target.addLegalOp<linalg::FillOp, linalg::YieldOp>();
     target.addDynamicallyLegalOp<linalg::GenericOp>([&](linalg::GenericOp op) {
-      return !matchSparsifyGenericOp(op, sparsePropagation);
+      return disableSparsePropagation ||
+             !matchSparsifyGenericOp(op, sparsePropagation);
     });
 
     patterns.add<SparsifyFuncOp>(sparsePropagation, typeConverter,
                                  patterns.getContext());
     patterns.add<SparsifyInsertSlice>(sparsePropagation, patterns.getContext());
-    patterns.add<SparsifyLinalgGenericOp>(sparsePropagation,
-                                          patterns.getContext());
+    patterns.add<SparsifyLinalgGenericOp>(
+        sparsePropagation, patterns.getContext(), disableSparsePropagation);
     patterns.add<SparsifyForOp>(sparsePropagation, loopNestAnalysis,
                                 patterns.getContext());
     if (failed(applyPartialConversion(getOperation(), target,
@@ -869,6 +876,12 @@ struct StructuredSparsifyPass
       return;
     }
   }
+
+protected:
+  Pass::Option<bool> disableSparsePropagation{
+      *this, "disable-sparsity",
+      llvm::cl::desc("Disables structured sparsification"),
+      llvm::cl::init(false)};
 };
 } // namespace
 
