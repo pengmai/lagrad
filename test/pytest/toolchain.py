@@ -1,6 +1,7 @@
 """An entrypoint into the lagrad-opt compiler."""
 
 import os.path as osp
+import pathlib
 import subprocess
 from typing import List, Literal
 
@@ -45,15 +46,7 @@ LOWERING_ENZYME = [
     "-convert-static-allocs",
     "-llvm-legalize-for-export",
 ]
-ENZYME_DYLIB = osp.join(
-    osp.expanduser("~"),
-    "Research",
-    "Enzyme",
-    "enzyme",
-    "build",
-    "Enzyme",
-    "LLVMEnzyme-12.dylib",
-)
+ENZYME_DYLIB = pathlib.Path.home() / ".local" / "LLVM12" / "lib" / "LLVMEnzyme-12.dylib"
 LIB = osp.expanduser(osp.join("~", ".local", "lib"))
 LIBS = osp.join(LIB, "libmlir_runner_utils.dylib")
 
@@ -135,17 +128,6 @@ def run_enzyme(llvm_ir: bytes, optimize=True):
         )
         return opt_p.stdout
     return enzyme_p.stdout
-
-
-def compile_benchmark(name: str, high_level_ir: bytes):
-    llvm_dialect = lower_to_llvm_dialect(high_level_ir, take_grads=False)
-    llvm_ir = lower_to_llvm(llvm_dialect)
-    object_file = osp.join(TMP_DIR, f"{name}.o")
-    with open(object_file, "wb") as ofile:
-        subprocess.run(
-            ["llc", "-filetype=obj"], input=llvm_ir, stdout=ofile, check=True
-        )
-    # TODO: Do this
 
 
 def jit_llvm(llvm_ir: bytes):

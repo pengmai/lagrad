@@ -398,7 +398,7 @@ mlirlib.mlir_mlp_batched.restype = ctypes.c_float
 mlirlib.lagrad_mlp_batched.argtypes = mlp_args
 mlirlib.lagrad_mlp_batched.restype = NNGrad
 
-DISABLE_SPARSE = True
+DISABLE_SPARSE = False
 if not DISABLE_SPARSE:
     mlirlib.onehot_adjoint_err_nest.argtypes = (
         memref_2d + memref_1d_index + memref_1d_int
