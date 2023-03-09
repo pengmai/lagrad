@@ -8,17 +8,7 @@ import pathlib
 import subprocess
 from typing import Literal
 
-# ENZYME_DYLIB = (
-#     pathlib.Path.home()
-#     / "Research"
-#     / "Enzyme"
-#     / "enzyme"
-#     / "build"
-#     / "Enzyme"
-#     / "LLVMEnzyme-12.dylib"
-# )
 ENZYME_DYLIB = pathlib.Path.home() / ".local" / "LLVM12" / "lib" / "LLVMEnzyme-12.dylib"
-
 LAGRAD_BINARY = str(pathlib.Path(__file__).parents[1] / "build" / "bin" / "lagrad-opt")
 
 LAGRAD_LLVM_DYLIB = (
@@ -44,7 +34,7 @@ class LAGradOptFlags:
         "-canonicalize",
         "-inline",
         "-linalg-canonicalize",
-        "-structured-sparsify",
+        "-structured-sparsify='disable-sparsity=false'",
         "-pack-triangular",
         "-standalone-dce",
         "-symbol-dce",
@@ -55,7 +45,7 @@ class LAGradOptFlags:
     bufferize = [
         "-tensor-constant-bufferize",
         "-tensor-bufferize",
-        "-standalone-bufferize",
+        "-standalone-bufferize='disable-ie=false'",
         "-linalg-bufferize",
         "-scf-bufferize",
         "-func-bufferize",
@@ -68,7 +58,6 @@ class LAGradOptFlags:
         "-canonicalize",
     ]
     lower_to_llvm = [
-        # "-convert-linalg-to-library",
         "-convert-linalg-to-loops",
         # "-convert-linalg-to-affine-loops",
         # "-affine-loop-unroll",
