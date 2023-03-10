@@ -191,8 +191,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
   PatternRewriter::InsertionGuard insertGuard(rewriter);
   for (auto it = ops.rbegin(); it != ops.rend(); it++) {
     Operation *op = *it;
-    auto opName = op->getName().getStringRef();
-    if (opName == "std.return") {
+    if (isa<ReturnOp>(op)) {
       // This is the exit point
       rewriter.setInsertionPoint(op);
       assert(op->getNumOperands() == 1 &&
@@ -206,7 +205,7 @@ FuncOp differentiateFunction(FuncOp funcOp, LAGradContext &ctx,
         env[operand] = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
       rewriter.eraseOp(op);
-    } else if (opName == "arith.cmpf") {
+    } else if (isa<arith::CmpFOp>(op)) {
       continue;
     } else if (op->getNumResults() != 0) {
       populateVJP(op, ctx, env, rewriter);
@@ -400,9 +399,9 @@ void eraseUnusedCalls(ModuleOp moduleOp, PatternRewriter &rewriter) {
   });
 }
 
-Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
-                         size_t op_index, ConversionPatternRewriter &rewriter) {
-  auto bmmOp = dyn_cast<linalg::BatchMatmulOp>(op);
+Value reverseBatchMatmul(linalg::BatchMatmulOp op, Value operand,
+                         Value vjp_value, size_t op_index,
+                         ConversionPatternRewriter &rewriter) {
   size_t op_rank = 4;
   auto idMap = rewriter.getMultiDimIdentityMap(op_rank);
   auto zero = getZero(operand.getLoc(), operand, rewriter);
@@ -418,8 +417,8 @@ Value reverseBatchMatmul(Operation *op, Value operand, Value vjp_value,
       {getParallelIteratorTypeName(), getParallelIteratorTypeName(),
        getReductionIteratorTypeName(), getParallelIteratorTypeName()});
   auto inputs = op_index == 0
-                    ? SmallVector<Value, 2>{vjp_value, bmmOp.getOperand(1)}
-                    : SmallVector<Value, 2>{bmmOp.getOperand(0), vjp_value};
+                    ? SmallVector<Value, 2>{vjp_value, op.getOperand(1)}
+                    : SmallVector<Value, 2>{op.getOperand(0), vjp_value};
   auto adjoint = rewriter.create<linalg::GenericOp>(
       operand.getLoc(),
       /*resultTensorTypes=*/operand.getType(),
@@ -465,21 +464,20 @@ void populateVJP(Operation *op, LAGradContext &ctx,
                  llvm::DenseMap<Value, Value> &env,
                  ConversionPatternRewriter &rewriter) {
   auto opName = op->getName().getStringRef();
-  if (opName == "arith.sitofp") {
+  if (isa<arith::SIToFPOp>(op)) {
     // The input is an integer so can't have a gradient signal.
     return;
   }
-  if (opName == "linalg.fill") {
+  if (isa<linalg::FillOp>(op)) {
     // We ignore fill ops for now because we assume they don't propagate
     // gradient signal.
     return;
   }
-  if (opName == "memref.store") {
+  if (isa<memref::StoreOp>(op)) {
     // Store ops are unsupported, so we ignore them for now.
     return;
   }
-  if (opName == "scf.if") {
-    auto ifOp = dyn_cast<scf::IfOp>(op);
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
     if (ifOp.getNumResults() == 0) {
       return;
     }
@@ -508,8 +506,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       }
     }
     return;
-  } else if (opName == "scf.for") {
-    auto forOp = dyn_cast<scf::ForOp>(op);
+  } else if (auto forOp = dyn_cast<scf::ForOp>(op)) {
     assert(forOp.getNumResults() > 0 &&
            "for op with zero results not supported");
     // This is incredibly brittle.
@@ -560,16 +557,16 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       return;
     }
 
-    if (opName == "arith.mulf") {
+    if (isa<arith::MulFOp>(op)) {
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value,
                                                  op->getOperand(1 - op_index));
-    } else if (opName == "arith.addf") {
+    } else if (isa<arith::AddFOp>(op)) {
       // This has no effect on the VJP
-    } else if (opName == "arith.subf") {
+    } else if (isa<arith::SubFOp>(op)) {
       if (op_index == 1) {
         vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
       }
-    } else if (opName == "arith.divf") {
+    } else if (isa<arith::DivFOp>(op)) {
       if (op_index == 0) {
         vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                    op->getOperand(1));
@@ -582,12 +579,9 @@ void populateVJP(Operation *op, LAGradContext &ctx,
         vjp_value =
             rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, denom);
       }
-    } else if (opName == "arith.negf") {
+    } else if (isa<arith::NegFOp>(op)) {
       vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
-    } else if (opName == "std.select") {
-      auto selectOp = dyn_cast<mlir::SelectOp>(op);
-      // Assume that the gradient is zero for the branch not taken.
-      // Not sure if this is true in general.
+    } else if (auto selectOp = dyn_cast<mlir::SelectOp>(op)) {
       if (op_index == 1) {
         // true branch
         auto zero = getZero(op->getLoc(), operand, rewriter);
@@ -599,18 +593,17 @@ void populateVJP(Operation *op, LAGradContext &ctx,
         vjp_value = rewriter.create<SelectOp>(
             op->getLoc(), selectOp.condition(), zero, vjp_value);
       }
-    } else if (opName == "math.exp") {
-      auto expOp = dyn_cast<math::ExpOp>(op);
+    } else if (auto expOp = dyn_cast<math::ExpOp>(op)) {
       vjp_value = rewriter.create<arith::MulFOp>(expOp.getLoc(), vjp_value,
                                                  expOp.getResult());
-    } else if (opName == "math.sin") {
+    } else if (isa<math::SinOp>(op)) {
       auto cos = rewriter.create<math::CosOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), cos, vjp_value);
-    } else if (opName == "math.cos") {
+    } else if (isa<math::CosOp>(op)) {
       auto sin = rewriter.create<math::SinOp>(op->getLoc(), operand);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), sin, vjp_value);
       vjp_value = rewriter.create<arith::NegFOp>(op->getLoc(), vjp_value);
-    } else if (opName == "math.tanh") {
+    } else if (isa<math::TanhOp>(op)) {
       // There's no builtin hyperbolic cos in the math dialect, so we need to
       // express the formula here.
       auto exp = rewriter.create<math::ExpOp>(op->getLoc(), operand);
@@ -624,21 +617,20 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           rewriter.create<arith::MulFOp>(op->getLoc(), cosh, cosh);
       vjp_value =
           rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, coshsquared);
-    } else if (opName == "math.log") {
+    } else if (isa<math::LogOp>(op)) {
       vjp_value =
           rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value, operand);
-    } else if (opName == "math.sqrt") {
+    } else if (isa<math::SqrtOp>(op)) {
       auto half = constLike(op->getLoc(), operand, 0.5, rewriter);
       vjp_value = rewriter.create<arith::MulFOp>(op->getLoc(), vjp_value, half);
       // This is a bit of a math trick. Note the result is sqrt(operand)
       vjp_value = rewriter.create<arith::DivFOp>(op->getLoc(), vjp_value,
                                                  op->getResult(0));
-    } else if (opName == "math.powf") {
+    } else if (auto powFOp = dyn_cast<math::PowFOp>(op)) {
       if (op_index > 0) {
         // TODO: Add support for the RHS powf derivative
         continue;
       }
-      auto powFOp = cast<math::PowFOp>(op);
       auto loc = op->getLoc();
       auto one = onesLike(ctx, loc, operand, rewriter);
       vjp_value = rewriter.create<arith::MulFOp>(
@@ -646,17 +638,15 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           rewriter.create<math::PowFOp>(
               loc, powFOp.lhs(),
               rewriter.create<arith::SubFOp>(loc, powFOp.rhs(), one)));
-    } else if (opName == "std.call") {
+    } else if (auto callOp = dyn_cast<CallOp>(op)) {
       if (!isFloatOrFloatTensor(operand.getType())) {
         continue;
       }
-      vjp_value = reverseCallOp(dyn_cast<CallOp>(op), ctx, vjp_value, op_index,
-                                rewriter);
-    } else if (opName == "tensor.extract") {
+      vjp_value = reverseCallOp(callOp, ctx, vjp_value, op_index, rewriter);
+    } else if (auto extractOp = dyn_cast<tensor::ExtractOp>(op)) {
       if (op_index > 0) {
         continue;
       }
-      auto extractOp = dyn_cast<tensor::ExtractOp>(op);
       bool requires_add = env[operand] != nullptr;
       auto space = requires_add ? env[operand]
                                 : getZero(operand.getLoc(), operand, rewriter,
@@ -671,14 +661,10 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       env[operand] = rewriter.create<tensor::InsertOp>(
           op->getLoc(), new_val, space, extractOp.indices());
       continue;
-    } else if (opName == "tensor.insert") {
+    } else if (auto insertOp = dyn_cast<tensor::InsertOp>(op)) {
       if (op_index > 0) {
         continue;
       }
-      // I don't know if this is super general, but it works for the case we're
-      // currently dealing with. Written to support a special case scf.for ops,
-      // which is conceptually a linalg.generic with slices.
-      auto insertOp = dyn_cast<tensor::InsertOp>(op);
       vjp_value = rewriter.create<tensor::ExtractOp>(op->getLoc(), vjp_value,
                                                      insertOp.indices());
 
@@ -689,8 +675,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       env[insertOp.dest()] = new_dresult;
       env[insertOp.result()] = new_dresult;
       // env[insertOp.dest()] = env[insertOp.result()];
-    } else if (opName == "tensor.extract_slice") {
-      auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op);
+    } else if (auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(op)) {
       auto resultType =
           extractSliceOp.getResult().getType().cast<RankedTensorType>();
       bool requires_add = env[operand] != nullptr;
@@ -713,11 +698,10 @@ void populateVJP(Operation *op, LAGradContext &ctx,
           extractSliceOp.strides(), extractSliceOp.static_offsets(),
           extractSliceOp.static_sizes(), extractSliceOp.static_strides());
       continue;
-    } else if (opName == "tensor.insert_slice") {
+    } else if (auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(op)) {
       if (op_index > 0) {
         continue;
       }
-      auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(op);
       vjp_value = rewriter.create<tensor::ExtractSliceOp>(
           op->getLoc(), insertSliceOp.getSourceType(), vjp_value,
           insertSliceOp.getMixedOffsets(), insertSliceOp.getMixedSizes(),
@@ -730,8 +714,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       env[insertSliceOp.dest()] = destGrad;
 
       // env[insertSliceOp.dest()] = env[insertSliceOp.getResult()];
-    } else if (opName == "linalg.generic") {
-      auto genericOp = dyn_cast<linalg::GenericOp>(op);
+    } else if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
       if (op_index > static_cast<size_t>(genericOp.getNumInputs() - 1))
         continue;
 
@@ -780,7 +763,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
       Value output = getZero(genericOp.getLoc(), operand, rewriter);
       vjp_value = reverseGenericOp(genericOp, ctx, operand, vjp_value, op_index,
                                    output, rewriter);
-    } else if (opName == "linalg.dot") {
+    } else if (isa<linalg::DotOp>(op)) {
       if (op_index > 1)
         continue;
       if (op_index > 1 || !ctx.activeValues.contains(operand))
@@ -809,11 +792,10 @@ void populateVJP(Operation *op, LAGradContext &ctx,
             builder.create<linalg::YieldOp>(loc, mul_res);
           });
       vjp_value = adjoint.getResult(0);
-    } else if (opName == "linalg.matvec") {
+    } else if (auto matvecOp = dyn_cast<linalg::MatvecOp>(op)) {
       if (op_index > 1)
         continue;
       if (op_index == 0) {
-        auto matvecOp = dyn_cast<linalg::MatvecOp>(op);
         // TODO: This is probably a bandaid solution.
         env[matvecOp.getOutputOperand(0)->get()] = env[matvecOp.getResult(0)];
         // Broadcast the gradient signal
@@ -876,7 +858,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
             });
         vjp_value = matmulOp.getResult(0);
       }
-    } else if (opName == "linalg.vecmat") {
+    } else if (isa<linalg::VecmatOp>(op)) {
       if (op_index > 1) {
         continue;
       } else if (op_index == 0) {
@@ -929,7 +911,7 @@ void populateVJP(Operation *op, LAGradContext &ctx,
             });
         vjp_value = outerProductOp.getResult(0);
       }
-    } else if (opName == "linalg.matmul") {
+    } else if (isa<linalg::MatmulOp>(op)) {
       if (op_index > 1) {
         continue;
       }
@@ -973,12 +955,12 @@ void populateVJP(Operation *op, LAGradContext &ctx,
             builder.create<linalg::YieldOp>(loc, add_res);
           });
       vjp_value = matmulOp.getResult(0);
-    } else if (opName == "linalg.batch_matmul") {
+    } else if (auto bmmOp = dyn_cast<linalg::BatchMatmulOp>(op)) {
       if (op_index > 1) {
         continue;
       }
       vjp_value =
-          reverseBatchMatmul(op, operand, vjp_value, op_index, rewriter);
+          reverseBatchMatmul(bmmOp, operand, vjp_value, op_index, rewriter);
     } else {
       llvm::outs() << "(populateVJP) unrecognized op: " << opName << "\n";
     }
