@@ -78,6 +78,9 @@ lagrad-opt <input_file> -take-grads -canonicalize
   - In the tensor case, the default behaviour computes the **elementwise gradient**, or sum along columns of the Jacobian matrix. A custom seed value should be used if the entire Jacobian matrix is desired.
 - `sparse`: `UnitAttr`. If included, `grad_signal` must also be included. This tells LAGrad that the seed value is one-hot sparse, meaning it only contains a single nonzero element at a time. This enables what we refer to as **Adjoint Sparsity**, which improves the performance of computing full Jacobians row-by-row.
 
+## Reproducing Benchmark Results
+[The best way to reproduce the benchmark results from the CC '23 paper is from the official artifact](https://doi.org/10.6084/m9.figshare.21964787.v1).
+
 ## Citing
 If using LAGrad in an academic context, please cite the following paper:
 ```
